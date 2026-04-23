@@ -46,21 +46,57 @@ def apply_terminal_style():
     """, unsafe_allow_html=True)
 
 apply_terminal_style()
+def save_credentials(creds):
+    """Salva a estrutura de usuários atualizada na nuvem."""
+    try:
+        data = {
+            "key": "user_credentials",
+            "value": creds,
+            "updated_at": "now()"
+        }
+        supabase.table("app_state").upsert(data).execute()
+    except Exception as e:
+        pass
 
-# Configuração de Usuários
-credentials = {
-    'usernames': {
-        'admin': {
-            'email': 'admin@test.com', 
-            'name': 'Trader TTS', 
-            'password': '123'
+# Configuração Dinâmica de Usuários
+saved_creds = fetch_app_state("user_credentials")
+
+if saved_creds is None:
+    # Primeira vez rodando na nuvem: Cria usuário Master
+    credentials = {
+        'usernames': {
+            'admin': {
+                'email': 'admin@test.com', 
+                'name': 'Trader TTS', 
+                'password': '123'
+            }
         }
     }
-}
+    stauth.Hasher.hash_passwords(credentials)
+    save_credentials(credentials)
+else:
+    credentials = saved_creds
 
-stauth.Hasher.hash_passwords(credentials)
 authenticator = stauth.Authenticate(credentials, 'tts_terminal_cookie', 'auth_key_123', cookie_expiry_days=30)
-authenticator.login(location='main')
+
+# Layout: Se não estiver logado, exibe as abas Login/Registro
+if not st.session_state.get("authentication_status"):
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        tab_login, tab_register = st.tabs(["🔒 Entrar", "📝 Novo Cadastro"])
+        
+        with tab_login:
+            authenticator.login(location='main')
+            
+        with tab_register:
+            try:
+                # O registro atualiza a variável credentials na memória
+                register_result = authenticator.register_user(preauthorization=False)
+                if register_result and register_result[0]: # email_of_registered_user
+                    st.success("Usuário registrado com sucesso! Volte na aba Entrar para logar.")
+                    save_credentials(credentials)
+            except Exception as e:
+                st.error(f"Erro no cadastro: {e}")
 
 # 3. Lógica Principal
 if st.session_state["authentication_status"]:
@@ -262,7 +298,3 @@ if st.session_state["authentication_status"]:
     else:
         st.info("Aguardando conexão com o Supabase na nuvem... (Verifique se a Ponte está rodando)")
 
-elif st.session_state["authentication_status"] is False:
-    st.error('Credenciais inválidas')
-elif st.session_state["authentication_status"] is None:
-    st.warning('Área Restrita: Identifique-se')
