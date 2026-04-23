@@ -91,7 +91,7 @@ if not st.session_state.get("authentication_status"):
         with tab_register:
             try:
                 # O registro atualiza a variável credentials na memória
-                register_result = authenticator.register_user(preauthorization=False)
+                register_result = authenticator.register_user(clear_on_submit=True)
                 if register_result and register_result[0]: # email_of_registered_user
                     st.success("Usuário registrado com sucesso! Volte na aba Entrar para logar.")
                     save_credentials(credentials)
