@@ -1,0 +1,19 @@
+.tmp/
+.env
+credentials.json
+token.json
+__pycache__/
+*.pyc
+
+# Arquivos de estado local (agora estão no Supabase)
+*.json
+!package.json
+!package-lock.json
+
+# Senhas do Streamlit
+.streamlit/secrets.toml
+
+# Frontend Node Modules
+DASHBOARD/node_modules/
+DASHBOARD/dist/
+DASHBOARD/.env.local
