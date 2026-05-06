@@ -272,6 +272,89 @@ def painel_inferior_rtd():
         st.markdown(html, unsafe_allow_html=True)
 
 @st.fragment(run_every=60)
+def painel_topo_global():
+    """Cards de destaque para o mercado global."""
+    global_data = fetch_app_state("mercados_globais")
+    if not global_data: return
+    
+    categories = global_data.get("categories", global_data)
+    
+    # Encontrar ativos específicos para os cards
+    cards_assets = {
+        "S&P 500": None,
+        "DXY (Dólar Index)": None,
+        "US 10Y (Yield)": None,
+        "BRENT OIL": None
+    }
+    
+    for cat in categories.values():
+        for asset in cat:
+            if asset['name'] in cards_assets:
+                cards_assets[asset['name']] = asset
+
+    st.markdown("#### 🌎 INDICADORES GLOBAIS")
+    cols = st.columns(4)
+    for i, (name, asset) in enumerate(cards_assets.items()):
+        with cols[i]:
+            if asset:
+                change = asset.get('change', 0)
+                color = "#00FFA3" if change >= 0 else "#FF4B4B"
+                price = asset.get('price', 0)
+                price_fmt = f"{price:.4f}" if price < 10 else f"{price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                
+                st.markdown(f"""
+                    <div class="main-card" style="padding: 15px; margin-bottom: 10px; border-left-color: {color};">
+                        <div class="label-small">{name}</div>
+                        <div style="font-size: 1.8rem; font-weight: bold; color: #FFF;">{price_fmt}</div>
+                        <div style="color: {color}; font-size: 0.85rem; font-weight: bold;">{change:+.2f}%</div>
+                    </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"<div class='main-card' style='padding:15px;'>{name}<br>---</div>", unsafe_allow_html=True)
+
+@st.fragment(run_every=60)
+def painel_corpo_global():
+    """Tabelas detalhadas de mercados globais."""
+    global_data = fetch_app_state("mercados_globais")
+    if not global_data: return
+    
+    categories = global_data.get("categories", global_data)
+    
+    st.markdown("---")
+    # Organizar em colunas de 2 para economizar espaço
+    cat_names = list(categories.keys())
+    for i in range(0, len(cat_names), 2):
+        c1, c2 = st.columns(2)
+        with c1:
+            cat = cat_names[i]
+            st.markdown(f"##### {cat}")
+            assets = categories[cat]
+            df = pd.DataFrame(assets)[['name', 'price', 'change']]
+            df.columns = ['Ativo', 'Preço', 'Var %']
+            def color_change(val):
+                try: 
+                    v = float(val)
+                    color = '#00FFA3' if v >= 0 else '#FF4B4B'
+                    return f'color: {color}; font-weight: bold'
+                except: return ''
+            st.dataframe(df.style.applymap(color_change, subset=['Var %']), hide_index=True, use_container_width=True)
+        
+        if i + 1 < len(cat_names):
+            with c2:
+                cat = cat_names[i+1]
+                st.markdown(f"##### {cat}")
+                assets = categories[cat]
+                df = pd.DataFrame(assets)[['name', 'price', 'change']]
+                df.columns = ['Ativo', 'Preço', 'Var %']
+                st.dataframe(df.style.applymap(color_change, subset=['Var %']), hide_index=True, use_container_width=True)
+
+def pagina_terminal_global():
+    """Página de Terminal Global."""
+    painel_topo_global()
+    secao_market_report_fragment()
+    painel_corpo_global()
+
+@st.fragment(run_every=60)
 def sidebar_mercados():
     global_data = fetch_app_state("mercados_globais")
     if not global_data: 
@@ -598,7 +681,7 @@ if not st.session_state.get("authentication_status"):
 if st.session_state.get("authentication_status"):
     with st.sidebar:
         st.markdown("### 🧭 Navegação")
-        page = st.radio("Ir para:", ["📉 Terminal de Trading", "📊 Gráficos Avançados", "⚖️ Painel de Correlação"], label_visibility="collapsed")
+        page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📊 Gráficos Avançados", "⚖️ Painel de Correlação"], label_visibility="collapsed")
         
         st.markdown("---")
         authenticator.logout('Encerrar Sessão', location='sidebar')
@@ -610,6 +693,8 @@ if st.session_state.get("authentication_status"):
     # Roteamento de Páginas
     if page == "📉 Terminal de Trading":
         pagina_terminal()
+    elif page == "🌎 Terminal Global":
+        pagina_terminal_global()
     elif page == "📊 Gráficos Avançados":
         pagina_graficos()
     elif page == "⚖️ Painel de Correlação":
