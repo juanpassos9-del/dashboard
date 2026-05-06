@@ -1,300 +1,619 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import streamlit_authenticator as stauth
-import json
 import os
 import pandas as pd
 from datetime import datetime
-import time
-from streamlit_autorefresh import st_autorefresh
 from supabase import create_client, Client
 
-# Configurações Estéticas (Bloomberg/TTS Style)
+
+# ── Configuração da Página ──────────────────────────────────────────────────
 st.set_page_config(page_title="Terminal TTS | Inteligência", layout="wide")
 
-# Inicializa Supabase
+# ── Supabase ────────────────────────────────────────────────────────────────
 @st.cache_resource
 def init_supabase() -> Client:
-    # No Streamlit Cloud, as variáveis vêm do st.secrets
-    url = st.secrets.get("SUPABASE_URL", os.environ.get("SUPABASE_URL", ""))
-    key = st.secrets.get("SUPABASE_KEY", os.environ.get("SUPABASE_KEY", ""))
-    return create_client(url, key)
+    try:
+        url = st.secrets.get("SUPABASE_URL", os.environ.get("SUPABASE_URL", ""))
+        key = st.secrets.get("SUPABASE_KEY", os.environ.get("SUPABASE_KEY", ""))
+        if not url or not key:
+            st.error("🔑 Credenciais do Supabase não encontradas. Verifique os segredos.")
+            return None
+        return create_client(url, key)
+    except Exception as e:
+        st.error(f"🌐 Falha na conexão com o Banco de Dados: {e}")
+        return None
 
 supabase = init_supabase()
 
 def fetch_app_state(key: str):
-    """Busca o JSON armazenado no Supabase."""
+    """Busca dados no Supabase com tratamento de erro e redundância."""
+    if not supabase: return None
     try:
         response = supabase.table("app_state").select("value").eq("key", key).execute()
         if response.data and len(response.data) > 0:
             return response.data[0]["value"]
     except Exception as e:
-        pass
+        print(f"[ERROR] Fetch {key}: {e}")
     return None
 
-def apply_terminal_style():
-    st.markdown("""
-        <style>
-        @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap');
-        html, body, [class*="css"] { font-family: 'Roboto Mono', monospace; background-color: #050505; color: #E0E0E0; }
-        .main-card { background: #111111; border-left: 5px solid #FF9800; padding: 25px; border-radius: 5px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); margin-bottom: 20px; }
-        .price-large { font-size: 3.5rem; font-weight: bold; color: #FFFFFF; }
-        .label-small { font-size: 0.8rem; color: #888888; text-transform: uppercase; }
-        .status-box { padding: 10px; border-radius: 4px; text-align: center; font-weight: bold; background: #1A1A1A; border: 1px solid #333; }
-        .venda { color: #FF4B4B; border-color: #FF4B4B; }
-        .compra { color: #00FFA3; border-color: #00FFA3; }
-        </style>
-    """, unsafe_allow_html=True)
-
-apply_terminal_style()
 def save_credentials(creds):
-    """Salva a estrutura de usuários atualizada na nuvem."""
+    if not supabase: return
     try:
-        data = {
+        supabase.table("app_state").upsert({
             "key": "user_credentials",
             "value": creds,
             "updated_at": "now()"
-        }
-        supabase.table("app_state").upsert(data).execute()
+        }).execute()
     except Exception as e:
-        pass
+        print(f"[ERROR] Save Creds: {e}")
 
-# Configuração Dinâmica de Usuários
-saved_creds = fetch_app_state("user_credentials")
+def sanitize_text(text):
+    """Proteção básica contra injeção de scripts."""
+    if text is None: return ""
+    if not isinstance(text, str): return str(text)
+    return text.replace("<script", "&lt;script").replace("javascript:", "")
 
-if saved_creds is None:
-    # Primeira vez rodando na nuvem: Cria usuário Master
-    credentials = {
-        'usernames': {
-            'admin': {
-                'email': 'admin@test.com', 
-                'name': 'Trader TTS', 
-                'password': '123'
-            }
-        }
+
+
+# ── Estilo Global ───────────────────────────────────────────────────────────
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&family=Inter:wght@400;700&display=swap');
+    
+    html, body, [class*="css"] { font-family: 'Roboto Mono', monospace; background-color: #050505; color: #E0E0E0; }
+    
+    /* Price Cards */
+    .main-card { background: #111111; border-left: 5px solid #FF9800; padding: 20px; border-radius: 5px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); margin-bottom: 20px; }
+    .price-large { font-size: 3.2rem; font-weight: bold; color: #FFFFFF; line-height: 1; }
+    .label-small { font-size: 0.75rem; color: #888; text-transform: uppercase; margin-bottom: 5px; }
+    
+    /* Semáforo */
+    .status-box { padding: 12px; border-radius: 4px; text-align: center; font-weight: bold; background: #1A1A1A; border: 1px solid #333; font-size: 0.85rem; }
+    
+    /* Escada Moderna */
+    .ladder-container { background: #0A0A0A; border: 1px solid #222; border-radius: 4px; overflow: hidden; margin-top: 15px; font-size: 0.85rem; }
+    .ladder-row { display: grid; grid-template-columns: 1fr 1.5fr 1fr 1.5fr; padding: 6px 12px; border-bottom: 1px solid #1a1a1a; align-items: center; }
+    .ladder-row:last-child { border-bottom: none; }
+    .ladder-header { background: #151515; color: #666; font-weight: bold; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 1px; }
+    .level-col { font-weight: bold; }
+    .price-col { font-family: 'Roboto Mono', monospace; color: #FFF; text-align: right; font-weight: bold; }
+    .delta-col { font-size: 0.75rem; text-align: right; }
+    .ajuste-row { background: #1A1A1A !important; border: 1px solid #FF980088; color: #FFF; }
+    .pos-row { background: #1F0A0A; color: #FF4B4B; }
+    .neg-row { background: #0A1F13; color: #00FFA3; }
+    .highlight-row { background: #FFC107 !important; color: #000 !important; font-weight: bold; }
+    .highlight-row .price-col, .highlight-row .level-col, .highlight-row .delta-col { color: #000 !important; }
+    
+    /* IA Banner */
+    .ia-banner { background: #111; border: 1px solid #333; border-left: 8px solid #444; padding: 20px; border-radius: 8px; margin: 20px 0; }
+    </style>
+""", unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FRAGMENTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.fragment(run_every=1)
+def painel_topo_rtd():
+    """Parte superior em tempo real (1s): Preços, Métricas e Semáforo."""
+    dados = fetch_app_state("dados_mercado")
+    if not dados or (isinstance(dados, list) and len(dados) == 0):
+        st.info("⏳ Aguardando dados do Terminal Bridge...")
+        return
+
+    data = dados[0] if isinstance(dados, list) else dados
+
+    def safe_fmt(v):
+        try: return f"{float(v):.2f}" if v is not None else "---"
+        except: return str(v)
+
+
+    # 1. Cabeçalho
+    bridge_time = data.get('updated_at', '')[-8:] or "---"
+    st.markdown(f"### 📡 {data['symbol']} | <span style='color:#888;'>{bridge_time}</span>", unsafe_allow_html=True)
+
+    # 2. Preços
+    c1, c2, c3 = st.columns([2, 1, 1])
+    change_val = data['change_percent']
+    change_str = f"{change_val:.2%}" if isinstance(change_val, float) else str(change_val)
+    color_hex  = '#00FFA3' if (isinstance(change_val, float) and change_val >= 0) else '#FF4B4B'
+
+    with c1:
+        st.markdown(f"""
+            <div class="main-card">
+                <div class="label-small">Último Preço</div>
+                <div class="price-large">{float(data['last_price']):,.2f}</div>
+                <div style="color:{color_hex}; font-weight:bold; margin-top:5px;">{change_str}</div>
+            </div>
+        """, unsafe_allow_html=True)
+    with c2:
+        st.metric("VWAP",   safe_fmt(data['vwap']))
+        st.metric("Ajuste", safe_fmt(data['adjustment']))
+    with c3:
+        st.markdown("<div class='label-small'>Viés VWAP</div>", unsafe_allow_html=True)
+        st.info(data['bias'])
+        st.markdown("<div class='label-small'>Status Mercado</div>", unsafe_allow_html=True)
+        st.warning(data['status'])
+
+    # 3. Semáforo
+    st.markdown("#### 🚥 SEMÁFORO DIRECIONAL")
+    if "semaforo" in data:
+        sem = data["semaforo"]
+        def sig_style(text):
+            t = str(text).upper() if text else ""
+            if any(x in t for x in ["VENDA","VENDER","VENDIDO"]): return "background-color:#400000;color:#FF4B4B;border:1px solid #FF4B4B;"
+            if any(x in t for x in ["COMPRA","COMPRAR","COMPRADO"]): return "background-color:#002611;color:#00FFA3;border:1px solid #00FFA3;"
+            return "background-color:#1A1A1A;color:#E0E0E0;border:1px solid #333;"
+
+        s1, s2, s3 = st.columns(3)
+        with s1: st.markdown(f"<div class='status-box' style='{sig_style(sem.get('direcao'))}'>DIREÇÃO DO DIA<br>{sem.get('direcao','---')}</div>", unsafe_allow_html=True)
+        with s2: st.markdown(f"<div class='status-box' style='{sig_style(sem.get('correlacao_rtd'))}'>CORRELAÇÕES RTD<br>{sem.get('correlacao_rtd','---')}</div>", unsafe_allow_html=True)
+        with s3: st.markdown(f"<div class='status-box' style='{sig_style(sem.get('correlacao_interna'))}'>CORRELAÇÃO INTERNA<br>{sem.get('correlacao_interna','---')}</div>", unsafe_allow_html=True)
+
+@st.fragment(run_every=60)
+def secao_ia_fragment():
+    """Seção de IA isolada para evitar atualizações constantes (60s)."""
+    st.markdown("---")
+    
+    # Histórico da IA (Tendência)
+    history_data = fetch_app_state("ai_insight_history")
+    if history_data:
+        st.markdown("<div style='font-size: 0.7rem; color: #666; margin-bottom: 8px; font-weight: bold; letter-spacing: 1px;'>⏳ HISTÓRICO DE DIREÇÃO (ÚLTIMAS 5)</div>", unsafe_allow_html=True)
+        cols_h = st.columns(5)
+        for i in range(5):
+            with cols_h[i]:
+                if i < len(history_data):
+                    h = history_data[i]
+                    h_sent = h.get('sentiment', 'NEUTRO')
+                    h_time = h.get('updated_at', '')
+                    if h_sent == "COMPRA":   h_color, h_bg = "#00FFA3", "#002611"
+                    elif h_sent == "VENDA":  h_color, h_bg = "#FF4B4B", "#400000"
+                    else:                  h_color, h_bg = "#E0E0E0", "#111"
+                    
+                    st.markdown(f"""
+                        <div style="background:{h_bg}; border: 1px solid {h_color}44; border-radius: 4px; padding: 4px; text-align: center; height: 45px; display: flex; flex-direction: column; justify-content: center;">
+                            <div style="font-size: 0.6rem; color: #888;">{h_time}</div>
+                            <div style="font-size: 0.7rem; font-weight: bold; color: {h_color};">{h_sent}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown('<div style="background:#050505; border: 1px dashed #222; border-radius: 4px; height: 45px;"></div>', unsafe_allow_html=True)
+        st.markdown("<div style='margin-bottom:15px;'></div>", unsafe_allow_html=True)
+
+    ai_data = fetch_app_state("ai_insight")
+    if ai_data:
+        sent = ai_data.get('sentiment', 'NEUTRO')
+        ibg, itext = ("#002611", "#00FFA3") if sent == "COMPRA" else (("#400000", "#FF4B4B") if sent == "VENDA" else ("#111", "#E0E0E0"))
+        
+        st.markdown(f"""
+            <div style="background:{ibg}; border: 1px solid {itext}44; padding: 20px; border-radius: 8px; border-left: 8px solid {itext}; margin-bottom: 25px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <b style="color:{itext}; font-size: 1rem;">🤖 ANALISTA IA: {sent}</b>
+                    <span style="color: #666; font-size: 0.75rem;">{ai_data.get('updated_at', '')}</span>
+                </div>
+                <div style="color: #E0E0E0; font-size: 0.95rem; line-height: 1.5;">{sanitize_text(ai_data.get('insight', '')).replace(chr(10), '<br>')}</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+@st.fragment(run_every=300)
+def secao_market_report_fragment():
+    """Seção de Relatório de Mercado (Market Report) baseada em notícias."""
+    report_data = fetch_app_state("market_report")
+    if report_data:
+        st.markdown("---")
+        st.markdown(f"""
+            <div style="background: #0A0A0A; border: 1px solid #1a1a1a; border-top: 4px solid #FF9800; padding: 25px; border-radius: 8px; margin: 20px 0;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="margin: 0; color: #FF9800; font-family: 'Inter', sans-serif;">📰 MARKET REPORT</h3>
+                    <span style="color: #555; font-size: 0.75rem; font-family: 'Roboto Mono', monospace;">ÚLTIMA ATUALIZAÇÃO: {report_data.get('updated_at', '---')}</span>
+                </div>
+                <div style="color: #CCC; font-size: 0.9rem; line-height: 1.6; font-family: 'Inter', sans-serif;">
+                    {sanitize_text(report_data.get('report', '')).replace(chr(10), '<br>')}
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+
+
+@st.fragment(run_every=1)
+def painel_inferior_rtd():
+    """Parte inferior em tempo real (1s): Correlações e Escada."""
+    dados = fetch_app_state("dados_mercado")
+    if not dados or (isinstance(dados, list) and len(dados) == 0):
+        return
+
+    data = dados[0] if isinstance(dados, list) else dados
+
+
+
+    # 5. Correlações e Escada
+    st.markdown("---")
+    st.markdown("#### ⚖️ CORRELAÇÕES RTD | JUROS x DÓLAR")
+    if data.get("correlacoes"):
+        df_corr = pd.DataFrame(data["correlacoes"], columns=["Fator", "Cotação RTD", "Var % / Δ", "Leitura", "Impacto WIN"])
+        def style_corr(row):
+            val = str(row['Var % / Δ'])
+            c = '#FF4B4B' if '-' in val else ('#E0E0E0' if '0' in val else '#00FFA3')
+            return [f'color: {c}'] * 5
+        st.dataframe(df_corr.style.apply(style_corr, axis=1), width='stretch', hide_index=True)
+
+    if data.get("escada"):
+        st.markdown("""<div style="background:#FF9800; color:#000; padding:5px 15px; font-weight:bold; border-radius:4px 4px 0; font-size:0.8rem; display:flex; justify-content:space-between;">
+            <span>ESCADA DE NÍVEIS</span>
+            <span>0,5% EM 0,5%</span>
+        </div>""", unsafe_allow_html=True)
+        
+        html = '<div class="ladder-container" style="margin-top:0; border-top:none;">'
+        html += '<div class="ladder-row ladder-header" style="grid-template-columns: 0.8fr 1fr 1.2fr 1.2fr 1fr;"><div>NÍVEL</div><div style="text-align:right;">Δ %</div><div style="text-align:right;">PREÇO</div><div style="text-align:right;">Δ P/ ÚLTIMO</div><div style="text-align:right;">MARCADOR</div></div>'
+        
+        last_price = float(data['last_price'])
+        precos_niveis = [float(row[2]) for row in data["escada"]]
+        preco_mais_proximo = min(precos_niveis, key=lambda x: abs(x - last_price))
+
+        for row in data["escada"]:
+            nivel, var_pct, preco, dist = row
+            preco_val = float(preco)
+            is_highlight = abs(preco_val - preco_mais_proximo) < 0.1
+            is_ajuste = "AJUSTE" in str(nivel).upper()
+            row_class = "highlight-row" if is_highlight else ("ajuste-row" if is_ajuste else ("pos-row" if any(x in str(nivel) for x in ["+","1","2","3","4","5"]) else "neg-row"))
+            marcador = "◀ PREÇO" if is_highlight else ""
+            p_fmt = f"{preco_val:,.0f}".replace(",", ".")
+            d_fmt = f"{float(dist):+,.0f}".replace(",", ".")
+            v_fmt = f"{float(var_pct):+.1f}%".replace(".", ",")
+            
+            html += f'<div class="ladder-row {row_class}" style="grid-template-columns: 0.8fr 1fr 1.2fr 1.2fr 1fr;">'
+            html += f'<div class="level-col">{nivel}</div>'
+            html += f'<div class="delta-col" style="text-align:right;">{v_fmt}</div>'
+            html += f'<div class="price-col" style="text-align:right;">{p_fmt}</div>'
+            html += f'<div class="delta-col" style="text-align:right;">{d_fmt}</div>'
+            html += f'<div style="text-align:right; font-size:0.7rem;">{marcador}</div>'
+            html += '</div>'
+        html += '</div>'
+        st.markdown(html, unsafe_allow_html=True)
+
+@st.fragment(run_every=60)
+def sidebar_mercados():
+    global_data = fetch_app_state("mercados_globais")
+    if not global_data: 
+        st.info("Carregando mercados...")
+        return
+    
+    # Suporte tanto para o formato antigo quanto para o novo
+    if "categories" in global_data:
+        categories = global_data["categories"]
+        metadata = global_data.get("metadata", {})
+        last_upd = metadata.get("last_updated", "---")
+    else:
+        categories = global_data
+        last_upd = "---"
+
+    st.markdown(f"<div style='text-align:right; font-size:0.65rem; color:#666; margin-bottom:10px;'>ATUALIZADO ÀS: {last_upd}</div>", unsafe_allow_html=True)
+
+    for cat_name, assets in categories.items():
+        st.markdown(f"<div style='font-size:0.75rem; font-weight:bold; color:#FF9800; margin-bottom:5px;'>{cat_name}</div>", unsafe_allow_html=True)
+        for item in assets:
+            if not isinstance(item, dict): continue
+            change_val = item.get('change', 0)
+            if not isinstance(change_val, (int, float)):
+                try: change_val = float(change_val)
+                except (ValueError, TypeError): change_val = 0.0
+
+            color = "#00FFA3" if change_val >= 0 else "#FF4B4B"
+            
+            price_val = item.get('price', 0)
+            if not isinstance(price_val, (int, float)):
+                try: price_val = float(price_val)
+                except (ValueError, TypeError): price_val = 0.0
+
+            # Formatação de preço: 4 casas se for pequeno (moedas), 2 se for grande
+            price_fmt = f"{price_val:.4f}" if price_val < 10 else f"{price_val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            
+            st.markdown(f"""
+                <div style='display:flex; justify-content:space-between; border-bottom:1px solid #1a1a1a; padding:4px 0; align-items:center;'>
+                    <span style='font-size:0.75rem; color:#AAA; max-width:60%;'>{item.get('name', '---')}</span>
+                    <div style='text-align:right;'>
+                        <div style='font-size:0.8rem; font-weight:bold;'>{price_fmt}</div>
+                        <div style='color:{color}; font-weight:bold; font-size:0.65rem;'>{change_val:+.2f}%</div>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+        st.markdown("<div style='margin-bottom:15px;'></div>", unsafe_allow_html=True)
+
+
+@st.fragment(run_every=3600)
+def sidebar_calendario():
+    calendar_data = fetch_app_state("calendario_economico")
+    if not calendar_data: 
+        st.info("Carregando calendário...")
+        return
+    
+    # 1. Seletor de Dia (Filtro Semanal)
+    try:
+        dates = sorted(list(set([e.get('date', '') for e in calendar_data if e.get('date')])))
+        if not dates:
+            st.warning("Nenhuma data disponível no calendário.")
+            return
+            
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        default_idx = dates.index(today_str) if today_str in dates else 0
+        selected_date = st.selectbox("📅 Selecione o Dia", dates, index=default_idx)
+    except Exception as e:
+        st.error(f"Erro ao processar datas do calendário: {e}")
+        return
+
+    
+    st.markdown("---")
+    
+    # 2. Filtragem e Exibição
+    filtered_events = [e for e in calendar_data if e['date'] == selected_date]
+    
+    if not filtered_events:
+        st.write("Nenhum evento importante para este dia.")
+        return
+
+    for event in filtered_events:
+        impact_color = "#FF4B4B" if event['impact'] == "HIGH" else ("#FF9800" if event['impact'] == "MEDIUM" else "#888")
+        
+        actual = event.get('actual', '---')
+        forecast = event.get('forecast', '---')
+        
+        # Design do Evento
+        st.markdown(f"""
+            <div style='border-bottom:1px solid #222; padding:10px 0;'>
+                <div style='display:flex; justify-content:space-between; align-items:center;'>
+                    <span style='font-size:0.7rem; color:#888;'>{event['time']} | {event['currency']}</span>
+                    <span style='font-size:0.65rem; background:#1a1a1a; padding:2px 6px; border-radius:10px; color:{impact_color}; border:1px solid {impact_color}44;'>{event['impact']}</span>
+                </div>
+                <div style='font-size:0.85rem; font-weight:bold; margin:4px 0;'>{event['icon']} {event['event']}</div>
+                <div style='display:flex; gap:15px; margin-top:5px;'>
+                    <div style='font-size:0.7rem;'>
+                        <span style='color:#666;'>PREV:</span> <b style='color:#DDD;'>{forecast}</b>
+                    </div>
+                    <div style='font-size:0.7rem;'>
+                        <span style='color:#666;'>ATUAL:</span> <b style='color:#FFF;'>{actual}</b>
+                    </div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PÁGINAS DO DASHBOARD
+# ══════════════════════════════════════════════════════════════════════════════
+
+def pagina_terminal():
+    """Renderiza o terminal principal de trading."""
+    painel_topo_rtd()       # Tempo Real (1s)
+    secao_ia_fragment()     # Estático/Lento (60s)
+    secao_market_report_fragment() # Notícias/IA (300s)
+    painel_inferior_rtd()   # Tempo Real (1s)
+
+def pagina_graficos():
+    """Página com integração TradingView Advanced Chart."""
+    st.markdown("### 📊 Gráficos Avançados TradingView")
+    
+    assets = {
+        "MINI ÍNDICE (WIN)": "BRA50",
+        "MINI DÓLAR (WDO)": "BMFBOVESPA:WDO1!",
+        "IBOVESPA": "BMFBOVESPA:IBOV",
+        "S&P 500 (Futuro)": "USA500",
+        "NASDAQ (Futuro)": "CME_MINI:NQ1!",
+        "VIX": "CBOE:VIX",
+        "DXY (Dólar Index)": "TVC:DXY",
+        "USDBRL": "FX_IDC:USDBRL",
+        "6L (Real CME)": "CME:6L1!",
+        "US 10Y (Yield)": "TVC:US10Y",
+        "US 30Y (Yield)": "TVC:US30Y",
+        "US 02Y (Yield)": "TVC:US02Y",
+        "EEM (Emerging Markets)": "AMEX:EEM",
+        "EWZ (Brazil ETF)": "AMEX:EWZ",
+        "PETR4": "BMFBOVESPA:PETR4",
+        "VALE3": "BMFBOVESPA:VALE3",
+        "ITUB4": "BMFBOVESPA:ITUB4",
+        "SPY (S&P 500 ETF)": "AMEX:SPY",
+        "XOP (Oil & Gas)": "AMEX:XOP",
+        "XLE (Energy)": "AMEX:XLE",
+        "XLK (Tech)": "AMEX:XLK",
+        "XLP (Staples)": "AMEX:XLP",
+        "XLB (Materials)": "AMEX:XLB",
+        "XLI (Industrials)": "AMEX:XLI",
+        "XLV (Health)": "AMEX:XLV",
+        "XLRE (Real Estate)": "AMEX:XLRE",
+        "XBI (Biotech)": "AMEX:XBI",
+        "XLY (Consumer)": "AMEX:XLY",
+        "XLC (Comm)": "AMEX:XLC",
+        "BRENT OIL": "TVC:UKOIL",
+        "WTI OIL": "TVC:USOIL",
+        "GOLD": "TVC:GOLD",
+        "SILVER": "TVC:SILVER",
+        "BITCOIN": "BINANCE:BTCUSDT",
+        "ETHEREUM": "BINANCE:ETHUSDT"
     }
-    stauth.Hasher.hash_passwords(credentials)
-    save_credentials(credentials)
+
+    c_topo1, c_topo2, c_topo3 = st.columns([1, 1, 2])
+    with c_topo3:
+        chart_height = st.slider("Ajustar Altura dos Gráficos", min_value=300, max_value=1200, value=550, step=50)
+
+    st.markdown("---")
+    st.markdown("#### 📈 Gráfico 1")
+    c1a, c1b = st.columns([2, 1])
+    with c1a:
+        sym1 = st.selectbox("Ativo 1", list(assets.keys()), index=0, key="sym1")
+    with c1b:
+        int1 = st.selectbox("Intervalo 1", ["1", "5", "15", "60", "D", "W"], index=1, key="int1")
+        
+    tv_html1 = f"""
+    <div class="tradingview-widget-container" style="height: {chart_height}px; width: 100%;">
+      <div id="tv_chart_1" style="height: 100%; width: 100%;"></div>
+      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+      <script type="text/javascript">
+      new TradingView.widget({{
+        "autosize": true,
+        "symbol": "{assets[sym1]}",
+        "interval": "{int1}",
+        "timezone": "America/Sao_Paulo",
+        "theme": "dark",
+        "style": "1",
+        "locale": "br",
+        "toolbar_bg": "#f1f3f6",
+        "enable_publishing": false,
+        "hide_top_toolbar": false,
+        "save_image": true,
+        "hide_volume": true,
+        "container_id": "tv_chart_1"
+      }});
+      </script>
+    </div>
+    """
+    components.html(tv_html1, height=chart_height + 20)
+
+    st.markdown("---")
+    st.markdown("#### 📉 Gráfico 2")
+    c2a, c2b = st.columns([2, 1])
+    with c2a:
+        sym2 = st.selectbox("Ativo 2", list(assets.keys()), index=3, key="sym2")
+    with c2b:
+        int2 = st.selectbox("Intervalo 2", ["1", "5", "15", "60", "D", "W"], index=1, key="int2")
+        
+    tv_html2 = f"""
+    <div class="tradingview-widget-container" style="height: {chart_height}px; width: 100%;">
+      <div id="tv_chart_2" style="height: 100%; width: 100%;"></div>
+      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+      <script type="text/javascript">
+      new TradingView.widget({{
+        "autosize": true,
+        "symbol": "{assets[sym2]}",
+        "interval": "{int2}",
+        "timezone": "America/Sao_Paulo",
+        "theme": "dark",
+        "style": "1",
+        "locale": "br",
+        "toolbar_bg": "#f1f3f6",
+        "enable_publishing": false,
+        "hide_top_toolbar": false,
+        "save_image": true,
+        "hide_volume": true,
+        "container_id": "tv_chart_2"
+      }});
+      </script>
+    </div>
+    """
+    components.html(tv_html2, height=chart_height + 20)
+
+def pagina_correlacao():
+    """Página dedicada ao estudo de correlação unificada com visibilidade aprimorada."""
+    st.markdown("### ⚖️ Painel de Correlação Macro")
+    
+    # Controles Gerais
+    c1, c2, c3 = st.columns([1, 1, 2])
+    with c1:
+        interval = st.selectbox("Intervalo", ["5", "15", "60", "D", "W"], index=3)
+    with c2:
+        theme = st.selectbox("Tema", ["dark", "light"], index=0)
+    with c3:
+        c_height = st.slider("Altura do Gráfico", 400, 1200, 800, 50)
+
+    # Legenda customizada com cores sugeridas para o usuário ajustar no widget
+    st.info("💡 Dica: No gráfico abaixo, você pode clicar em cada ativo na legenda (canto superior esquerdo) para ajustar a cor e a espessura da linha para melhor visibilidade.")
+
+    # Widget TradingView com ferramentas de customização habilitadas
+    tv_html = f"""
+    <div class="tradingview-widget-container" style="height: {c_height}px; width: 100%;">
+      <div id="tradingview_unified_v2" style="height: 100%; width: 100%;"></div>
+      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+      <script type="text/javascript">
+      new TradingView.widget(
+      {{
+        "autosize": true,
+        "symbol": "USA500",
+        "interval": "{interval}",
+
+        "timezone": "America/Sao_Paulo",
+        "theme": "{theme}",
+        "style": "2",
+        "locale": "br",
+        "toolbar_bg": "#f1f3f6",
+        "enable_publishing": false,
+        "hide_top_toolbar": false,
+        "hide_side_toolbar": true,
+        "allow_symbol_change": true,
+
+        "save_image": true,
+        "details": false,
+        "hotlist": false,
+        "calendar": false,
+        "hide_volume": true,
+        "container_id": "tradingview_unified_v2",
+        "overrides": {{
+            "mainSeriesProperties.lineStyle.color": "#FF00FF",
+            "mainSeriesProperties.lineStyle.linewidth": 3
+        }},
+        "studies": [
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:GOLD" }}, "plots": {{ "Plot": {{ "color": "#FFFF00" }} }} }},
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:UKOIL" }}, "plots": {{ "Plot": {{ "color": "#006400" }} }} }},
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "US10Y" }} }},
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "OTCB:US30Y" }}, "plots": {{ "Plot": {{ "color": "#00BFFF" }} }} }}
+        ]
+
+
+
+      }}
+      );
+      </script>
+    </div>
+    """
+    components.html(tv_html, height=c_height + 20)
+
+
+def render_tv_corr(container_id, main_sym, comp_sym, interval, height):
+    """(Mantido para compatibilidade se necessário futuramente)"""
+    pass
+
+
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+saved_creds = fetch_app_state("user_credentials")
+if saved_creds is None:
+    credentials = {'usernames': {'admin': {'email': 'admin@test.com', 'name': 'Trader TTS', 'password': '123'}}}
 else:
     credentials = saved_creds
+authenticator = stauth.Authenticate(credentials, 'tts_terminal_v2', 'auth_key_tts_2026', cookie_expiry_days=30, auto_hash=True)
+if saved_creds is None: save_credentials(authenticator.credentials)
 
-authenticator = stauth.Authenticate(credentials, 'tts_terminal_cookie', 'auth_key_123', cookie_expiry_days=30)
-
-# Layout: Se não estiver logado, exibe as abas Login/Registro
 if not st.session_state.get("authentication_status"):
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         tab_login, tab_register = st.tabs(["🔒 Entrar", "📝 Novo Cadastro"])
-        
         with tab_login:
-            authenticator.login(location='main')
-            
+            try: authenticator.login(location='main')
+            except Exception: st.rerun()
         with tab_register:
             try:
-                # O registro atualiza a variável credentials na memória
-                register_result = authenticator.register_user(clear_on_submit=True)
-                if register_result and register_result[0]: # email_of_registered_user
-                    st.success("Usuário registrado com sucesso! Volte na aba Entrar para logar.")
-                    save_credentials(credentials)
-            except Exception as e:
-                st.error(f"Erro no cadastro: {e}")
+                result = authenticator.register_user(clear_on_submit=True, captcha=False)
+                if result and result[0]: save_credentials(authenticator.credentials); st.success("Registrado!")
+            except Exception as e: st.error(f"Erro: {e}")
 
-# 3. Lógica Principal
-if st.session_state["authentication_status"]:
-    # Auto-refresh de 1 segundo (1000ms)
-    st_autorefresh(interval=1000, key="data_refresh")
-    
-    authenticator.logout('Encerrar Sessão', 'sidebar')
-    name = st.session_state["name"]
-    
-    # Barra Lateral - Informações Globais
+if st.session_state.get("authentication_status"):
     with st.sidebar:
+        st.markdown("### 🧭 Navegação")
+        page = st.radio("Ir para:", ["📉 Terminal de Trading", "📊 Gráficos Avançados", "⚖️ Painel de Correlação"], label_visibility="collapsed")
+        
+        st.markdown("---")
+        authenticator.logout('Encerrar Sessão', location='sidebar')
+        
         tab1, tab2 = st.tabs(["🌍 MERCADOS", "📅 CALENDÁRIO"])
-        
-        with tab1:
-            global_categories = fetch_app_state("mercados_globais")
-            if global_categories:
-                for cat_name, assets in global_categories.items():
-                    st.markdown(f"#### {cat_name}")
-                    for item in assets:
-                        color = "#00FFA3" if item['change'] >= 0 else "#FF4B4B"
-                        st.markdown(f"""
-                            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #222; padding: 4px 0;">
-                                <span style="font-size: 0.75rem; color: #AAA;">{item['name']}</span>
-                                <span style="font-size: 0.8rem; font-weight: bold;">{item['price']}</span>
-                                <span style="color: {color}; font-weight: bold; font-size: 0.8rem;">{item['change']}%</span>
-                            </div>
-                        """, unsafe_allow_html=True)
-                    st.markdown("<br>", unsafe_allow_html=True)
-            else:
-                st.info("Carregando mercados da nuvem...")
+        with tab1: sidebar_mercados()
+        with tab2: sidebar_calendario()
 
-        with tab2:
-            calendar_data = fetch_app_state("calendario_economico")
-            if calendar_data:
-                if not calendar_data:
-                    st.write("Sem eventos relevantes hoje.")
-                
-                def parse_val(val):
-                    try:
-                        return float(val.replace('%', '').replace('K', '').replace('M', '').replace('B', '').strip())
-                    except:
-                        return None
+    # Roteamento de Páginas
+    if page == "📉 Terminal de Trading":
+        pagina_terminal()
+    elif page == "📊 Gráficos Avançados":
+        pagina_graficos()
+    elif page == "⚖️ Painel de Correlação":
+        pagina_correlacao()
 
-                for event in calendar_data:
-                    actual_raw = event.get('actual', '')
-                    forecast_raw = event.get('forecast', '')
-                    
-                    # Lógica de seta
-                    arrow = ""
-                    actual_v = parse_val(actual_raw)
-                    forecast_v = parse_val(forecast_raw)
-                    
-                    if actual_v is not None and forecast_v is not None:
-                        if actual_v > forecast_v: arrow = "<span style='color:#00FFA3;'>▲</span>"
-                        elif actual_v < forecast_v: arrow = "<span style='color:#FF4B4B;'>▼</span>"
 
-                    st.markdown(f"""
-                        <div style="border-bottom: 1px solid #333; padding: 8px 0;">
-                            <div style="display: flex; justify-content: space-between;">
-                                <span style="font-size: 0.7rem; color: #888;">{event['time']} | {event['currency']}</span>
-                                <span style="font-size: 0.75rem; font-weight: bold;">{arrow} {actual_raw}</span>
-                            </div>
-                            <span style="font-size: 0.85rem; font-weight: bold;">{event['icon']} {event['event']}</span>
-                            <div style="display: flex; gap: 10px; margin-top: 4px;">
-                                <span style="font-size: 0.65rem; color: #666;">Proj: {forecast_raw if forecast_raw else '---'}</span>
-                                <span style="font-size: 0.65rem; color: #666;">Ant: {event.get('previous', '---')}</span>
-                            </div>
-                        </div>
-                    """, unsafe_allow_html=True)
-            else:
-                st.info("Carregando calendário da nuvem...")
-
-    dados_mercado_raw = fetch_app_state("dados_mercado")
-    if dados_mercado_raw:
-        try:
-            data = dados_mercado_raw[0] if isinstance(dados_mercado_raw, list) else dados_mercado_raw
-            
-            def safe_format(value):
-                try:
-                    if value is None: return "---"
-                    return f"{float(value):.3f}"
-                except:
-                    return str(value)
-
-            st.markdown(f"### 📡 {data['symbol']} | {datetime.now().strftime('%H:%M:%S')}")
-            c1, c2, c3 = st.columns([2, 1, 1])
-        
-            # Formatação de cores e strings
-            change_val = data['change_percent']
-            if isinstance(change_val, float):
-                change_str = f"{change_val:.2%}"
-            else:
-                change_str = str(change_val)
-            
-            color_hex = '#00FFA3' if (isinstance(change_val, float) and change_val >= 0) else '#FF4B4B'
-
-            with c1:
-                st.markdown(f"""
-                    <div class="main-card">
-                        <div class="label-small">Último Preço</div>
-                        <div class="price-large">{safe_format(data['last_price'])}</div>
-                        <div style="color: {color_hex}">{change_str}</div>
-                    </div>
-                """, unsafe_allow_html=True)
-                
-            with c2:
-                st.metric("VWAP", safe_format(data['vwap']))
-                st.metric("Ajuste", safe_format(data['adjustment']))
-                
-            with c3:
-                st.markdown(f"<div class='label-small'>Viés VWAP</div>", unsafe_allow_html=True)
-                st.info(data['bias'])
-                st.markdown(f"<div class='label-small'>Status Mercado</div>", unsafe_allow_html=True)
-                st.warning(data['status'])
-
-            # 2. Semáforo Direcional
-            st.markdown("---")
-            st.markdown("#### 🚥 SEMÁFORO DIRECIONAL")
-            
-            if "semaforo" in data:
-                sem = data["semaforo"]
-                
-                def get_signal_color(text):
-                    t = str(text).upper() if text else ""
-                    if "VENDA" in t or "VENDER" in t or "VENDIDO" in t: 
-                        return "background-color: #400000; color: #FF4B4B; border: 1px solid #FF4B4B;"
-                    if "COMPRA" in t or "COMPRAR" in t or "COMPRADO" in t: 
-                        return "background-color: #002611; color: #00FFA3; border: 1px solid #00FFA3;"
-                    return "background-color: #1A1A1A; color: #E0E0E0; border: 1px solid #333;"
-
-                # Layout em 3 banners
-                s1, s2, s3 = st.columns(3)
-                with s1: st.markdown(f"<div class='status-box' style='{get_signal_color(sem.get('direcao'))}'>DIREÇÃO DO DIA<br>{sem.get('direcao', '---')}</div>", unsafe_allow_html=True)
-                with s2: st.markdown(f"<div class='status-box' style='{get_signal_color(sem.get('correlacao_rtd'))}'>CORRELAÇÕES RTD<br>{sem.get('correlacao_rtd', '---')}</div>", unsafe_allow_html=True)
-                with s3: st.markdown(f"<div class='status-box' style='{get_signal_color(sem.get('correlacao_interna'))}'>CORRELAÇÃO INTERNA<br>{sem.get('correlacao_interna', '---')}</div>", unsafe_allow_html=True)
-            else:
-                st.warning("Dados do Semáforo não encontrados no arquivo de sincronização.")
-
-            # 3. Correlações RTD | Juros x Dólar
-            st.markdown("---")
-            st.markdown("#### ⚖️ CORRELAÇÕES RTD | JUROS x DÓLAR")
-            
-            if "correlacoes" in data and data["correlacoes"]:
-                df_corr = pd.DataFrame(data["correlacoes"], columns=["Fator", "Cotação RTD", "Var % / Δ", "Leitura", "Impacto WIN"])
-                
-                def style_corr(row):
-                    val = str(row['Var % / Δ'])
-                    if '-' in val: color = '#FF4B4B'
-                    elif '0' in val: color = '#E0E0E0'
-                    else: color = '#00FFA3'
-                    return [f'color: {color}'] * 5
-
-                st.dataframe(df_corr.style.apply(style_corr, axis=1), use_container_width=True, hide_index=True)
-
-            # 4. Análise de Inteligência Artificial (Macro Insight)
-            st.markdown("---")
-            st.markdown("#### 🤖 INSIGHT DO ANALISTA (IA)")
-            ai_data = fetch_app_state("ai_insight")
-            if ai_data:
-                # Lógica de Cores Semáforo
-                sent = ai_data.get('sentiment', 'NEUTRO')
-                if sent == "COMPRA": 
-                    bg_color, border_color = "#002611", "#00FFA3"
-                elif sent == "VENDA": 
-                    bg_color, border_color = "#400000", "#FF4B4B"
-                else: 
-                    bg_color, border_color = "#111111", "#333"
-
-                st.markdown(f"""
-                    <div style="background: {bg_color}; border: 1px solid {border_color}; border-left: 5px solid {border_color}; padding: 20px; border-radius: 5px; color: #E0E0E0; font-size: 0.95rem; line-height: 1.6;">
-                        <b style="color: {border_color}; text-transform: uppercase;">VIÉS IA: {sent}</b><br><br>
-                        {ai_data['insight'].replace('\n', '<br>')}
-                    </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.info("Aguardando primeira análise do Analista IA na nuvem...")
-
-            # 5. Escada de Níveis (Tabela Estilizada)
-            
-            if "escada" in data and data["escada"]:
-                df_escada = pd.DataFrame(data["escada"], columns=["Nível", "Δ %", "Preço", "Δ p/ Último"])
-                
-                # Formatação numérica
-                for col in ["Δ %", "Preço", "Δ p/ Último"]:
-                    df_escada[col] = df_escada[col].apply(lambda x: f"{float(x):.2f}" if x is not None else "---")
-
-                def color_rows(row):
-                    val = str(row['Nível'])
-                    if 'AJUSTE' in val.upper(): return ['background-color: #262626; color: #FF9800; font-weight: bold'] * 4
-                    if '-' in val: return ['background-color: #0A1F13; color: #00FFA3'] * 4 # Tons de verde para baixo
-                    return ['background-color: #1F0A0A; color: #FF4B4B'] * 4 # Tons de vermelho para cima
-
-                st.table(df_escada.style.apply(color_rows, axis=1))
-
-            st.markdown("---")
-
-        except Exception as e:
-            st.error(f"Erro ao processar dados: {e}")
-    else:
-        st.info("Aguardando conexão com o Supabase na nuvem... (Verifique se a Ponte está rodando)")
 
