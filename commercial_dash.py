@@ -351,6 +351,88 @@ def painel_corpo_global():
 def pagina_terminal_global():
     """Página de Terminal Global."""
     painel_topo_global()
+    
+    st.markdown("---")
+    
+    global_chart_assets = {
+        "S&P 500": {"tv": "USA500", "yf": "^GSPC"},
+        "NASDAQ": {"tv": "CME_MINI:NQ1!", "yf": "^IXIC"},
+        "BRENT OIL": {"tv": "TVC:UKOIL", "yf": "BZ=F"},
+        "WTI OIL": {"tv": "TVC:USOIL", "yf": "CL=F"},
+        "GOLD": {"tv": "TVC:GOLD", "yf": "GC=F"},
+        "BITCOIN": {"tv": "BINANCE:BTCUSDT", "yf": "BTC-USD"},
+        "DXY (Dólar Index)": {"tv": "TVC:DXY", "yf": "DX-Y.NYB"},
+        "US 10Y (Yield)": {"tv": "TVC:US10Y", "yf": "^TNX"},
+        "EWZ (Brazil ETF)": {"tv": "AMEX:EWZ", "yf": "EWZ"},
+        "EEM (Emerging Markets)": {"tv": "AMEX:EEM", "yf": "EEM"},
+    }
+    
+    c1, c2 = st.columns([2, 1])
+    
+    with c1:
+        st.markdown("#### 📈 Gráfico Global")
+        col_sel, col_int = st.columns([2, 1])
+        with col_sel:
+            sym = st.selectbox("Ativo", list(global_chart_assets.keys()), index=0, key="global_sym")
+        with col_int:
+            interval = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=4, key="global_int")
+            
+        tv_html = f"""
+        <div class="tradingview-widget-container" style="height: 480px; width: 100%;">
+          <div id="tv_global" style="height: 100%; width: 100%;"></div>
+          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+          <script type="text/javascript">
+          new TradingView.widget({{
+            "autosize": true,
+            "symbol": "{global_chart_assets[sym]['tv']}",
+            "interval": "{interval}",
+            "timezone": "America/Sao_Paulo",
+            "theme": "dark",
+            "style": "1",
+            "locale": "br",
+            "toolbar_bg": "#f1f3f6",
+            "enable_publishing": false,
+            "hide_top_toolbar": false,
+            "save_image": true,
+            "hide_volume": false,
+            "container_id": "tv_global"
+          }});
+          </script>
+        </div>
+        """
+        components.html(tv_html, height=500)
+
+    with c2:
+        st.markdown("#### 🤖 Analista Técnico IA")
+        st.info(f"Análise baseada no histórico diário (OHLC) de {sym}.")
+        if st.button("Gerar Análise Técnica (IA)", use_container_width=True):
+            with st.spinner("Lendo o gráfico via IA..."):
+                import sys
+                exec_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'execution'))
+                if exec_path not in sys.path:
+                    sys.path.append(exec_path)
+                from tech_analyst import get_technical_analysis
+                
+                yf_ticker = global_chart_assets[sym]['yf']
+                insight = get_technical_analysis(sym, yf_ticker)
+                
+                st.session_state[f'tech_insight_{sym}'] = insight
+                
+        if f'tech_insight_{sym}' in st.session_state:
+            insight_text = st.session_state[f'tech_insight_{sym}']
+            if "Erro" in insight_text or "429" in insight_text:
+                border_color = "#FF4B4B"
+                if "quota" in insight_text.lower() or "429" in insight_text:
+                    insight_text = "⚠️ Limite de requisições da IA (Quota Exceeded) atingido. Tente novamente em alguns minutos."
+            else:
+                border_color = "#00FFA3"
+                
+            st.markdown(f"""
+                <div style="background: #111; border: 1px solid #333; padding: 15px; border-radius: 8px; border-left: 5px solid {border_color}; font-size: 0.85rem; color: #E0E0E0; max-height: 380px; overflow-y: auto;">
+                    {insight_text.replace(chr(10), '<br>')}
+                </div>
+            """, unsafe_allow_html=True)
+            
     secao_market_report_fragment()
     painel_corpo_global()
 
