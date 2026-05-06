@@ -23,10 +23,6 @@ def get_technical_analysis(symbol_name, ticker_symbol):
         # Formata os dados para o prompt
         price_history = recent_data.to_string()
         
-        genai.configure(api_key=api_key)
-        # Usando o modelo Pro ou Flash
-        model = genai.GenerativeModel('gemini-flash-latest') 
-        
         prompt = f"""
 Você é um Analista Técnico de Elite Institucional focado em análise gráfica e price action quantitativo.
 Seu objetivo é ler os dados numéricos históricos de preços (OHLC - Open, High, Low, Close) e Volume de {symbol_name} ({ticker_symbol}) e fornecer um relatório técnico imediato.
@@ -45,8 +41,32 @@ FORMATO DA RESPOSTA:
 - Seja objetivo e escreva como um trader.
 - Destaque os níveis de preço em negrito.
 """
-        response = model.generate_content(prompt)
-        return response.text
+        try:
+            genai.configure(api_key=api_key)
+            # Usando o modelo Pro ou Flash
+            model = genai.GenerativeModel('gemini-flash-latest') 
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as gemini_e:
+            err_str = str(gemini_e).lower()
+            if "429" in err_str or "quota" in err_str or "exhausted" in err_str:
+                # Fallback para OpenAI
+                openai_key = os.getenv("OPENAI_API_KEY")
+                if openai_key:
+                    from openai import OpenAI
+                    client = OpenAI(api_key=openai_key)
+                    completion = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": "Você é um analista financeiro institucional rigoroso e focado em price action numérico."},
+                            {"role": "user", "content": prompt}
+                        ]
+                    )
+                    return f"**[Fallback IA: OpenAI GPT-4o]**\n\n" + completion.choices[0].message.content
+                else:
+                    return f"Erro de Limite no Gemini e chave da OpenAI ausente: {gemini_e}"
+            else:
+                return f"Erro interno do modelo Gemini: {gemini_e}"
         
     except Exception as e:
         return f"Erro na análise técnica: {e}"
