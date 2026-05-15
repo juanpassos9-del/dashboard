@@ -1,6 +1,6 @@
 import streamlit as st
 import streamlit.components.v1 as components
-import streamlit_authenticator as stauth
+
 import os
 import pandas as pd
 from datetime import datetime
@@ -93,6 +93,60 @@ st.markdown("""
 # ══════════════════════════════════════════════════════════════════════════════
 # FRAGMENTS
 # ══════════════════════════════════════════════════════════════════════════════
+
+@st.fragment(run_every=60)
+def painel_tickers_topo():
+    """Mini cards de cotações globais no topo do terminal."""
+    global_data = fetch_app_state("mercados_globais")
+    if not global_data: return
+
+    # Suporte para formato com ou sem chave 'categories'
+    categories = global_data.get("categories", global_data)
+    
+    # Mapeamento dos ativos solicitados pelo usuário
+    targets = {
+        "EWZ": "EWZ (Brazil ETF)",
+        "EEM": "EEM (Emerging Markets)",
+        "6L": "6L (Real CME)",
+        "PBR": "PETR4 (ADR)",
+        "VALE": "VALE (ADR)",
+        "BRENT": "BRENT OIL"
+    }
+    
+    found_assets = {}
+    if isinstance(categories, dict):
+        for cat_assets in categories.values():
+            if not isinstance(cat_assets, list): continue
+            for asset in cat_assets:
+                for key, target_name in targets.items():
+                    if asset.get('name') == target_name:
+                        found_assets[key] = asset
+
+    # Renderização em colunas
+    cols = st.columns(len(targets))
+    for i, key in enumerate(targets.keys()):
+        with cols[i]:
+            asset = found_assets.get(key)
+            if asset:
+                change = asset.get('change', 0)
+                color = "#00FFA3" if change >= 0 else "#FF4B4B"
+                price = asset.get('price', 0)
+                # Formatação compacta para o topo
+                price_fmt = f"{price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                st.markdown(f"""
+                    <div style="background: #111; border: 1px solid #222; border-top: 2px solid {color}; padding: 8px; border-radius: 4px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">
+                        <div style="font-size: 0.6rem; color: #888; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;">{key}</div>
+                        <div style="font-size: 1.1rem; font-weight: bold; color: #FFF; margin: 2px 0;">{price_fmt}</div>
+                        <div style="font-size: 0.75rem; color: {color}; font-weight: bold;">{change:+.2f}%</div>
+                    </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                    <div style="background: #0A0A0A; border: 1px solid #222; padding: 8px; border-radius: 4px; text-align: center; color: #444;">
+                        <div style="font-size: 0.6rem;">{key}</div>
+                        <div style="font-size: 1.1rem;">---</div>
+                    </div>
+                """, unsafe_allow_html=True)
 
 @st.fragment(run_every=1)
 def painel_topo_rtd():
@@ -548,6 +602,7 @@ def sidebar_calendario():
 
 def pagina_terminal():
     """Renderiza o terminal principal de trading."""
+    painel_tickers_topo()   # Indicadores Globais no Topo
     painel_topo_rtd()       # Tempo Real (1s)
     secao_ia_fragment()     # Estático/Lento (60s)
     secao_market_report_fragment() # Notícias/IA (300s)
@@ -738,49 +793,26 @@ def render_tv_corr(container_id, main_sym, comp_sym, interval, height):
 
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-saved_creds = fetch_app_state("user_credentials")
-if saved_creds is None:
-    credentials = {'usernames': {'admin': {'email': 'admin@test.com', 'name': 'Trader TTS', 'password': '123'}}}
-else:
-    credentials = saved_creds
-authenticator = stauth.Authenticate(credentials, 'tts_terminal_v2', 'auth_key_tts_2026', cookie_expiry_days=30, auto_hash=True)
-if saved_creds is None: save_credentials(authenticator.credentials)
+# Navegação na Barra Lateral
+with st.sidebar:
+    st.markdown("### 🧭 Navegação")
+    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📊 Gráficos Avançados", "⚖️ Painel de Correlação"], label_visibility="collapsed")
+    
+    st.markdown("---")
+    
+    tab1, tab2 = st.tabs(["🌍 MERCADOS", "📅 CALENDÁRIO"])
+    with tab1: sidebar_mercados()
+    with tab2: sidebar_calendario()
 
-if not st.session_state.get("authentication_status"):
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        tab_login, tab_register = st.tabs(["🔒 Entrar", "📝 Novo Cadastro"])
-        with tab_login:
-            try: authenticator.login(location='main')
-            except Exception: st.rerun()
-        with tab_register:
-            try:
-                result = authenticator.register_user(clear_on_submit=True, captcha=False)
-                if result and result[0]: save_credentials(authenticator.credentials); st.success("Registrado!")
-            except Exception as e: st.error(f"Erro: {e}")
-
-if st.session_state.get("authentication_status"):
-    with st.sidebar:
-        st.markdown("### 🧭 Navegação")
-        page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📊 Gráficos Avançados", "⚖️ Painel de Correlação"], label_visibility="collapsed")
-        
-        st.markdown("---")
-        authenticator.logout('Encerrar Sessão', location='sidebar')
-        
-        tab1, tab2 = st.tabs(["🌍 MERCADOS", "📅 CALENDÁRIO"])
-        with tab1: sidebar_mercados()
-        with tab2: sidebar_calendario()
-
-    # Roteamento de Páginas
-    if page == "📉 Terminal de Trading":
-        pagina_terminal()
-    elif page == "🌎 Terminal Global":
-        pagina_terminal_global()
-    elif page == "📊 Gráficos Avançados":
-        pagina_graficos()
-    elif page == "⚖️ Painel de Correlação":
-        pagina_correlacao()
+# Roteamento de Páginas
+if page == "📉 Terminal de Trading":
+    pagina_terminal()
+elif page == "🌎 Terminal Global":
+    pagina_terminal_global()
+elif page == "📊 Gráficos Avançados":
+    pagina_graficos()
+elif page == "⚖️ Painel de Correlação":
+    pagina_correlacao()
 
 
 
