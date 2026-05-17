@@ -24,22 +24,25 @@ def get_technical_analysis(symbol_name, ticker_symbol):
         price_history = recent_data.to_string()
         
         prompt = f"""
-Você é um Analista Técnico de Elite Institucional focado em análise gráfica e price action quantitativo.
-Seu objetivo é ler os dados numéricos históricos de preços (OHLC - Open, High, Low, Close) e Volume de {symbol_name} ({ticker_symbol}) e fornecer um relatório técnico imediato.
+Você é um Analista Técnico de Elite Institucional especializado nas metodologias de Richard Wyckoff, Volume Spread Analysis (VSA) e Smart Money Concepts (SMC).
+Seu objetivo é analisar os dados numéricos históricos de preços (OHLC - Open, High, Low, Close) e Volume de {symbol_name} ({ticker_symbol}) e fornecer um relatório técnico profundo e padronizado.
 
 DADOS HISTÓRICOS (Últimos 15 dias de negociação):
 {price_history}
 
-Com base nestes números absolutos, gere uma análise técnica concisa que inclua:
-1. **Tendência atual**: Análise de topos e fundos nos últimos 15 dias (tendência de curto prazo) e variação percentual.
-2. **Níveis Chave**: Identifique pelo menos 1 suporte forte e 1 resistência forte baseados nos pontos de mínima e máxima recentes.
-3. **Price Action / Momentum**: Avalie se o momento recente é de exaustão, consolidação ou rompimento direcional (analise os preços de abertura vs fechamento e o tamanho dos pavios/sombras).
-4. **Veredito Técnico**: Direção sugerida no curto prazo (COMPRA, VENDA ou NEUTRO).
+Com base nestes dados absolutos (focando puramente no comportamento do Preço e Volume), gere uma análise técnica concisa estruturada no seguinte padrão operacional:
+
+1. **Contexto Wyckoff**: Identifique em qual possível fase do ciclo o ativo se encontra (Acumulação, Mark-up, Distribuição, Mark-down). Procure evidências de *Stopping Volume*, *Springs*, *Upthrusts* ou Absorção Institucional.
+2. **Análise de Preço e Volume (VSA)**: Analise a relação entre o *spread* (tamanho dos candles de fechamento a fechamento ou máxima a mínima) e o Volume negociado. Identifique anomalias como "Esforço vs Resultado", "No Demand/No Supply" ou Clímax de Volume.
+3. **Smart Money Concepts (SMC)**: 
+    - **Estrutura**: Identifique quebras de estrutura (BOS - Break of Structure) ou mudanças de caráter (ChoCh - Change of Character) nos movimentos recentes.
+    - **Níveis Institucionais**: Aponte capturas de liquidez (*Liquidity Sweeps*), e identifique zonas prováveis de *Order Blocks* ou *Fair Value Gaps* (Imbalances) onde o dinheiro inteligente pode estar posicionado.
+4. **Veredito Institucional**: Viés direcional sugerido para o curto prazo (COMPRA, VENDA ou NEUTRO), embasado na confluência destas 3 leituras.
 
 FORMATO DA RESPOSTA:
-- Use tópicos curtos e diretos.
-- Seja objetivo e escreva como um trader.
-- Destaque os níveis de preço em negrito.
+- Use bullet points curtos, diretos e profissionais.
+- Mantenha a objetividade de um mesa proprietária ou fundo quant.
+- Destaque os níveis de preço relevantes (zonas de liquidez, OBs, FVGs) sempre em **negrito**.
 """
         try:
             genai.configure(api_key=api_key)
@@ -58,7 +61,7 @@ FORMATO DA RESPOSTA:
                     completion = client.chat.completions.create(
                         model="gpt-4o-mini",
                         messages=[
-                            {"role": "system", "content": "Você é um analista financeiro institucional rigoroso e focado em price action numérico."},
+                            {"role": "system", "content": "Você é um Analista Técnico de Elite Institucional especializado em Wyckoff, VSA e Smart Money Concepts (SMC). Mantenha extremo rigor analítico e foco institucional."},
                             {"role": "user", "content": prompt}
                         ]
                     )

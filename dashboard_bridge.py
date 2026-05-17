@@ -34,10 +34,11 @@ class TerminalBridge:
         
         self.gateway = RTDGateway(workbook_name="dashboard_trade_bloomberg_semaforo")
         self.file_path = "dados_mercado.json"
-        self.last_global_fetch = 0
-        self.last_ai_fetch = 0
-        self.last_calendar_fetch = 0
-        self.last_report_fetch = 0
+        current = time.time()
+        self.last_global_fetch = current
+        self.last_ai_fetch = current
+        self.last_calendar_fetch = current
+        self.last_report_fetch = current
         
     def sync_to_app_state(self, key: str, value: dict | list):
         """Salva o JSON completo na tabela app_state com retentativa."""
@@ -69,8 +70,7 @@ class TerminalBridge:
         logger.info("Iniciando Terminal Bridge (Profit -> Supabase)...")
         
         if not self.gateway.connect():
-            logger.critical("Erro: Abra o Excel 'dashboard_trade_bloomberg_semaforo'")
-            return
+            logger.warning("[!] Excel 'dashboard_trade_bloomberg_semaforo' não detectado. Iniciando em modo offline para o RTD. O restante do dashboard continuará atualizando normalmente.")
 
         while True:
             try:
@@ -127,36 +127,48 @@ class TerminalBridge:
                     self.last_calendar_fetch = current_time
 
                 # 5. Dados RTD (Tempo Real - 1s)
-                sheet = self.gateway.sheet
+                sheet = None
+                try:
+                    sheet = self.gateway.sheet
+                except Exception:
+                    self.gateway.sheet = None
+                    
                 if sheet:
-                    symbol = sheet.Range("L3").Value
-                    if symbol:
-                        data = {
-                            "symbol": symbol,
-                            "last_price": sheet.Range("L4").Value,
-                            "vwap": sheet.Range("L5").Value,
-                            "adjustment": sheet.Range("L6").Value,
-                            "change_percent": sheet.Range("L12").Value,
-                            "status": sheet.Range("L16").Value,
-                            "bias": sheet.Range("L15").Value,
-                            "escada": sheet.Range("A14:D24").Value,
-                            "semaforo": {
-                                "direcao": str(sheet.Range("G9").Value).split("|")[-1].strip() if sheet.Range("G9").Value else "---",
-                                "correlacao_rtd": str(sheet.Range("G10").Value).split("|")[-1].strip() if sheet.Range("G10").Value else "---",
-                                "correlacao_interna": str(sheet.Range("G11").Value).split("|")[-1].strip() if sheet.Range("G11").Value else "---"
-                            },
-                            "correlacoes": sheet.Range("A46:E49").Value,
-                            "updated_at": time.strftime("%Y-%m-%d %H:%M:%S")
-                        }
-                        
-                        # Salva backup local
-                        try:
-                            with open(self.file_path, "w") as f:
-                                json.dump([data], f)
-                            self.sync_to_app_state("dados_mercado", [data])
-                            print(f"\r[*] {symbol} sincronizado: {data['updated_at']}", end="")
-                        except Exception as e:
-                            logger.error(f"Erro ao salvar dados RTD: {e}")
+                    try:
+                        symbol = sheet.Range("L3").Value
+                        if symbol:
+                            data = {
+                                "symbol": symbol,
+                                "last_price": sheet.Range("L4").Value,
+                                "vwap": sheet.Range("L5").Value,
+                                "adjustment": sheet.Range("L6").Value,
+                                "change_percent": sheet.Range("L12").Value,
+                                "status": sheet.Range("L16").Value,
+                                "bias": sheet.Range("L15").Value,
+                                "escada": sheet.Range("A14:D24").Value,
+                                "semaforo": {
+                                    "direcao": str(sheet.Range("G9").Value).split("|")[-1].strip() if sheet.Range("G9").Value else "---",
+                                    "correlacao_rtd": str(sheet.Range("G10").Value).split("|")[-1].strip() if sheet.Range("G10").Value else "---",
+                                    "correlacao_interna": str(sheet.Range("G11").Value).split("|")[-1].strip() if sheet.Range("G11").Value else "---"
+                                },
+                                "saldo_agressao": sheet.Range("J6").Value,
+                                "correlacoes": sheet.Range("A46:E49").Value,
+                                "acoes_peso": sheet.Range("A55:G59").Value,
+                                "updated_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                            }
+                            
+                            # Salva backup local
+                            try:
+                                with open(self.file_path, "w") as f:
+                                    json.dump([data], f)
+                                self.sync_to_app_state("dados_mercado", [data])
+                                print(f"\r[*] {symbol} sincronizado: {data['updated_at']}", end="")
+                            except Exception as e:
+                                logger.error(f"Erro ao salvar dados RTD: {e}")
+                    except Exception as e:
+                        # Se houver erro de leitura do Excel (ex: Excel fechado no meio da operação), trata e limpa para tentar reconexão
+                        logger.warning(f"Erro de comunicação COM com o Excel: {e}. Tratando para reconexão suave...")
+                        self.gateway.sheet = None
                 
                 time.sleep(1)
                 

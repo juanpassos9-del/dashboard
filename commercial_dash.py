@@ -54,6 +54,31 @@ def sanitize_text(text):
     if not isinstance(text, str): return str(text)
     return text.replace("<script", "&lt;script").replace("javascript:", "")
 
+def clean_val(val):
+    """Limpa strings com formatações variadas de milhar/decimal para float robusto."""
+    if val is None:
+        return 0.0
+    if isinstance(val, (int, float)):
+        return float(val)
+    s = str(val).strip()
+    s = s.replace(" ", "")
+    if "." in s and "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    elif "." in s:
+        parts = s.split(".")
+        if len(parts) == 2 and len(parts[1]) == 3:
+            s = s.replace(".", "")
+    elif "," in s:
+        parts = s.split(",")
+        if len(parts) == 2 and len(parts[1]) == 3:
+            s = s.replace(",", "")
+        else:
+            s = s.replace(",", ".")
+    try:
+        return float(s)
+    except:
+        return 0.0
+
 
 
 # ── Estilo Global ───────────────────────────────────────────────────────────
@@ -185,10 +210,54 @@ def painel_topo_rtd():
         st.metric("VWAP",   safe_fmt(data['vwap']))
         st.metric("Ajuste", safe_fmt(data['adjustment']))
     with c3:
-        st.markdown("<div class='label-small'>Viés VWAP</div>", unsafe_allow_html=True)
-        st.info(data['bias'])
-        st.markdown("<div class='label-small'>Status Mercado</div>", unsafe_allow_html=True)
-        st.warning(data['status'])
+        saldo_agr = data.get('saldo_agressao')
+        if saldo_agr is not None:
+            try:
+                saldo_num = clean_val(saldo_agr)
+                color = "#00FFA3" if saldo_num > 0 else ("#FF4B4B" if saldo_num < 0 else "#E0E0E0")
+                # Formata com sinal (+/-) e separadores de milhar no padrão brasileiro
+                saldo_fmt = f"{saldo_num:+,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            except:
+                color = "#E0E0E0"
+                saldo_fmt = str(saldo_agr)
+            st.markdown(f"<div class='label-small'>Saldo Agressão</div><div style='color:{color}; font-size:1.1rem; font-weight:bold;'>{saldo_fmt}</div>", unsafe_allow_html=True)
+            
+    # --- INTERPRETAÇÃO DE DIVERGÊNCIA DE DELTA ---
+    last_price_val = data.get('last_price')
+    vwap_val = data.get('vwap')
+    saldo_agr = data.get('saldo_agressao')
+    
+    if last_price_val is not None and vwap_val is not None and saldo_agr is not None:
+        try:
+            np_price = clean_val(last_price_val)
+            np_vwap = clean_val(vwap_val)
+            
+            # Ajuste de magnitude robusto
+            if np_price > 0 and np_vwap > 0:
+                ratio = np_price / np_vwap
+                if ratio > 500:
+                    np_vwap *= 1000
+                elif ratio < 0.002:
+                    np_price *= 1000
+            
+            saldo_num = clean_val(saldo_agr)
+            
+            if np_price > np_vwap and saldo_num < 0:
+                st.markdown("""
+                    <div style="background: rgba(255, 75, 75, 0.1); border: 2px solid #FF4B4B; padding: 15px; border-radius: 8px; text-align: center; margin-top: 15px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(255,75,75,0.2);">
+                        <span style="color: #FF4B4B; font-weight: bold; font-size: 1.2rem; letter-spacing: 1px;">⚠️ DIVERGÊNCIA DE DELTA (VENDA)</span><br>
+                        <span style="color: #DDD; font-size: 0.85rem;">Preço atual acima da VWAP com Saldo Acumulado Vendedor. Alerta de absorção na venda ou exaustão de compra!</span>
+                    </div>
+                """, unsafe_allow_html=True)
+            elif np_price < np_vwap and saldo_num > 0:
+                st.markdown("""
+                    <div style="background: rgba(0, 255, 163, 0.1); border: 2px solid #00FFA3; padding: 15px; border-radius: 8px; text-align: center; margin-top: 15px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,255,163,0.2);">
+                        <span style="color: #00FFA3; font-weight: bold; font-size: 1.2rem; letter-spacing: 1px;">🚀 DIVERGÊNCIA DE DELTA (COMPRA)</span><br>
+                        <span style="color: #DDD; font-size: 0.85rem;">Preço atual abaixo da VWAP com Saldo Acumulado Comprador. Alerta de absorção na compra ou exaustão de venda!</span>
+                    </div>
+                """, unsafe_allow_html=True)
+        except Exception as e:
+            pass
 
     # 3. Semáforo
     st.markdown("#### 🚥 SEMÁFORO DIRECIONAL")
@@ -204,6 +273,86 @@ def painel_topo_rtd():
         with s1: st.markdown(f"<div class='status-box' style='{sig_style(sem.get('direcao'))}'>DIREÇÃO DO DIA<br>{sem.get('direcao','---')}</div>", unsafe_allow_html=True)
         with s2: st.markdown(f"<div class='status-box' style='{sig_style(sem.get('correlacao_rtd'))}'>CORRELAÇÕES RTD<br>{sem.get('correlacao_rtd','---')}</div>", unsafe_allow_html=True)
         with s3: st.markdown(f"<div class='status-box' style='{sig_style(sem.get('correlacao_interna'))}'>CORRELAÇÃO INTERNA<br>{sem.get('correlacao_interna','---')}</div>", unsafe_allow_html=True)
+
+    # 4. Histograma de Variação % do Dia (Movido para baixo do Semáforo a pedido do usuário)
+    if data.get("correlacoes") or data.get("acoes_peso"):
+        st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
+        st.markdown("#### 📊 HISTOGRAMA DE VARIAÇÃO % DO DIA")
+        try:
+            bar_data = []
+            
+            # Filtra e adiciona ativos macro das correlações
+            if data.get("correlacoes"):
+                for row in data["correlacoes"]:
+                    fator = row[0]
+                    if "CORR" in str(fator).upper():
+                        continue
+                    var_val = clean_val(row[2])
+                    bar_data.append({"Ativo": fator, "Variação %": var_val})
+            
+            # Adiciona ações de maior peso
+            if data.get("acoes_peso"):
+                for row in data["acoes_peso"]:
+                    fator = row[0]
+                    var_val = clean_val(row[3])
+                    bar_data.append({"Ativo": fator, "Variação %": var_val})
+            
+            df_bar = pd.DataFrame(bar_data)
+            
+            if not df_bar.empty:
+                # Garante arredondamento de 2 casas decimais no dataframe para evitar floats longos
+                df_bar['Variação %'] = df_bar['Variação %'].round(2)
+                
+                import plotly.express as px
+                df_bar['Cor'] = df_bar['Variação %'].apply(lambda x: '#00FFA3' if x >= 0 else '#FF4B4B')
+                
+                fig = px.bar(
+                    df_bar,
+                    x='Variação %',
+                    y='Ativo',
+                    orientation='h',
+                    text='Variação %',
+                    color='Cor',
+                    color_discrete_map="identity"
+                )
+                
+                num_items = len(df_bar)
+                chart_height = max(180, num_items * 28 + 20)
+                
+                fig.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font_family='"Roboto Mono", monospace',
+                    font_color='#E0E0E0',
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    height=chart_height,
+                    xaxis=dict(
+                        showgrid=True, 
+                        gridcolor='#1a1a1a', 
+                        zeroline=True, 
+                        zerolinecolor='#444',
+                        title=None,
+                        ticksuffix="%"
+                    ),
+                    yaxis=dict(
+                        title=None,
+                        autorange="reversed"
+                    ),
+                    showlegend=False
+                )
+                
+                fig.update_traces(
+                    texttemplate='%{text:+.2f}%',
+                    textposition='inside',
+                    insidetextanchor='middle',
+                    marker_line_color='#050505',
+                    marker_line_width=1,
+                    opacity=0.85
+                )
+                
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        except Exception as e:
+            st.error(f"Erro ao gerar histograma de variação: {e}")
 
 @st.fragment(run_every=60)
 def secao_ia_fragment():
@@ -280,16 +429,7 @@ def painel_inferior_rtd():
 
 
 
-    # 5. Correlações e Escada
-    st.markdown("---")
-    st.markdown("#### ⚖️ CORRELAÇÕES RTD | JUROS x DÓLAR")
-    if data.get("correlacoes"):
-        df_corr = pd.DataFrame(data["correlacoes"], columns=["Fator", "Cotação RTD", "Var % / Δ", "Leitura", "Impacto WIN"])
-        def style_corr(row):
-            val = str(row['Var % / Δ'])
-            c = '#FF4B4B' if '-' in val else ('#E0E0E0' if '0' in val else '#00FFA3')
-            return [f'color: {c}'] * 5
-        st.dataframe(df_corr.style.apply(style_corr, axis=1), width='stretch', hide_index=True)
+    # 5. Escada de Níveis
 
     if data.get("escada"):
         st.markdown("""<div style="background:#FF9800; color:#000; padding:5px 15px; font-weight:bold; border-radius:4px 4px 0; font-size:0.8rem; display:flex; justify-content:space-between;">
