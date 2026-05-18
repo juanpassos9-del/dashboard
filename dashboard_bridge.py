@@ -32,13 +32,13 @@ class TerminalBridge:
             logger.critical(f"Falha na inicialização do Supabase: {e}")
             self.supabase = None
         
-        self.gateway = RTDGateway(workbook_name="dashboard_trade_bloomberg_semaforo")
+        self.gateway = RTDGateway(workbook_name="dashboard_trade_bloomberg_semaforo", sheet_name="Dashboard")
         self.file_path = "dados_mercado.json"
-        current = time.time()
-        self.last_global_fetch = current
-        self.last_ai_fetch = current
-        self.last_calendar_fetch = current
-        self.last_report_fetch = current
+        self.last_global_fetch = 0
+        self.last_ai_fetch = 0
+        self.last_calendar_fetch = 0
+        self.last_report_fetch = 0
+        self.last_reconnect_attempt = 0
         
     def sync_to_app_state(self, key: str, value: dict | list):
         """Salva o JSON completo na tabela app_state com retentativa."""
@@ -133,6 +133,15 @@ class TerminalBridge:
                 except Exception:
                     self.gateway.sheet = None
                     
+                # Se não estiver conectado ao Excel, tenta reconectar a cada 10 segundos
+                if not sheet:
+                    if current_time - self.last_reconnect_attempt > 10:
+                        logger.info("Excel offline ou desconectado. Tentando reconectar...")
+                        self.last_reconnect_attempt = current_time
+                        if self.gateway.connect():
+                            sheet = self.gateway.sheet
+                            logger.info("Reconectado ao Excel com sucesso!")
+                    
                 if sheet:
                     try:
                         symbol = sheet.Range("L3").Value
@@ -175,12 +184,6 @@ class TerminalBridge:
             except Exception as e:
                 logger.error(f"Erro no loop principal: {e}")
                 time.sleep(5) # Espera um pouco mais se houver erro crítico
-
-if __name__ == "__main__":
-    bridge = TerminalBridge()
-    bridge.sync_data()
-
-
 
 if __name__ == "__main__":
     bridge = TerminalBridge()
