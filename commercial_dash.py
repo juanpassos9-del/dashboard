@@ -3,7 +3,7 @@ import streamlit.components.v1 as components
 
 import os
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 
 
@@ -15,7 +15,9 @@ st.set_page_config(page_title="Terminal TTS | Inteligência", layout="wide")
 def init_supabase() -> Client:
     try:
         url = st.secrets.get("SUPABASE_URL", os.environ.get("SUPABASE_URL", ""))
-        key = st.secrets.get("SUPABASE_KEY", os.environ.get("SUPABASE_KEY", ""))
+        key = st.secrets.get("SUPABASE_SERVICE_ROLE", os.environ.get("SUPABASE_SERVICE_ROLE", ""))
+        if not key:
+            key = st.secrets.get("SUPABASE_KEY", os.environ.get("SUPABASE_KEY", ""))
         if not url or not key:
             st.error("🔑 Credenciais do Supabase não encontradas. Verifique os segredos.")
             return None
@@ -36,6 +38,29 @@ def fetch_app_state(key: str):
     except Exception as e:
         print(f"[ERROR] Fetch {key}: {e}")
     return None
+
+def fetch_app_state_with_time(key: str):
+    """Busca dados no Supabase e retorna uma tupla (valor, data_atualizacao_formatada_local, dt_utc)."""
+    if not supabase: return None, "Sem conexão", None
+    try:
+        response = supabase.table("app_state").select("value, updated_at").eq("key", key).execute()
+        if response.data and len(response.data) > 0:
+            val = response.data[0]["value"]
+            upd_raw = response.data[0].get("updated_at")
+            if upd_raw:
+                try:
+                    s = upd_raw.replace("Z", "+00:00")
+                    dt_utc = datetime.fromisoformat(s)
+                    tz_br = timezone(timedelta(hours=-3))
+                    dt_local = dt_utc.astimezone(tz_br)
+                    return val, dt_local.strftime("%d/%m/%Y %H:%M:%S"), dt_utc
+                except Exception as ex:
+                    print(f"Erro formatar data {upd_raw}: {ex}")
+                    return val, str(upd_raw), None
+            return val, "---", None
+    except Exception as e:
+        print(f"[ERROR] Fetch {key} with time: {e}")
+    return None, "Erro", None
 
 def save_credentials(creds):
     if not supabase: return
@@ -199,10 +224,11 @@ def painel_topo_rtd():
     color_hex  = '#00FFA3' if (isinstance(change_val, float) and change_val >= 0) else '#FF4B4B'
 
     with c1:
+        last_price_val = clean_val(data.get('last_price', 0))
         st.markdown(f"""
             <div class="main-card">
                 <div class="label-small">Último Preço</div>
-                <div class="price-large">{float(data['last_price']):,.2f}</div>
+                <div class="price-large">{last_price_val:,.2f}</div>
                 <div style="color:{color_hex}; font-weight:bold; margin-top:5px;">{change_str}</div>
             </div>
         """, unsafe_allow_html=True)
@@ -440,7 +466,7 @@ def painel_inferior_rtd():
         html = '<div class="ladder-container" style="margin-top:0; border-top:none;">'
         html += '<div class="ladder-row ladder-header" style="grid-template-columns: 0.8fr 1fr 1.2fr 1.2fr 1fr;"><div>NÍVEL</div><div style="text-align:right;">Δ %</div><div style="text-align:right;">PREÇO</div><div style="text-align:right;">Δ P/ ÚLTIMO</div><div style="text-align:right;">MARCADOR</div></div>'
         
-        last_price = float(data['last_price'])
+        last_price = clean_val(data.get('last_price', 0))
         precos_niveis = [float(row[2]) for row in data["escada"]]
         preco_mais_proximo = min(precos_niveis, key=lambda x: abs(x - last_price))
 
@@ -735,6 +761,145 @@ def sidebar_calendario():
             </div>
         """, unsafe_allow_html=True)
 
+@st.fragment(run_every=300)
+def secao_fluxo_estrangeiro_fragment():
+    """Seção que exibe o Fluxo do Investidor Estrangeiro na B3."""
+    fluxo_data = fetch_app_state("fluxo_estrangeiro_b3")
+    if not fluxo_data or "records" not in fluxo_data:
+        return
+
+    st.markdown("---")
+    st.markdown("#### 🌍 FLUXO ESTRANGEIRO NA B3")
+    st.markdown(f"<span style='color: #666; font-size: 0.75rem; font-family: \"Roboto Mono\", monospace;'>ÚLTIMA ATUALIZAÇÃO: {fluxo_data.get('updated_at', '---')[:10]}</span>", unsafe_allow_html=True)
+    
+    records = fluxo_data["records"][:30] # Últimos 30 dias
+    if not records:
+        return
+        
+    df = pd.DataFrame(records)
+    df = df.sort_values("date") # Ordem cronológica para o gráfico
+    
+    import plotly.graph_objects as go
+    
+    # Cores baseadas no valor (positivo = verde, negativo = vermelho)
+    colors = ['#00FFA3' if val >= 0 else '#FF4B4B' for val in df['foreigners']]
+    
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=df['date'],
+        y=df['foreigners'],
+        marker_color=colors,
+        text=df['foreigners'].apply(lambda x: f"R$ {x/1000:,.1f}M".replace(",", "X").replace(".", ",").replace("X", ".")),
+        textposition='outside',
+        textfont=dict(color='#E0E0E0', size=9)
+    ))
+    
+    fig.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font_family='"Roboto Mono", monospace',
+        font_color='#E0E0E0',
+        margin=dict(l=10, r=10, t=30, b=10),
+        height=350,
+        xaxis=dict(showgrid=False, title=None, tickangle=-45),
+        yaxis=dict(showgrid=True, gridcolor='#1a1a1a', zeroline=True, zerolinecolor='#444', title="R$ Milhares"),
+        showlegend=False
+    )
+    
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+@st.fragment(run_every=300)
+def secao_boletim_focus_fragment():
+    """Seção que exibe as expectativas do Boletim Focus no formato histórico."""
+    focus_data = fetch_app_state("boletim_focus")
+    if not focus_data or "years" not in focus_data:
+        return
+        
+    st.markdown("---")
+    st.markdown("#### 🇧🇷 BOLETIM FOCUS (BCB)")
+    st.markdown(f"<span style='color: #666; font-size: 0.75rem; font-family: \"Roboto Mono\", monospace;'>DATA BASE: {focus_data.get('publish_date', '---')}</span>", unsafe_allow_html=True)
+    
+    years = sorted(list(focus_data["years"].keys()))
+    if not years:
+        return
+        
+    # CSS para a tabela do Focus
+    st.markdown("""
+    <style>
+    .focus-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.75rem;
+        font-family: "Roboto Mono", monospace;
+    }
+    .focus-table th {
+        text-align: right;
+        color: #888;
+        padding: 4px;
+        border-bottom: 1px solid #333;
+        font-weight: normal;
+    }
+    .focus-table th:first-child {
+        text-align: left;
+    }
+    .focus-table td {
+        text-align: right;
+        color: #FFF;
+        padding: 4px;
+        border-bottom: 1px solid #222;
+    }
+    .focus-table td:first-child {
+        text-align: left;
+        color: #AAA;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    cols = st.columns(len(years))
+    
+    for i, year in enumerate(years):
+        with cols[i]:
+            data_year = focus_data["years"][year]
+            st.markdown(f"<div style='text-align:center; padding:5px; background-color:#1a1a1a; border-radius:5px; margin-bottom:5px;'><b style='color:#00FFA3;'>{year}</b></div>", unsafe_allow_html=True)
+            
+            html = "<table class='focus-table'><tr><th>Indicador</th><th>Há 4 sem</th><th>Há 1 sem</th><th>Hoje</th><th></th></tr>"
+            
+            indicadores = [
+                ("IPCA", data_year.get("IPCA", {})),
+                ("PIB", data_year.get("PIB", {})),
+                ("Câmbio", data_year.get("Cambio", {})),
+                ("Selic", data_year.get("Selic", {}))
+            ]
+            
+            for nome, vals in indicadores:
+                if not vals or not isinstance(vals, dict):
+                    html += f"<tr><td>{nome}</td><td>---</td><td>---</td><td>---</td><td></td></tr>"
+                    continue
+                    
+                v4 = vals.get("4_sem")
+                v1 = vals.get("1_sem")
+                v0 = vals.get("hoje")
+                
+                # Formatters
+                def f_val(x):
+                    return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if x is not None else "---"
+                
+                v4_str = f_val(v4)
+                v1_str = f_val(v1)
+                v0_str = f_val(v0)
+                
+                # Setas de tendência
+                seta = ""
+                if v0 is not None and v1 is not None:
+                    if v0 > v1: seta = "<span style='color:#FF4B4B'>▲</span>" # Subiu (Vermelho se IPCA/Selic, mas mantendo simples)
+                    elif v0 < v1: seta = "<span style='color:#00FFA3'>▼</span>" # Caiu
+                    else: seta = "<span style='color:#888'>=</span>"
+                
+                html += f"<tr><td>{nome}</td><td>{v4_str}</td><td>{v1_str}</td><td><b>{v0_str}</b></td><td>{seta}</td></tr>"
+                
+            html += "</table>"
+            st.markdown(html, unsafe_allow_html=True)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PÁGINAS DO DASHBOARD
@@ -745,8 +910,14 @@ def pagina_terminal():
     painel_tickers_topo()   # Indicadores Globais no Topo
     painel_topo_rtd()       # Tempo Real (1s)
     secao_ia_fragment()     # Estático/Lento (60s)
-    secao_market_report_fragment() # Notícias/IA (300s)
-    painel_inferior_rtd()   # Tempo Real (1s)
+    painel_inferior_rtd()   # Tempo Real (1s) - Escada de Níveis
+    secao_boletim_focus_fragment() # Estático/Lento (300s)
+    secao_fluxo_estrangeiro_fragment() # Fluxo B3 (300s)
+
+def pagina_market_report():
+    """Página dedicada ao Market Report Institucional."""
+    painel_tickers_topo()
+    secao_market_report_fragment()
 
 def pagina_graficos():
     """Página com integração TradingView Advanced Chart."""
@@ -929,14 +1100,339 @@ def render_tv_corr(container_id, main_sym, comp_sym, interval, height):
     """(Mantido para compatibilidade se necessário futuramente)"""
     pass
 
+def pagina_painel_controle():
+    import time
+    import json
+    st.markdown("### ⚙️ Central de Controle e Sincronização")
+    st.write("Monitore o status das fontes de dados do seu terminal e force atualizações na nuvem de forma manual.")
 
+    # 1. Busca dados do Supabase
+    val_rtd, time_rtd, dt_rtd = fetch_app_state_with_time("dados_mercado")
+    val_globais, time_globais, dt_globais = fetch_app_state_with_time("mercados_globais")
+    val_ia, time_ia, dt_ia = fetch_app_state_with_time("ai_insight")
+    val_report, time_report, dt_report = fetch_app_state_with_time("market_report")
+    val_cal, time_cal, dt_cal = fetch_app_state_with_time("calendario_economico")
+    val_fluxo, time_fluxo, dt_fluxo = fetch_app_state_with_time("fluxo_estrangeiro_b3")
+    val_focus, time_focus, dt_focus = fetch_app_state_with_time("boletim_focus")
 
+    # Calcula se os dados estão atualizados (B3 RTD - 30 segundos de tolerância)
+    is_rtd_ok = False
+    if dt_rtd:
+        try:
+            diff = (datetime.now(timezone.utc) - dt_rtd).total_seconds()
+            if abs(diff) < 30:
+                is_rtd_ok = True
+        except Exception:
+            pass
 
+    # Status e cor dos badges
+    def get_badge(status_ok, text_ok="🟢 ATUALIZADO", text_err="🔴 DESATUALIZADO / OFFLINE"):
+        if status_ok:
+            return f"<span style='color: #00FFA3; font-weight: bold;'>{text_ok}</span>"
+        else:
+            return f"<span style='color: #FF4B4B; font-weight: bold;'>{text_err}</span>"
+
+    status_rtd = get_badge(is_rtd_ok, "🟢 EM OPERAÇÃO (TEMPO REAL)", "🔴 BRIDGE INDISPONÍVEL / OFFLINE")
+    status_globais = get_badge(time_globais != "---" and "Erro" not in time_globais, "🟢 ATIVO", "🔴 INDISPONÍVEL")
+    status_ia = get_badge(time_ia != "---" and "Erro" not in time_ia, "🟢 ATIVO", "🔴 INDISPONÍVEL")
+    status_report = get_badge(time_report != "---" and "Erro" not in time_report, "🟢 ATIVO", "🔴 INDISPONÍVEL")
+    status_cal = get_badge(time_cal != "---" and "Erro" not in time_cal, "🟢 ATIVO", "🔴 INDISPONÍVEL")
+    status_fluxo = get_badge(time_fluxo != "---" and "Erro" not in time_fluxo, "🟢 ATIVO", "🔴 INDISPONÍVEL")
+    status_focus = get_badge(time_focus != "---" and "Erro" not in time_focus, "🟢 ATIVO", "🔴 INDISPONÍVEL")
+
+    # Exibe Grid de Status
+    st.markdown("""
+        <style>
+        .status-table { width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 25px; }
+        .status-table th, .status-table td { padding: 12px; text-align: left; border-bottom: 1px solid #222; }
+        .status-table th { background-color: #111; color: #FF9800; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; }
+        .status-table td { font-size: 0.85rem; }
+        </style>
+    """, unsafe_allow_html=True)
+
+    html = f"""
+    <table class="status-table">
+        <tr>
+            <th>Fonte de Dados</th>
+            <th>Status do Feed</th>
+            <th>Última Sincronização (Brasília)</th>
+            <th>Tipo</th>
+        </tr>
+        <tr>
+            <td><b>ProfitChart B3 (RTD Local)</b></td>
+            <td>{status_rtd}</td>
+            <td>{time_rtd}</td>
+            <td>Local COM (WIN/WDO)</td>
+        </tr>
+        <tr>
+            <td><b>Mercados Globais (Yahoo Finance)</b></td>
+            <td>{status_globais}</td>
+            <td>{time_globais}</td>
+            <td>Nuvem API (S&P 500, Moedas, Commodities)</td>
+        </tr>
+        <tr>
+            <td><b>IA Analista (Gemini)</b></td>
+            <td>{status_ia}</td>
+            <td>{time_ia}</td>
+            <td>Nuvem LLM</td>
+        </tr>
+        <tr>
+            <td><b>Market Report (Gemini + RSS)</b></td>
+            <td>{status_report}</td>
+            <td>{time_report}</td>
+            <td>Nuvem LLM / RSS Notícias</td>
+        </tr>
+        <tr>
+            <td><b>Calendário Econômico (ForexFactory)</b></td>
+            <td>{status_cal}</td>
+            <td>{time_cal}</td>
+            <td>Nuvem Scraping</td>
+        </tr>
+        <tr>
+            <td><b>Fluxo Estrangeiro (B3 / DDM)</b></td>
+            <td>{status_fluxo}</td>
+            <td>{time_fluxo}</td>
+            <td>Nuvem Scraping</td>
+        </tr>
+        <tr>
+            <td><b>Boletim Focus (BCB)</b></td>
+            <td>{status_focus}</td>
+            <td>{time_focus}</td>
+            <td>API Pública</td>
+        </tr>
+    </table>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+    st.warning("""
+        ⚠️ **Nota sobre o ProfitChart B3 (RTD Local):** As cotações do Mini Índice (WIN), Mini Dólar (WDO) e a Escada de Níveis requerem que a sua plataforma ProfitChart esteja aberta localmente com o script `dashboard_bridge.py` em execução no seu computador. Essa conexão COM local não pode ser atualizada em nuvem sem a bridge física ativa.
+    """)
+
+    st.markdown("### 🔄 Sincronização Manual na Nuvem")
+    st.write("Se o seu computador estiver desligado (sem a bridge rodando) ou você queira forçar a atualização imediata dos mercados globais, IA e notícias, use os botões abaixo:")
+
+    c1, c2, c3 = st.columns(3)
+
+    def run_update_task(name, func, key, success_msg):
+        with st.spinner(f"Atualizando {name}..."):
+            try:
+                result = func()
+                paths_map = {
+                    "mercados_globais": ["mercados_globais.json", "execution/mercados_globais.json"],
+                    "ai_insight": ["ai_insight.json", "execution/ai_insight.json"],
+                    "market_report": ["market_report.json", "execution/market_report.json"],
+                    "calendario_economico": ["calendario_economico.json", "execution/calendario_economico.json"],
+                    "fluxo_estrangeiro_b3": ["fluxo_estrangeiro.json", "execution/fluxo_estrangeiro.json"],
+                    "boletim_focus": ["focus_bcb.json", "execution/focus_bcb.json"]
+                }
+                
+                if key == "mercados_globais":
+                    for p in paths_map[key]:
+                        if os.path.exists(p):
+                            with open(p, "r") as f:
+                                data = json.load(f)
+                                supabase.table("app_state").upsert({
+                                    "key": key,
+                                    "value": data,
+                                    "updated_at": "now()"
+                                }).execute()
+                            break
+                            
+                elif key == "ai_insight":
+                    for p in paths_map[key]:
+                        if os.path.exists(p):
+                            with open(p, "r", encoding="utf-8") as f:
+                                new_insight = json.load(f)
+                                supabase.table("app_state").upsert({
+                                    "key": key,
+                                    "value": new_insight,
+                                    "updated_at": "now()"
+                                }).execute()
+                                
+                                try:
+                                    res = supabase.table("app_state").select("value").eq("key", "ai_insight_history").execute()
+                                    history = res.data[0]["value"] if res.data else []
+                                    if not isinstance(history, list): history = []
+                                    
+                                    history.append({
+                                        "sentiment": new_insight.get("sentiment", "NEUTRO"),
+                                        "updated_at": new_insight.get("updated_at", ""),
+                                        "id": int(time.time())
+                                    })
+                                    history = history[-5:]
+                                    supabase.table("app_state").upsert({
+                                        "key": "ai_insight_history",
+                                        "value": history,
+                                        "updated_at": "now()"
+                                    }).execute()
+                                except Exception as he:
+                                    print(f"Erro histórico: {he}")
+                            break
+                            
+                elif key == "market_report":
+                    for p in paths_map[key]:
+                        if os.path.exists(p):
+                            with open(p, "r", encoding="utf-8") as f:
+                                supabase.table("app_state").upsert({
+                                    "key": key,
+                                    "value": json.load(f),
+                                    "updated_at": "now()"
+                                }).execute()
+                            break
+                            
+                elif key == "calendario_economico":
+                    for p in paths_map[key]:
+                        if os.path.exists(p):
+                            with open(p, "r", encoding="utf-8") as f:
+                                supabase.table("app_state").upsert({
+                                    "key": key,
+                                    "value": json.load(f),
+                                    "updated_at": "now()"
+                                }).execute()
+                            break
+                            
+                elif key == "fluxo_estrangeiro_b3":
+                    for p in paths_map[key]:
+                        if os.path.exists(p):
+                            with open(p, "r", encoding="utf-8") as f:
+                                supabase.table("app_state").upsert({
+                                    "key": key,
+                                    "value": json.load(f),
+                                    "updated_at": "now()"
+                                }).execute()
+                            break
+                            
+                elif key == "boletim_focus":
+                    for p in paths_map[key]:
+                        if os.path.exists(p):
+                            with open(p, "r", encoding="utf-8") as f:
+                                supabase.table("app_state").upsert({
+                                    "key": key,
+                                    "value": json.load(f),
+                                    "updated_at": "now()"
+                                }).execute()
+                            break
+                            
+                st.success(success_msg)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao atualizar {name}: {e}")
+
+    with c1:
+        if st.button("📊 Atualizar Mercados Globais", use_container_width=True, help="Baixa cotações do Yahoo Finance em lote e sincroniza com o banco de dados."):
+            import sys
+            exec_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'execution'))
+            if exec_path not in sys.path: sys.path.append(exec_path)
+            from fetch_global_markets import fetch_global_data
+            run_update_task("Mercados Globais", fetch_global_data, "mercados_globais", "✅ Mercados Globais atualizados com sucesso!")
+
+    with c2:
+        if st.button("🤖 Atualizar IA & Market Report", use_container_width=True, help="Executa a análise macro da IA com Gemini e o Market Report de notícias diário."):
+            import sys
+            exec_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'execution'))
+            if exec_path not in sys.path: sys.path.append(exec_path)
+            from ai_analyst import generate_macro_insight
+            from market_report import generate_market_report
+            
+            with st.spinner("Atualizando IA Analista..."):
+                try:
+                    generate_macro_insight()
+                    paths = ["ai_insight.json", "execution/ai_insight.json"]
+                    for p in paths:
+                        if os.path.exists(p):
+                            with open(p, "r", encoding="utf-8") as f:
+                                new_insight = json.load(f)
+                                supabase.table("app_state").upsert({
+                                    "key": "ai_insight",
+                                    "value": new_insight,
+                                    "updated_at": "now()"
+                                }).execute()
+                                
+                                try:
+                                    res = supabase.table("app_state").select("value").eq("key", "ai_insight_history").execute()
+                                    history = res.data[0]["value"] if res.data else []
+                                    if not isinstance(history, list): history = []
+                                    
+                                    history.append({
+                                        "sentiment": new_insight.get("sentiment", "NEUTRO"),
+                                        "updated_at": new_insight.get("updated_at", ""),
+                                        "id": int(time.time())
+                                    })
+                                    history = history[-5:]
+                                    supabase.table("app_state").upsert({
+                                        "key": "ai_insight_history",
+                                        "value": history,
+                                        "updated_at": "now()"
+                                    }).execute()
+                                except Exception as he:
+                                    print(f"Erro histórico: {he}")
+                            break
+                    st.success("✅ Análise da IA atualizada!")
+                except Exception as e:
+                    st.error(f"Erro na IA Analista: {e}")
+                    
+            with st.spinner("Atualizando Market Report..."):
+                try:
+                    generate_market_report()
+                    paths = ["market_report.json", "execution/market_report.json"]
+                    for p in paths:
+                        if os.path.exists(p):
+                            with open(p, "r", encoding="utf-8") as f:
+                                supabase.table("app_state").upsert({
+                                    "key": "market_report",
+                                    "value": json.load(f),
+                                    "updated_at": "now()"
+                                }).execute()
+                            break
+                    st.success("✅ Market Report atualizado!")
+                except Exception as e:
+                    st.error(f"Erro no Market Report: {e}")
+            st.rerun()
+
+    with c3:
+        if st.button("📅 Atualizar Dados (Calendário, Fluxo, Focus)", use_container_width=True, help="Busca o calendário, fluxo B3 e Focus."):
+            import sys
+            exec_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'execution'))
+            if exec_path not in sys.path: sys.path.append(exec_path)
+            
+            from fetch_calendar import fetch_economic_calendar
+            run_update_task("Calendário Econômico", fetch_economic_calendar, "calendario_economico", "✅ Calendário Econômico atualizado!")
+            
+            from fetch_foreign_flow import fetch_foreign_flow, save_flow_data
+            def fetch_and_save_flow():
+                records = fetch_foreign_flow()
+                if records: save_flow_data(records, "fluxo_estrangeiro.json")
+            run_update_task("Fluxo Estrangeiro", fetch_and_save_flow, "fluxo_estrangeiro_b3", "✅ Fluxo Estrangeiro atualizado!")
+            
+            from fetch_focus import fetch_focus_bcb, save_focus_data
+            def fetch_and_save_focus():
+                data = fetch_focus_bcb()
+                if data: save_focus_data(data, "focus_bcb.json")
+            run_update_task("Boletim Focus", fetch_and_save_focus, "boletim_focus", "✅ Boletim Focus atualizado!")
+
+    st.markdown("---")
+    st.markdown("### ☁️ Configurando Automação 24/7 Gratuita no GitHub")
+    st.write("""
+        Para que o seu site **nunca fique desatualizado** (mesmo com o seu computador desligado), configuramos um fluxo de trabalho automatizado (GitHub Actions) no seu repositório.
+        
+        Esse fluxo roda silenciosamente na nuvem a **cada hora**, buscando cotações globais, notícias e gerando relatórios de IA automaticamente.
+        
+        **Para ativá-lo, você só precisa cadastrar suas credenciais nas configurações do seu repositório no GitHub:**
+        
+        1. Acesse o seu repositório no **GitHub**.
+        2. Vá em **Settings** (Configurações) > **Secrets and variables** > **Actions**.
+        3. Clique em **New repository secret** (Novo segredo) e adicione as seguintes chaves:
+           - Nome: `SUPABASE_URL` | Valor: *Sua URL do Supabase*
+           - Nome: `SUPABASE_KEY` | Valor: *Sua service_role key do Supabase*
+           - Nome: `GEMINI_API_KEY` | Valor: *Sua API Key do Google Gemini*
+        
+        Pronto! Com isso cadastrado, o GitHub atualizará o seu site automaticamente 24 horas por dia, 7 dias por semana, sem que você precise deixar nenhum código rodando no seu computador!
+    """)
 
 # Navegação na Barra Lateral
 with st.sidebar:
     st.markdown("### 🧭 Navegação")
-    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📊 Gráficos Avançados", "⚖️ Painel de Correlação"], label_visibility="collapsed")
+    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📰 Market Report", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "⚙️ Painel de Controle"], label_visibility="collapsed")
     
     st.markdown("---")
     
@@ -949,10 +1445,14 @@ if page == "📉 Terminal de Trading":
     pagina_terminal()
 elif page == "🌎 Terminal Global":
     pagina_terminal_global()
+elif page == "📰 Market Report":
+    pagina_market_report()
 elif page == "📊 Gráficos Avançados":
     pagina_graficos()
 elif page == "⚖️ Painel de Correlação":
     pagina_correlacao()
+elif page == "⚙️ Painel de Controle":
+    pagina_painel_controle()
 
 
 
