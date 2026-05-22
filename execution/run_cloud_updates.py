@@ -12,7 +12,7 @@ from supabase import create_client
 # Carrega chaves
 load_dotenv()
 supabase_url = os.getenv("SUPABASE_URL")
-supabase_key = os.getenv("SUPABASE_KEY")
+supabase_key = os.getenv("SUPABASE_SERVICE_ROLE") or os.getenv("SUPABASE_KEY")
 
 if not supabase_url or not supabase_key:
     print("[!] Chaves do Supabase não encontradas no ambiente.")
@@ -96,7 +96,7 @@ except Exception as e:
 
 # 4. Calendário Econômico
 try:
-    print("\n[4/4] Atualizando Calendário Econômico...")
+    print("\n[4/5] Atualizando Calendário Econômico...")
     from fetch_calendar import fetch_economic_calendar
     fetch_economic_calendar()
     paths = ["calendario_economico.json", "execution/calendario_economico.json"]
@@ -107,5 +107,27 @@ try:
             break
 except Exception as e:
     print(f"[!] Erro em Calendário Econômico: {e}")
+
+# 5. Fluxo Estrangeiro B3
+try:
+    print("\n[5/6] Atualizando Fluxo Estrangeiro B3...")
+    from fetch_foreign_flow import fetch_foreign_flow, save_flow_data
+    records = fetch_foreign_flow()
+    if records:
+        flow_data = save_flow_data(records)
+        sync_to_supabase("fluxo_estrangeiro_b3", flow_data)
+except Exception as e:
+    print(f"[!] Erro em Fluxo Estrangeiro B3: {e}")
+
+# 6. Boletim Focus
+try:
+    print("\n[6/6] Atualizando Boletim Focus (BCB)...")
+    from fetch_focus import fetch_focus_bcb, save_focus_data
+    focus_data = fetch_focus_bcb()
+    if focus_data:
+        data_to_save = save_focus_data(focus_data)
+        sync_to_supabase("boletim_focus", data_to_save)
+except Exception as e:
+    print(f"[!] Erro no Boletim Focus: {e}")
 
 print("\n=== ATUALIZAÇÕES COMPLETADAS COM SUCESSO ===")

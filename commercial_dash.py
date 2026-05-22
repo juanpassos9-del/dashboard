@@ -581,7 +581,7 @@ def pagina_terminal_global():
         "WTI OIL": {"tv": "TVC:USOIL", "yf": "CL=F"},
         "GOLD": {"tv": "TVC:GOLD", "yf": "GC=F"},
         "BITCOIN": {"tv": "BINANCE:BTCUSDT", "yf": "BTC-USD"},
-        "DXY (Dólar Index)": {"tv": "TVC:DXY", "yf": "DX-Y.NYB"},
+        "DXY (Dólar Index)": {"tv": "CAPITALCOM:DXY", "yf": "DX-Y.NYB"},
         "US 10Y (Yield)": {"tv": "TVC:US10Y", "yf": "^TNX"},
         "EWZ (Brazil ETF)": {"tv": "AMEX:EWZ", "yf": "EWZ"},
         "EEM (Emerging Markets)": {"tv": "AMEX:EEM", "yf": "EEM"},
@@ -930,7 +930,7 @@ def pagina_graficos():
         "S&P 500 (Futuro)": "USA500",
         "NASDAQ (Futuro)": "CME_MINI:NQ1!",
         "VIX": "CBOE:VIX",
-        "DXY (Dólar Index)": "TVC:DXY",
+        "DXY (Dólar Index)": "CAPITALCOM:DXY",
         "USDBRL": "FX_IDC:USDBRL",
         "6L (Real CME)": "CME:6L1!",
         "US 10Y (Yield)": "TVC:US10Y",
@@ -1045,9 +1045,10 @@ def pagina_correlacao():
         c_height = st.slider("Altura do Gráfico", 400, 1200, 800, 50)
 
     # Legenda customizada com cores sugeridas para o usuário ajustar no widget
-    st.info("💡 Dica: No gráfico abaixo, você pode clicar em cada ativo na legenda (canto superior esquerdo) para ajustar a cor e a espessura da linha para melhor visibilidade.")
+    st.info("💡 Dica: Nos gráficos abaixo, você pode clicar em cada ativo na legenda (canto superior esquerdo) para ajustar a cor e a espessura da linha para melhor visibilidade.")
 
-    # Widget TradingView com ferramentas de customização habilitadas
+    # Widget 1: Correlação Macro Tradicional
+    st.markdown("#### 📊 Correlação Macro (USA500, Ouro, Petróleo, US10Y, US30Y)")
     tv_html = f"""
     <div class="tradingview-widget-container" style="height: {c_height}px; width: 100%;">
       <div id="tradingview_unified_v2" style="height: 100%; width: 100%;"></div>
@@ -1058,7 +1059,6 @@ def pagina_correlacao():
         "autosize": true,
         "symbol": "USA500",
         "interval": "{interval}",
-
         "timezone": "America/Sao_Paulo",
         "theme": "{theme}",
         "style": "2",
@@ -1068,7 +1068,6 @@ def pagina_correlacao():
         "hide_top_toolbar": false,
         "hide_side_toolbar": true,
         "allow_symbol_change": true,
-
         "save_image": true,
         "details": false,
         "hotlist": false,
@@ -1085,15 +1084,59 @@ def pagina_correlacao():
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "US10Y" }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "OTCB:US30Y" }}, "plots": {{ "Plot": {{ "color": "#00BFFF" }} }} }}
         ]
-
-
-
       }}
       );
       </script>
     </div>
     """
     components.html(tv_html, height=c_height + 20)
+
+    # Widget 2: Comparativo de Moedas vs DXY
+    st.markdown("---")
+    st.markdown("#### 💱 Comparativo de Moedas vs DXY (Escala em Porcentagem)")
+    st.markdown("<p style='color:#888; font-size:0.85rem;'>Gráfico comparando o DXY (base em Branco) com as taxas Spot de Real Brasileiro (BRLUSD - Verde), Euro (EURUSD - Azul Claro) e Iene Japonês (JPYUSD - Vermelho).</p>", unsafe_allow_html=True)
+    
+    tv_html_currencies = f"""
+    <div class="tradingview-widget-container" style="height: {c_height}px; width: 100%;">
+      <div id="tradingview_currencies_v2" style="height: 100%; width: 100%;"></div>
+      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+      <script type="text/javascript">
+      new TradingView.widget(
+      {{
+        "autosize": true,
+        "symbol": "CAPITALCOM:DXY",
+        "interval": "{interval}",
+        "timezone": "America/Sao_Paulo",
+        "theme": "{theme}",
+        "style": "2",
+        "locale": "br",
+        "toolbar_bg": "#f1f3f6",
+        "enable_publishing": false,
+        "hide_top_toolbar": false,
+        "hide_side_toolbar": true,
+        "allow_symbol_change": true,
+        "save_image": true,
+        "details": false,
+        "hotlist": false,
+        "calendar": false,
+        "hide_volume": true,
+        "container_id": "tradingview_currencies_v2",
+        "overrides": {{
+            "mainSeriesProperties.lineStyle.color": "#FFFFFF",
+            "mainSeriesProperties.lineStyle.linewidth": 3,
+            "scalesProperties.scaleMode": 2
+        }},
+        "studies": [
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "FX_IDC:BRLUSD" }}, "plots": {{ "Plot": {{ "color": "#00FFA3" }} }} }},
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "FX:EURUSD" }}, "plots": {{ "Plot": {{ "color": "#00BFFF" }} }} }},
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "FX_IDC:JPYUSD" }}, "plots": {{ "Plot": {{ "color": "#FF4B4B" }} }} }}
+        ]
+      }}
+      );
+      </script>
+    </div>
+    """
+    components.html(tv_html_currencies, height=c_height + 20)
 
 
 def render_tv_corr(container_id, main_sym, comp_sym, interval, height):
@@ -1429,10 +1472,320 @@ def pagina_painel_controle():
         Pronto! Com isso cadastrado, o GitHub atualizará o seu site automaticamente 24 horas por dia, 7 dias por semana, sem que você precise deixar nenhum código rodando no seu computador!
     """)
 
+def pagina_gestao_risco():
+    """Página de Gestão de Risco com análise IA de relatório de performance."""
+    import json, base64, io
+    import plotly.graph_objects as go
+
+    st.markdown("### 🛡️ Gestão de Risco & Performance")
+    st.markdown("<p style='color:#888; font-size:0.9rem;'>Envie seu relatório de performance (tabela Excel/CSV ou print/foto) e receba análise IA, tamanho de posição ideal e feedbacks para evolução.</p>", unsafe_allow_html=True)
+
+    # ── CSS da página ──
+    st.markdown("""
+    <style>
+    .risk-card { background: #111; border: 1px solid #222; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+    .risk-metric { font-size: 2rem; font-weight: bold; color: #FFF; }
+    .risk-label  { font-size: 0.7rem; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+    .risk-badge-g { display:inline-block; background:#002611; color:#00FFA3; border:1px solid #00FFA344; border-radius:6px; padding:4px 12px; font-weight:bold; font-size:0.85rem; }
+    .risk-badge-r { display:inline-block; background:#400000; color:#FF4B4B; border:1px solid #FF4B4B44; border-radius:6px; padding:4px 12px; font-weight:bold; font-size:0.85rem; }
+    .ai-feedback  { background:#0A0A0A; border:1px solid #333; border-left:6px solid #FF9800; padding:20px; border-radius:8px; margin-top:12px; color:#E0E0E0; font-size:0.9rem; line-height:1.7; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # ══════════════════════════════════════════════════
+    # BLOCO 1 — Upload de Relatório
+    # ══════════════════════════════════════════════════
+    st.markdown("#### 📤 Upload do Relatório de Performance")
+    st.markdown("<p style='color:#666; font-size:0.8rem;'>Aceita: Excel (.xlsx), CSV, ou imagem (print/foto do relatório)</p>", unsafe_allow_html=True)
+
+    col_up, col_param = st.columns([1.5, 1])
+
+    with col_up:
+        uploaded_file = st.file_uploader(
+            "Selecione o arquivo",
+            type=["xlsx", "csv", "png", "jpg", "jpeg", "webp"],
+            label_visibility="collapsed",
+            key="risk_upload"
+        )
+
+    with col_param:
+        st.markdown("<div class='risk-label'>Parâmetros de Risco</div>", unsafe_allow_html=True)
+        capital_total = st.number_input("Capital Total (R$)", min_value=1000.0, value=10000.0, step=500.0, format="%.2f", key="risk_capital")
+        risco_por_trade = st.slider("Risco por Trade (%)", 0.5, 5.0, 1.0, 0.25, key="risk_pct", format="%.2f%%")
+        stop_pontos = st.number_input("Stop Loss (pontos)", min_value=1.0, value=50.0, step=5.0, key="risk_stop")
+        valor_por_ponto = st.number_input("Valor por Contrato/Ponto (R$)", min_value=0.1, value=0.20, step=0.05, format="%.2f", key="risk_vpp")
+
+    # ── Cálculo de tamanho de posição (Kelly simplificado + risco fixo) ──
+    risco_valor = capital_total * (risco_por_trade / 100.0)
+    tamanho_pos = risco_valor / (stop_pontos * valor_por_ponto) if (stop_pontos * valor_por_ponto) > 0 else 0
+
+    st.markdown("---")
+    st.markdown("#### 📐 Tamanho de Posição Calculado")
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.markdown(f"<div class='risk-card'><div class='risk-label'>Risco em R$</div><div class='risk-metric'>R$ {risco_valor:,.2f}</div></div>", unsafe_allow_html=True)
+    with m2:
+        st.markdown(f"<div class='risk-card'><div class='risk-label'>Contratos / Lotes</div><div class='risk-metric' style='color:#FF9800;'>{tamanho_pos:.1f}</div></div>", unsafe_allow_html=True)
+    with m3:
+        st.markdown(f"<div class='risk-card'><div class='risk-label'>Stop Loss (R$)</div><div class='risk-metric' style='color:#FF4B4B;'>R$ {(stop_pontos * valor_por_ponto * tamanho_pos):,.2f}</div></div>", unsafe_allow_html=True)
+    with m4:
+        alv_2r = risco_valor * 2
+        st.markdown(f"<div class='risk-card'><div class='risk-label'>Alvo 2:1 (R$)</div><div class='risk-metric' style='color:#00FFA3;'>R$ {alv_2r:,.2f}</div></div>", unsafe_allow_html=True)
+
+    # ══════════════════════════════════════════════════
+    # BLOCO 2 — Processar arquivo e analisar IA
+    # ══════════════════════════════════════════════════
+    if uploaded_file is not None:
+        file_ext = uploaded_file.name.split(".")[-1].lower()
+        df_trades = None
+        img_bytes  = None
+        img_b64    = None
+
+        # Lê CSV / Excel
+        if file_ext in ["csv", "xlsx"]:
+            try:
+                if file_ext == "csv":
+                    df_trades = pd.read_csv(uploaded_file)
+                else:
+                    df_trades = pd.read_excel(uploaded_file)
+                st.success(f"✅ Arquivo '{uploaded_file.name}' carregado — {len(df_trades)} registros encontrados.")
+                with st.expander("📋 Pré-visualização do Relatório", expanded=False):
+                    st.dataframe(df_trades.head(30), use_container_width=True, hide_index=True)
+            except Exception as e:
+                st.error(f"Erro ao ler arquivo: {e}")
+        else:
+            # Imagem
+            img_bytes = uploaded_file.read()
+            img_b64   = base64.b64encode(img_bytes).decode()
+            st.image(img_bytes, caption="Relatório enviado", use_column_width=True)
+
+        # ── Botão Analisar ──
+        st.markdown("")
+        if st.button("🤖 Analisar com IA e Calcular Posição", use_container_width=True, type="primary"):
+            api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+            try:
+                api_key = api_key or st.secrets.get("GOOGLE_API_KEY", st.secrets.get("GEMINI_API_KEY", ""))
+            except Exception:
+                pass
+
+            if not api_key:
+                st.error("🔑 Configure GOOGLE_API_KEY no .env ou nos segredos do Streamlit.")
+            else:
+                import google.generativeai as genai
+                genai.configure(api_key=api_key)
+
+                prompt_base = f"""
+                Você é um Coach de Trading e Gestor de Risco profissional com expertise em:
+                - Análise estatística de performance de traders
+                - Psicologia do trading e controle emocional
+                - Gestão de risco e sizing de posição
+                - Método Wyckoff, VSA e Smart Money Concepts
+
+                PARÂMETROS DO TRADER:
+                - Capital total: R$ {capital_total:,.2f}
+                - Risco por trade configurado: {risco_por_trade:.2f}%
+                - Stop loss: {stop_pontos:.0f} pontos
+                - Valor por ponto/contrato: R$ {valor_por_ponto:.2f}
+                - Tamanho de posição calculado: {tamanho_pos:.1f} contratos
+
+                RELATÓRIO DE PERFORMANCE ENVIADO:
+                {df_trades.to_string() if df_trades is not None else '[Imagem enviada — analise visualmente]'}
+
+                Analise o relatório e forneça:
+
+                1. 📊 DIAGNÓSTICO DE PERFORMANCE
+                (Win rate, fator de lucro, drawdown máximo, relação risco/retorno média)
+
+                2. 📐 TAMANHO DE POSIÇÃO RECOMENDADO
+                (Com base nos dados reais de performance. Justifique se deve aumentar, manter ou reduzir o sizing atual de {tamanho_pos:.1f} contratos)
+
+                3. 🧠 ANÁLISE PSICOLÓGICA
+                (Identifique padrões emocionais: overtrading, revenge trading, FOMO, cortar gains cedo, deixar losses crescer)
+
+                4. 🎯 PLANO DE MELHORIA (TOP 3 AÇÕES)
+                (Ações concretas e mensuráveis para melhorar nos próximos 30 dias)
+
+                5. ⚠️ ALERTAS DE RISCO
+                (Pontos críticos que podem destruir o capital se não corrigidos)
+
+                Seja direto, honesto e cirúrgico. Não seja genérico. Fale como um gestor sênior falaria para um trader júnior.
+                """
+
+                with st.spinner("🧠 IA analisando seu relatório de performance..."):
+                    try:
+                        if img_b64:
+                            model = genai.GenerativeModel("gemini-2.0-flash")
+                            img_part = {"mime_type": f"image/{file_ext if file_ext != 'jpg' else 'jpeg'}", "data": img_b64}
+                            response = model.generate_content([prompt_base, img_part])
+                        else:
+                            model = genai.GenerativeModel("gemini-2.0-flash")
+                            response = model.generate_content(prompt_base)
+
+                        st.session_state["risco_ia_resultado"] = response.text
+                        st.session_state["risco_ia_sizing"]    = tamanho_pos
+                        st.session_state["risco_capital"]      = capital_total
+                    except Exception as e:
+                        st.error(f"Erro na análise IA: {e}")
+
+                # Constrói gráfico de rentabilidade se vier de tabela
+                if df_trades is not None:
+                    result_col = None
+                    for c in df_trades.columns:
+                        if any(k in c.lower() for k in ["resultado", "result", "pnl", "lucro", "profit", "retorno", "gain", "loss"]):
+                            result_col = c
+                            break
+                    if result_col:
+                        try:
+                            df_trades["_r"] = pd.to_numeric(df_trades[result_col].astype(str).str.replace("R$","").str.replace(".","").str.replace(",",".").str.strip(), errors="coerce")
+                            df_trades["_acum"] = df_trades["_r"].cumsum()
+                            st.session_state["risco_df_acum"] = df_trades[["_r","_acum"]].dropna()
+                        except Exception:
+                            pass
+
+        # ── Exibe resultado da IA ──
+        if "risco_ia_resultado" in st.session_state:
+            st.markdown("---")
+            st.markdown("#### 🤖 Análise IA do Relatório de Performance")
+
+            # Sizing recomendado
+            sz = st.session_state.get("risco_ia_sizing", 0)
+            cap = st.session_state.get("risco_capital", capital_total)
+            s1, s2 = st.columns([1, 2])
+            with s1:
+                badge_color = "#FF9800"
+                st.markdown(f"""
+                    <div class='risk-card' style='border-left: 5px solid {badge_color}; text-align:center;'>
+                        <div class='risk-label'>📐 Posição p/ Próximo Trade</div>
+                        <div style='font-size: 3rem; font-weight: bold; color: {badge_color};'>{sz:.1f}</div>
+                        <div style='color:#888; font-size:0.8rem;'>contratos / lotes</div>
+                        <div style='color:#666; font-size:0.75rem; margin-top:8px;'>Risco: R$ {cap*(risco_por_trade/100):,.2f} ({risco_por_trade:.2f}% do capital)</div>
+                    </div>
+                """, unsafe_allow_html=True)
+            with s2:
+                ia_text = st.session_state["risco_ia_resultado"]
+                st.markdown(f"<div class='ai-feedback'>{sanitize_text(ia_text).replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
+
+    # ══════════════════════════════════════════════════
+    # BLOCO 3 — Gráfico de Rentabilidade Acumulada
+    # ══════════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown("#### 📈 Rentabilidade Acumulada")
+
+    tab_graf1, tab_graf2 = st.tabs(["📂 Do Relatório Enviado", "✏️ Entrada Manual"])
+
+    with tab_graf1:
+        if "risco_df_acum" in st.session_state:
+            df_a = st.session_state["risco_df_acum"].reset_index(drop=True)
+            df_a.index += 1
+            _plot_rentabilidade(df_a["_r"].tolist(), df_a["_acum"].tolist())
+        else:
+            st.info("📤 Envie um relatório CSV/Excel com coluna de resultado (PnL) para visualizar o gráfico automaticamente.")
+
+    with tab_graf2:
+        st.markdown("<p style='color:#666; font-size:0.8rem;'>Cole os resultados dos trades separados por vírgula ou um por linha (em R$). Ex: 120, -80, 200, -50</p>", unsafe_allow_html=True)
+        manual_input = st.text_area("Resultados dos trades (R$)", placeholder="120, -80, 200, -50, 300, -100", height=100, key="risk_manual_input")
+        if st.button("📊 Gerar Gráfico Manual", key="risk_manual_btn"):
+            try:
+                raw = manual_input.replace("\n", ",").replace(";", ",")
+                vals = [float(x.strip().replace("R$","").replace(".","").replace(",",".")) for x in raw.split(",") if x.strip()]
+                if vals:
+                    acum = []
+                    soma = 0.0
+                    for v in vals:
+                        soma += v
+                        acum.append(soma)
+                    _plot_rentabilidade(vals, acum)
+                else:
+                    st.warning("Nenhum valor válido encontrado.")
+            except Exception as e:
+                st.error(f"Erro ao processar valores: {e}")
+
+
+def _plot_rentabilidade(resultados: list, acumulado: list):
+    """Plota gráfico premium de rentabilidade acumulada."""
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    n = len(acumulado)
+    trades = list(range(1, n + 1))
+    cores_barras = ["#00FFA3" if r >= 0 else "#FF4B4B" for r in resultados]
+    max_dd = 0.0
+    peak = acumulado[0] if acumulado else 0
+    for v in acumulado:
+        if v > peak: peak = v
+        dd = peak - v
+        if dd > max_dd: max_dd = dd
+
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        row_heights=[0.65, 0.35],
+        vertical_spacing=0.06,
+        subplot_titles=("Curva de Capital Acumulada (R$)", "Resultado por Trade (R$)")
+    )
+
+    # Linha de capital
+    fig.add_trace(go.Scatter(
+        x=trades, y=acumulado, mode="lines+markers",
+        line=dict(color="#FF9800", width=2.5),
+        marker=dict(size=5, color="#FF9800"),
+        fill="tozeroy",
+        fillcolor="rgba(255,152,0,0.08)",
+        name="Capital Acumulado"
+    ), row=1, col=1)
+
+    # Linha de referência zero
+    fig.add_hline(y=0, line_dash="dot", line_color="#444", row=1, col=1)
+
+    # Barras por trade
+    fig.add_trace(go.Bar(
+        x=trades, y=resultados,
+        marker_color=cores_barras,
+        name="Resultado",
+        marker_line_width=0,
+        opacity=0.85
+    ), row=2, col=1)
+
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family='"Roboto Mono", monospace', color="#E0E0E0", size=11),
+        margin=dict(l=10, r=10, t=30, b=10),
+        height=480,
+        showlegend=False,
+        xaxis2=dict(title="Nº do Trade", showgrid=False, color="#888"),
+        yaxis=dict(showgrid=True, gridcolor="#1a1a1a", zeroline=True, zerolinecolor="#444", tickprefix="R$ "),
+        yaxis2=dict(showgrid=True, gridcolor="#1a1a1a", zeroline=True, zerolinecolor="#444", tickprefix="R$ "),
+    )
+
+    # Annotations de resumo
+    ultimo = acumulado[-1] if acumulado else 0
+    wins = sum(1 for r in resultados if r > 0)
+    wr = wins / n * 100 if n else 0
+    color_tot = "#00FFA3" if ultimo >= 0 else "#FF4B4B"
+
+    fig.add_annotation(
+        text=f"Total: R$ {ultimo:+,.2f} | Win Rate: {wr:.0f}% | Max DD: R$ {max_dd:,.2f}",
+        xref="paper", yref="paper", x=0.5, y=1.02,
+        showarrow=False, font=dict(size=11, color=color_tot),
+        bgcolor="rgba(0,0,0,0.5)"
+    )
+
+    import streamlit as _st
+    _st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    # Métricas rápidas
+    c1, c2, c3, c4 = _st.columns(4)
+    c1.metric("Total Trades", n)
+    c2.metric("Win Rate", f"{wr:.1f}%")
+    c3.metric("Resultado Total", f"R$ {ultimo:+,.2f}")
+    c4.metric("Drawdown Máx.", f"R$ {max_dd:,.2f}")
+
+
 # Navegação na Barra Lateral
 with st.sidebar:
     st.markdown("### 🧭 Navegação")
-    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📰 Market Report", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "⚙️ Painel de Controle"], label_visibility="collapsed")
+    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📰 Market Report", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], label_visibility="collapsed")
     
     st.markdown("---")
     
@@ -1451,6 +1804,8 @@ elif page == "📊 Gráficos Avançados":
     pagina_graficos()
 elif page == "⚖️ Painel de Correlação":
     pagina_correlacao()
+elif page == "🛡️ Gestão de Risco":
+    pagina_gestao_risco()
 elif page == "⚙️ Painel de Controle":
     pagina_painel_controle()
 
