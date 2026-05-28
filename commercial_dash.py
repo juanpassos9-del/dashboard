@@ -1490,9 +1490,8 @@ def pagina_terminal_bloomberg():
         if panels:
             st.markdown(f"<div class='bb-quote-grid'>{''.join(panels)}</div>", unsafe_allow_html=True)
 
-    render_quote_grids(global_data)
-
     render_bloomberg_news_feed_fragment()
+    render_quote_grids(global_data)
     return
 
     st.caption("Atualizacao automatica reduzida para 60s para manter a pagina responsiva. Use o filtro para focar nas manchetes relevantes.")
