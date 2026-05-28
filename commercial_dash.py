@@ -40,6 +40,68 @@ def fetch_app_state(key: str):
         print(f"[ERROR] Fetch {key}: {e}")
     return None
 
+@st.cache_data(ttl=60, show_spinner=False)
+def load_bloomberg_news_feed(refresh_nonce: int = 0):
+    """Monta o feed pesado com cache para evitar travamentos no rerender."""
+    del refresh_nonce
+    news_sources = []
+    warnings = []
+    news_list = fetch_app_state("financial_juice_news") or []
+    if news_list:
+        news_sources.append("Financial Juice")
+
+    if not news_list:
+        try:
+            from execution.fetch_financial_juice import fetch_financial_juice_news
+            news_list = fetch_financial_juice_news(limit=40)
+            if news_list:
+                news_sources.append("Financial Juice RSS")
+        except Exception as e:
+            warnings.append(f"Financial Juice indisponivel: {e}")
+            news_list = []
+
+    try:
+        from execution.fetch_gdelt_news import fetch_gdelt_news
+        gdelt_news = fetch_gdelt_news(limit=20, timespan="3h")
+        if gdelt_news:
+            news_list.extend(gdelt_news)
+            news_sources.append("GDELT")
+    except Exception as e:
+        warnings.append(f"GDELT indisponivel: {e}")
+
+    try:
+        from execution.fetch_source_news import fetch_source_news
+        source_news = fetch_source_news(limit=25, timespan="6h")
+        if source_news:
+            news_list.extend(source_news)
+            news_sources.append("Reuters/Bloomberg/CNBC/SCMP")
+    except Exception as e:
+        warnings.append(f"Fontes editoriais indisponiveis: {e}")
+
+    seen_news = set()
+    unique_news = []
+    for item in news_list:
+        key = (item.get("link") or item.get("title_en") or item.get("title_pt") or "").strip().lower()[:160]
+        if not key or key in seen_news:
+            continue
+        seen_news.add(key)
+        unique_news.append(item)
+
+    def news_sort_key(item):
+        try:
+            return float(item.get("timestamp") or 0)
+        except Exception:
+            return 0
+
+    unique_news = sorted(unique_news, key=news_sort_key, reverse=True)
+    try:
+        from execution.fetch_financial_juice import normalize_news_translations
+        unique_news = normalize_news_translations(unique_news, {})
+    except Exception as e:
+        warnings.append(f"Normalizacao de traducoes indisponivel: {e}")
+
+    return unique_news, news_sources, warnings, datetime.now().strftime("%H:%M:%S")
+
 def fetch_app_state_with_time(key: str):
     """Busca dados no Supabase e retorna uma tupla (valor, data_atualizacao_formatada_local, dt_utc)."""
     if not supabase: return None, "Sem conexão", None
@@ -619,9 +681,9 @@ def painel_corpo_global():
                 df.columns = ['Ativo', 'Preço', 'Var %']
                 st.dataframe(df.style.applymap(color_change, subset=['Var %']), hide_index=True, use_container_width=True)
 
-@st.fragment(run_every=10)
+@st.fragment(run_every=60)
 def pagina_terminal_bloomberg():
-    """Página do Terminal Bloomberg de Notícias com atualização automática assíncrona (10s)."""
+    """Pagina do Terminal Bloomberg de noticias com atualizacao leve e cacheada."""
     def esc(value) -> str:
         return html.escape(str(value or ""), quote=True)
 
@@ -733,10 +795,40 @@ def pagina_terminal_bloomberg():
             max-height: calc(100vh - 225px);
             min-height: 420px;
             overflow-y: auto;
-            background: #111820;
-            border: 1px solid #1d2834;
+            background: #090d12;
+            border: 1px solid #263443;
             border-radius: 7px;
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+        }
+
+        .bb-news-toolbar {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+            margin: 8px 0 10px;
+        }
+
+        .bb-news-stat {
+            background: #111820;
+            border: 1px solid #263443;
+            border-radius: 6px;
+            padding: 8px 10px;
+            font-family: "Consolas", monospace;
+        }
+
+        .bb-news-stat span {
+            display: block;
+            color: #8fa0b2;
+            font-size: 0.68rem;
+            text-transform: uppercase;
+        }
+
+        .bb-news-stat strong {
+            display: block;
+            color: #edf2f7;
+            font-size: 1.05rem;
+            line-height: 1.25;
+            margin-top: 2px;
         }
 
         .bb-feed-header {
@@ -766,31 +858,43 @@ def pagina_terminal_bloomberg():
         .bb-news-card {
             position: relative;
             display: grid;
-            grid-template-columns: 34px minmax(0, 1fr) 22px;
-            gap: 8px;
-            padding: 8px 10px 7px 6px;
-            min-height: 54px;
-            background: #202b37;
-            border-bottom: 4px solid #111820;
+            grid-template-columns: 6px 34px minmax(0, 1fr) 22px;
+            gap: 9px;
+            padding: 9px 10px 8px 0;
+            min-height: 64px;
+            background: #18222d;
+            border-bottom: 1px solid #0c1218;
             color: #d8dee7;
             font-family: "Inter", "Segoe UI", Arial, sans-serif;
         }
 
         .bb-news-card.bb-featured {
-            background: #22303d;
-            min-height: 118px;
+            background: #1f3141;
+            min-height: 124px;
+        }
+
+        .bb-news-rail {
+            width: 6px;
+            align-self: stretch;
+            background: #34495e;
         }
 
         .bb-news-card.bb-impact-high {
-            background: #241b1e;
-            border-left: 4px solid #ff3b30;
+            background: #2a181b;
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 0 0 1px rgba(255,59,48,0.18);
         }
 
         .bb-news-card.bb-impact-medium {
-            background: #242118;
-            border-left: 4px solid #ff9900;
+            background: #261f12;
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 0 0 1px rgba(255,153,0,0.14);
+        }
+
+        .bb-news-card.bb-impact-high .bb-news-rail {
+            background: #ff3b30;
+        }
+
+        .bb-news-card.bb-impact-medium .bb-news-rail {
+            background: #ff9900;
         }
 
         .bb-news-card.bb-impact-high .bb-news-title {
@@ -820,10 +924,10 @@ def pagina_terminal_bloomberg():
 
         .bb-news-title {
             color: #edf2f7;
-            font-size: 0.88rem;
+            font-size: 0.95rem;
             font-weight: 700;
-            line-height: 1.25;
-            margin-bottom: 2px;
+            line-height: 1.3;
+            margin-bottom: 3px;
         }
 
         .bb-news-card:not(.bb-featured) .bb-news-title {
@@ -831,10 +935,10 @@ def pagina_terminal_bloomberg():
         }
 
         .bb-news-summary {
-            color: #c2cad5;
-            font-size: 0.86rem;
-            line-height: 1.38;
-            margin-top: 2px;
+            color: #d1d8e0;
+            font-size: 0.88rem;
+            line-height: 1.42;
+            margin-top: 4px;
         }
 
         .bb-news-card:not(.bb-featured) .bb-news-summary {
@@ -848,8 +952,8 @@ def pagina_terminal_bloomberg():
             display: flex;
             flex-wrap: wrap;
             align-items: center;
-            gap: 5px;
-            margin-top: 4px;
+            gap: 6px;
+            margin-top: 6px;
             color: #9aa6b2;
             font-size: 0.76rem;
             line-height: 1.25;
@@ -926,6 +1030,15 @@ def pagina_terminal_bloomberg():
             justify-content: space-between;
             align-items: center;
         }
+
+        @media (max-width: 900px) {
+            .bb-news-toolbar {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .bb-status-footer {
+                display: block;
+            }
+        }
         
         .bb-status-led {
             display: inline-block;
@@ -977,70 +1090,23 @@ def pagina_terminal_bloomberg():
     else:
         st.markdown('<div class="bb-ticker-bar"><span style="color: #666;">Aguardando Ticker...</span></div>', unsafe_allow_html=True)
 
-    filter_term = ""
+    st.caption("Atualizacao automatica reduzida para 60s para manter a pagina responsiva. Use o filtro para focar nas manchetes relevantes.")
+    if st.button("Atualizar feed agora", use_container_width=True, key="bb_refresh_news"):
+        load_bloomberg_news_feed.clear()
+    filter_term = st.text_input(
+        "Filtrar noticias",
+        placeholder="Digite Fed, dolar, petroleo, Brasil...",
+        label_visibility="collapsed",
+        key="bb_news_filter",
+    ).strip()
 
-    # Carrega notícias em tempo real: Supabase/Bridge primeiro, RSS direto como fallback automático.
-    news_sources = []
-    news_list = fetch_app_state("financial_juice_news") or []
-    if news_list:
-        news_sources.append("Financial Juice")
-    if not news_list:
-        try:
-            from execution.fetch_financial_juice import fetch_financial_juice_news
-            news_list = fetch_financial_juice_news(limit=40)
-            if news_list:
-                news_sources.append("Financial Juice RSS")
-        except Exception as e:
-            st.error(f"Erro ao buscar notícias do Financial Juice: {e}")
-            news_list = []
-    if not news_list:
-        st.info("⏳ Aguardando notícias do Financial Juice.")
-        news_list = []
-
-    try:
-        from execution.fetch_gdelt_news import fetch_gdelt_news
-        gdelt_news = fetch_gdelt_news(limit=25, timespan="3h")
-        if gdelt_news:
-            news_list.extend(gdelt_news)
-            news_sources.append("GDELT")
-    except Exception as e:
-        st.warning(f"GDELT indisponÃ­vel no momento: {e}")
-
-    try:
-        from execution.fetch_source_news import fetch_source_news
-        source_news = fetch_source_news(limit=35, timespan="6h")
-        if source_news:
-            news_list.extend(source_news)
-            news_sources.append("Reuters/Bloomberg/CNBC/SCMP")
-    except Exception as e:
-        st.warning(f"Fontes editoriais indisponÃ­veis no momento: {e}")
+    news_list, news_sources, news_warnings, feed_loaded_at = load_bloomberg_news_feed(0)
+    for warning in news_warnings[:2]:
+        st.warning(warning)
 
     if not news_list:
-        st.info("â³ Aguardando notÃ­cias em tempo real.")
+        st.info("Aguardando noticias em tempo real.")
         return
-
-    seen_news = set()
-    unique_news = []
-    for item in news_list:
-        key = (item.get("link") or item.get("title_en") or item.get("title_pt") or "").strip().lower()[:160]
-        if not key or key in seen_news:
-            continue
-        seen_news.add(key)
-        unique_news.append(item)
-    news_list = unique_news
-
-    def news_sort_key(item):
-        try:
-            return float(item.get("timestamp") or 0)
-        except Exception:
-            return 0
-
-    news_list = sorted(news_list, key=news_sort_key, reverse=True)
-    try:
-        from execution.fetch_financial_juice import normalize_news_translations
-        news_list = normalize_news_translations(news_list, {})
-    except Exception:
-        pass
 
     # Filtra notícias se houver termo ativo
     if filter_term:
@@ -1052,6 +1118,19 @@ def pagina_terminal_bloomberg():
     else:
         filtered_news = news_list
 
+    high_count = sum(1 for item in filtered_news if market_impact(item)[0] == "high")
+    medium_count = sum(1 for item in filtered_news if market_impact(item)[0] == "medium")
+    latest_time = esc(filtered_news[0].get("published_str", "--:--")) if filtered_news else "--:--"
+    st.markdown(
+        f'<div class="bb-news-toolbar">'
+        f'<div class="bb-news-stat"><span>Noticias</span><strong>{len(filtered_news)}</strong></div>'
+        f'<div class="bb-news-stat"><span>Alto impacto</span><strong style="color:#ff6b5f;">{high_count}</strong></div>'
+        f'<div class="bb-news-stat"><span>Impacto medio</span><strong style="color:#ffb24a;">{medium_count}</strong></div>'
+        f'<div class="bb-news-stat"><span>Mais recente</span><strong>{latest_time}</strong></div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
     # Notícia ativa
     if "selected_news_id" not in st.session_state:
         st.session_state.selected_news_id = None
@@ -1061,7 +1140,7 @@ def pagina_terminal_bloomberg():
     # 3. Feed de Notícias fixo
     if filtered_news:
         cards = []
-        for idx, item in enumerate(filtered_news):
+        for idx, item in enumerate(filtered_news[:45]):
             is_featured = item.get("id") == st.session_state.selected_news_id or idx == 0
             impact_level, impact_label, impact_reasons = market_impact(item)
             title_pt = esc(item.get("title_pt") or item.get("title_en") or "---")
@@ -1090,6 +1169,7 @@ def pagina_terminal_bloomberg():
             cards.append(
                 f'<div class="bb-news-card{featured_class}{impact_class}">'
                 f'{close_html}'
+                f'<div class="bb-news-rail"></div>'
                 f'<div class="bb-news-icon">{icon_text}</div>'
                 f'<div class="bb-news-content">'
                 f'<div class="bb-news-title">{title_pt}</div>'
@@ -1117,11 +1197,11 @@ def pagina_terminal_bloomberg():
         <div>
             <span class="bb-status-led"></span>
             <span style="color: #00FFA3; font-weight: bold;">LIVE FEED</span>
-            &nbsp;|&nbsp; Atualização da tela a cada 10s
+            &nbsp;|&nbsp; Atualizacao da tela a cada 60s
             &nbsp;|&nbsp; Origem: {esc(" + ".join(news_sources) or "Fontes")}
         </div>
         <div>
-            Último Refresh: {datetime.now().strftime("%H:%M:%S")}
+            Ultimo Refresh: {feed_loaded_at}
             &nbsp;|&nbsp; Fontes: Financial Juice + Reuters + Bloomberg + CNBC + SCMP + GDELT
         </div>
     </div>

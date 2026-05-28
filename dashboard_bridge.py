@@ -128,8 +128,8 @@ class TerminalBridge:
                             self.sync_to_app_state("calendario_economico", json.load(f))
                     self.last_calendar_fetch = current_time
 
-                # 6. Busca notícias do Financial Juice (10 segundos)
-                if current_time - self.last_news_fetch > 10:
+                # 6. Busca noticias do Financial Juice (45 segundos)
+                if current_time - self.last_news_fetch > 45:
                     news_list = self.run_task("Financial Juice News", fetch_financial_juice_news, 50)
                     if news_list:
                         self.sync_to_app_state("financial_juice_news", news_list)
