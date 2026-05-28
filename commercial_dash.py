@@ -749,7 +749,7 @@ def secao_market_report_fragment():
 
     st.markdown("---")
     st.markdown("### Market Report")
-    st.caption("Tres leituras por dia: manha, tarde e noite. Os reports ficam registrados ate virar o dia.")
+    st.caption("Atualizacao automatica: 07:05, 13:05 e 19:05 (Sao Paulo). Os reports ficam registrados ate virar o dia.")
 
     if not reports:
         st.info("Nenhum Market Report registrado para hoje ainda.")

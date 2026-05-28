@@ -60,6 +60,7 @@ Dashboard em Python (Streamlit) que exibe cotações quasi-tempo-real de ativos 
 
 ## Aprendizados
 - **Market Report intradiario:** Gerar no maximo 3 leituras por dia (`manha`, `tarde`, `noite`) e salvar em `market_report_daily.json`/`app_state.market_report_daily`. `market_report` continua apontando para o ultimo report para compatibilidade, mas a tela deve ler o historico do dia para preservar as analises ate virar a data local de Sao Paulo.
+- **Market Report automatico:** Usar o workflow dedicado `.github/workflows/market_report.yml` para gerar/sincronizar automaticamente as leituras as 07:05, 13:05 e 19:05 de Sao Paulo. O workflow chama `execution/run_market_report_update.py`, que sincroniza `market_report` e `market_report_daily` no Supabase.
 - **Feed de noticias ao vivo:** Para baixa latencia, buscar Financial Juice RSS direto no Streamlit/bridge com `fast_mode=True` e `min_network_interval=5`. Nao bloquear manchetes novas em traducao IA; exibir primeiro com traducao heuristica/cache e deixar normalizacoes mais pesadas fora do caminho critico. O Supabase deve ser usado como cache/backup, nao como unica fonte quando ja existir dado antigo.
 - **yfinance rate limit:** Downloads em batch de 20+ tickers causam `YFRateLimitError`. Solução: mini-lotes de 5 tickers, delay 3s entre lotes, `threads=False`, retry individual com backoff 5s.
 - **Windows cp1252:** Console do Windows não suporta emojis Unicode (▲▼🔴🟡🟢). Usar caracteres ASCII no console, emojis só no Streamlit (UTF-8).
