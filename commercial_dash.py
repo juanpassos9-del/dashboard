@@ -98,9 +98,10 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
 
     unique_news = sorted(unique_news, key=news_sort_key, reverse=True)
     try:
-        from execution.fetch_financial_juice import ensure_portuguese_fields
+        from execution.fetch_financial_juice import ensure_brazil_time, ensure_portuguese_fields
         for item in unique_news:
             ensure_portuguese_fields(item)
+            ensure_brazil_time(item)
     except Exception as e:
         warnings.append(f"Normalizacao rapida indisponivel: {e}")
 

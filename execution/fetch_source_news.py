@@ -13,6 +13,7 @@ import json
 import os
 import re
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import feedparser
 import requests
@@ -22,6 +23,7 @@ from execution.fetch_gdelt_news import _parse_gdelt_datetime
 from execution.logger_setup import setup_logger
 
 logger = setup_logger("source_news")
+BR_TZ = ZoneInfo("America/Sao_Paulo")
 
 CACHE_DIR = ".tmp"
 CACHE_FILE = os.path.join(CACHE_DIR, "source_news_cache.json")
@@ -116,7 +118,7 @@ def _fetch_rss_sources(limit_per_source=10):
                 "source": source,
                 "provider": "RSS",
                 "link": link,
-                "published_str": published_dt.strftime("%H:%M"),
+                "published_str": published_dt.astimezone(BR_TZ).strftime("%H:%M"),
                 "timestamp": published_dt.timestamp(),
             })
     return items
@@ -155,7 +157,7 @@ def _fetch_reuters_gdelt(limit=10, timespan="6h"):
             "source": "Reuters",
             "provider": "GDELT",
             "link": link,
-            "published_str": published_dt.strftime("%H:%M"),
+            "published_str": published_dt.astimezone(BR_TZ).strftime("%H:%M"),
             "timestamp": published_dt.timestamp(),
         })
     return items

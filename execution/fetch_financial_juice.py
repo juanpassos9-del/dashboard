@@ -10,7 +10,8 @@ import json
 import warnings
 import feedparser
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 import google.generativeai as genai
 import sys
@@ -30,6 +31,7 @@ load_dotenv()
 # Caminho do cache local
 CACHE_DIR = ".tmp"
 CACHE_FILE = os.path.join(CACHE_DIR, "financial_juice_cache.json")
+BR_TZ = ZoneInfo("America/Sao_Paulo")
 
 # RSS Feed URL do Financial Juice
 RSS_URL = "https://www.financialjuice.com/feed.ashx?xy=rss"
@@ -193,6 +195,17 @@ def ensure_portuguese_fields(item):
     return item
 
 
+def ensure_brazil_time(item):
+    """Garante published_str no fuso de Sao Paulo a partir do timestamp."""
+    try:
+        timestamp = float(item.get("timestamp") or 0)
+        if timestamp > 0:
+            item["published_str"] = datetime.fromtimestamp(timestamp, timezone.utc).astimezone(BR_TZ).strftime("%H:%M:%S")
+    except Exception:
+        pass
+    return item
+
+
 ENGLISH_MARKERS = {
     "the", "and", "are", "is", "was", "were", "will", "with", "from", "after",
     "before", "over", "under", "growth", "rates", "yields", "stocks", "dollar",
@@ -350,8 +363,11 @@ def fetch_financial_juice_news(limit=50, min_network_interval=60, fast_mode=Fals
         if fast_mode:
             for item in news_list:
                 ensure_portuguese_fields(item)
+                ensure_brazil_time(item)
         else:
             news_list = normalize_news_translations(news_list, cache)
+            for item in news_list:
+                ensure_brazil_time(item)
         news_list.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
         return news_list[:limit]
         
@@ -397,8 +413,11 @@ def fetch_financial_juice_news(limit=50, min_network_interval=60, fast_mode=Fals
             if fast_mode:
                 for item in cached_news:
                     ensure_portuguese_fields(item)
+                    ensure_brazil_time(item)
             else:
                 cached_news = normalize_news_translations(cached_news, cache)
+                for item in cached_news:
+                    ensure_brazil_time(item)
             cached_news.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
             return cached_news[:limit]
             
@@ -419,13 +438,13 @@ def fetch_financial_juice_news(limit=50, min_network_interval=60, fast_mode=Fals
             
             pub_date_parsed = entry.get("published_parsed")
             if pub_date_parsed:
-                pub_date = datetime(*pub_date_parsed[:6])
+                pub_date = datetime(*pub_date_parsed[:6], tzinfo=timezone.utc)
             else:
-                pub_date = datetime.now()
+                pub_date = datetime.now(timezone.utc)
                 
             # Ajusta fuso horário se necessário (normalmente GMT para o RSS do Financial Juice)
             # Vamos manter datetime e formatar
-            pub_date_str = pub_date.strftime("%H:%M:%S")
+            pub_date_str = pub_date.astimezone(BR_TZ).strftime("%H:%M:%S")
             
             news_item = {
                 "id": news_id,
@@ -508,8 +527,11 @@ def fetch_financial_juice_news(limit=50, min_network_interval=60, fast_mode=Fals
         if fast_mode:
             for item in news_list:
                 ensure_portuguese_fields(item)
+                ensure_brazil_time(item)
         else:
             news_list = normalize_news_translations(news_list, cache)
+            for item in news_list:
+                ensure_brazil_time(item)
         news_list.sort(key=lambda x: x["timestamp"], reverse=True)
         return news_list
         
@@ -521,8 +543,11 @@ def fetch_financial_juice_news(limit=50, min_network_interval=60, fast_mode=Fals
         if fast_mode:
             for item in cached_news:
                 ensure_portuguese_fields(item)
+                ensure_brazil_time(item)
         else:
             cached_news = normalize_news_translations(cached_news, cache)
+            for item in cached_news:
+                ensure_brazil_time(item)
         cached_news.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
         return cached_news[:limit]
 

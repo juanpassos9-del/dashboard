@@ -9,6 +9,7 @@ import json
 import os
 import re
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -16,6 +17,7 @@ from execution.fetch_financial_juice import normalize_news_translations
 from execution.logger_setup import setup_logger
 
 logger = setup_logger("gdelt_news")
+BR_TZ = ZoneInfo("America/Sao_Paulo")
 
 CACHE_DIR = ".tmp"
 CACHE_FILE = os.path.join(CACHE_DIR, "gdelt_news_cache.json")
@@ -119,7 +121,7 @@ def fetch_gdelt_news(limit=30, timespan="3h"):
             "source": domain,
             "provider": "GDELT",
             "link": link,
-            "published_str": published_dt.strftime("%H:%M"),
+            "published_str": published_dt.astimezone(BR_TZ).strftime("%H:%M"),
             "timestamp": published_dt.timestamp(),
         }
         news.append(item)
