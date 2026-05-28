@@ -197,19 +197,6 @@ def render_bloomberg_news_feed_fragment():
     else:
         filtered_news = news_list
 
-    high_count = sum(1 for item in filtered_news if market_impact(item)[0] == "high")
-    medium_count = sum(1 for item in filtered_news if market_impact(item)[0] == "medium")
-    latest_time = esc(filtered_news[0].get("published_str", "--:--")) if filtered_news else "--:--"
-    st.markdown(
-        f'<div class="bb-news-toolbar">'
-        f'<div class="bb-news-stat"><span>Noticias</span><strong>{len(filtered_news)}</strong></div>'
-        f'<div class="bb-news-stat"><span>Alto impacto</span><strong style="color:#ff6b5f;">{high_count}</strong></div>'
-        f'<div class="bb-news-stat"><span>Impacto medio</span><strong style="color:#ffb24a;">{medium_count}</strong></div>'
-        f'<div class="bb-news-stat"><span>Refresh feed</span><strong>{feed_loaded_at}</strong></div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
     if "selected_news_id" not in st.session_state:
         st.session_state.selected_news_id = None
     if not st.session_state.selected_news_id and filtered_news:
@@ -1128,36 +1115,6 @@ def pagina_terminal_bloomberg():
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
         }
 
-        .bb-news-toolbar {
-            display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-            gap: 8px;
-            margin: 8px 0 10px;
-        }
-
-        .bb-news-stat {
-            background: #111820;
-            border: 1px solid #263443;
-            border-radius: 6px;
-            padding: 8px 10px;
-            font-family: "Consolas", monospace;
-        }
-
-        .bb-news-stat span {
-            display: block;
-            color: #8fa0b2;
-            font-size: 0.68rem;
-            text-transform: uppercase;
-        }
-
-        .bb-news-stat strong {
-            display: block;
-            color: #edf2f7;
-            font-size: 1.05rem;
-            line-height: 1.25;
-            margin-top: 2px;
-        }
-
         .bb-feed-header {
             position: sticky;
             top: 0;
@@ -1362,9 +1319,6 @@ def pagina_terminal_bloomberg():
             .bb-quote-grid {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
                 gap: 18px;
-            }
-            .bb-news-toolbar {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
             }
             .bb-status-footer {
                 display: block;
