@@ -50,15 +50,18 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
     if news_list:
         news_sources.append("Financial Juice")
 
-    if not news_list:
-        try:
-            from execution.fetch_financial_juice import fetch_financial_juice_news
-            news_list = fetch_financial_juice_news(limit=40)
-            if news_list:
-                news_sources.append("Financial Juice RSS")
-        except Exception as e:
-            warnings.append(f"Financial Juice indisponivel: {e}")
-            news_list = []
+    try:
+        from execution.fetch_financial_juice import fetch_financial_juice_news
+        live_news = fetch_financial_juice_news(
+            limit=40,
+            min_network_interval=5,
+            fast_mode=True,
+        )
+        if live_news:
+            news_list.extend(live_news)
+            news_sources.append("Financial Juice RSS direto")
+    except Exception as e:
+        warnings.append(f"Financial Juice direto indisponivel: {e}")
 
     try:
         from execution.fetch_gdelt_news import fetch_gdelt_news
@@ -95,10 +98,11 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
 
     unique_news = sorted(unique_news, key=news_sort_key, reverse=True)
     try:
-        from execution.fetch_financial_juice import normalize_news_translations
-        unique_news = normalize_news_translations(unique_news, {})
+        from execution.fetch_financial_juice import ensure_portuguese_fields
+        for item in unique_news:
+            ensure_portuguese_fields(item)
     except Exception as e:
-        warnings.append(f"Normalizacao de traducoes indisponivel: {e}")
+        warnings.append(f"Normalizacao rapida indisponivel: {e}")
 
     return unique_news, news_sources, warnings, datetime.now().strftime("%H:%M:%S")
 

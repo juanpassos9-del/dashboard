@@ -130,7 +130,7 @@ class TerminalBridge:
 
                 # 6. Busca noticias do Financial Juice (5 segundos; a fonte possui throttle interno)
                 if current_time - self.last_news_fetch > 5:
-                    news_list = self.run_task("Financial Juice News", fetch_financial_juice_news, 50)
+                    news_list = self.run_task("Financial Juice News", fetch_financial_juice_news, 50, 5, True)
                     if news_list:
                         self.sync_to_app_state("financial_juice_news", news_list)
                     self.last_news_fetch = current_time

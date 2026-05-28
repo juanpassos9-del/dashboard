@@ -335,19 +335,23 @@ def translate_batch_with_gemini(headlines):
         return translate_batch_fallback(headlines)
 
 
-def fetch_financial_juice_news(limit=50):
+def fetch_financial_juice_news(limit=50, min_network_interval=60, fast_mode=False):
     """Busca as notícias do Financial Juice, traduz os novos registros e os retorna com network throttle."""
     cache = load_cache()
     now = datetime.now().timestamp()
     last_fetch = cache.get("last_network_fetch", 0)
     
     # Se o último fetch de rede foi há menos de 60 segundos, usa o cache local para evitar 429
-    if now - last_fetch < 60:
+    if now - last_fetch < min_network_interval:
         logger.info("Mecanismo de throttling ativo. Carregando noticias do cache local para evitar erro 429.")
         news_list = [v for k, v in cache.items() if k != "last_network_fetch"]
         # Filtra dicionários válidos (em caso de lixo no cache)
         news_list = [n for n in news_list if isinstance(n, dict) and "timestamp" in n]
-        news_list = normalize_news_translations(news_list, cache)
+        if fast_mode:
+            for item in news_list:
+                ensure_portuguese_fields(item)
+        else:
+            news_list = normalize_news_translations(news_list, cache)
         news_list.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
         return news_list[:limit]
         
@@ -362,7 +366,7 @@ def fetch_financial_juice_news(limit=50):
         feed = None
         network_success = False
         try:
-            res = requests.get(RSS_URL, headers=headers, timeout=10)
+            res = requests.get(RSS_URL, headers=headers, timeout=5 if fast_mode else 10)
             if res.status_code == 200:
                 feed = feedparser.parse(res.content)
                 logger.info(f"Feed RSS baixado via requests com sucesso. Status: {res.status_code}")
@@ -390,7 +394,11 @@ def fetch_financial_juice_news(limit=50):
             # Se falhar o RSS, retornamos o que temos no cache ordenado por tempo
             cached_news = [v for k, v in cache.items() if k != "last_network_fetch"]
             cached_news = [n for n in cached_news if isinstance(n, dict) and "timestamp" in n]
-            cached_news = normalize_news_translations(cached_news, cache)
+            if fast_mode:
+                for item in cached_news:
+                    ensure_portuguese_fields(item)
+            else:
+                cached_news = normalize_news_translations(cached_news, cache)
             cached_news.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
             return cached_news[:limit]
             
@@ -450,10 +458,11 @@ def fetch_financial_juice_news(limit=50):
             # Divide em lotes de no máximo 15 para não estourar tokens do modelo
             batch_size = 15
             translations = {}
-            for i in range(0, len(untranslated_headlines), batch_size):
-                batch = untranslated_headlines[i:i+batch_size]
-                batch_translations = translate_batch_with_gemini(batch)
-                translations.update(batch_translations)
+            if not fast_mode:
+                for i in range(0, len(untranslated_headlines), batch_size):
+                    batch = untranslated_headlines[i:i+batch_size]
+                    batch_translations = translate_batch_with_gemini(batch)
+                    translations.update(batch_translations)
                 
             # Salva no cache
             for item in news_list:
@@ -496,7 +505,11 @@ def fetch_financial_juice_news(limit=50):
         # Ordena por timestamp de publicação decrescente
             save_cache(cache)
 
-        news_list = normalize_news_translations(news_list, cache)
+        if fast_mode:
+            for item in news_list:
+                ensure_portuguese_fields(item)
+        else:
+            news_list = normalize_news_translations(news_list, cache)
         news_list.sort(key=lambda x: x["timestamp"], reverse=True)
         return news_list
         
@@ -505,7 +518,11 @@ def fetch_financial_juice_news(limit=50):
         # Retorna o cache local como fallback de emergência
         cached_news = [v for k, v in cache.items() if k != "last_network_fetch"]
         cached_news = [n for n in cached_news if isinstance(n, dict) and "timestamp" in n]
-        cached_news = normalize_news_translations(cached_news, cache)
+        if fast_mode:
+            for item in cached_news:
+                ensure_portuguese_fields(item)
+        else:
+            cached_news = normalize_news_translations(cached_news, cache)
         cached_news.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
         return cached_news[:limit]
 

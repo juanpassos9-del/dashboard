@@ -59,6 +59,7 @@ Dashboard em Python (Streamlit) que exibe cotações quasi-tempo-real de ativos 
 - **Calendário vazio:** exibir "Sem eventos hoje"
 
 ## Aprendizados
+- **Feed de noticias ao vivo:** Para baixa latencia, buscar Financial Juice RSS direto no Streamlit/bridge com `fast_mode=True` e `min_network_interval=5`. Nao bloquear manchetes novas em traducao IA; exibir primeiro com traducao heuristica/cache e deixar normalizacoes mais pesadas fora do caminho critico. O Supabase deve ser usado como cache/backup, nao como unica fonte quando ja existir dado antigo.
 - **yfinance rate limit:** Downloads em batch de 20+ tickers causam `YFRateLimitError`. Solução: mini-lotes de 5 tickers, delay 3s entre lotes, `threads=False`, retry individual com backoff 5s.
 - **Windows cp1252:** Console do Windows não suporta emojis Unicode (▲▼🔴🟡🟢). Usar caracteres ASCII no console, emojis só no Streamlit (UTF-8).
 - **DI Futuro B3:** Contratos DI1F26/DI1F27 não estão disponíveis no yfinance. Precisa de scraping direto da B3 ou API especializada.
