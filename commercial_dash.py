@@ -720,24 +720,6 @@ def secao_ia_fragment():
 
 @st.fragment(run_every=300)
 def secao_market_report_fragment():
-    """Seção de Relatório de Mercado (Market Report) baseada em notícias."""
-    report_data = fetch_app_state("market_report")
-    if report_data:
-        st.markdown("---")
-        st.markdown(f"""
-            <div style="background: #0A0A0A; border: 1px solid #1a1a1a; border-top: 4px solid #FF9800; padding: 25px; border-radius: 8px; margin: 20px 0;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h3 style="margin: 0; color: #FF9800; font-family: 'Inter', sans-serif;">📰 MARKET REPORT</h3>
-                    <span style="color: #555; font-size: 0.75rem; font-family: 'Roboto Mono', monospace;">ÚLTIMA ATUALIZAÇÃO: {report_data.get('updated_at', '---')}</span>
-                </div>
-                <div style="color: #CCC; font-size: 0.9rem; line-height: 1.6; font-family: 'Inter', sans-serif;">
-                    {sanitize_text(report_data.get('report', '')).replace(chr(10), '<br>')}
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-
-@st.fragment(run_every=300)
-def secao_market_report_fragment():
     """Renderiza o Market Report com os tres registros do dia."""
     daily_data = fetch_app_state("market_report_daily")
     latest_report = fetch_app_state("market_report")
@@ -750,6 +732,45 @@ def secao_market_report_fragment():
     st.markdown("---")
     st.markdown("### Market Report")
     st.caption("Atualizacao automatica: 07:05, 13:05 e 19:05 (Sao Paulo). Os reports ficam registrados ate virar o dia.")
+
+    if st.button("Atualizar analise agora", type="primary", use_container_width=True, key="market_report_refresh_now"):
+        if not supabase:
+            st.error("Supabase indisponivel para salvar a analise.")
+        else:
+            with st.spinner("Gerando nova analise do Market Report..."):
+                try:
+                    import json as _json
+                    from execution.market_report import generate_market_report
+
+                    try:
+                        for secret_key in ("GOOGLE_API_KEY", "GEMINI_API_KEY"):
+                            secret_value = st.secrets.get(secret_key, "")
+                            if secret_value:
+                                os.environ[secret_key] = secret_value
+                    except Exception:
+                        pass
+
+                    generated = generate_market_report(force=True)
+                    if not generated:
+                        st.warning("Nao foi possivel gerar uma nova analise agora.")
+                    else:
+                        for key, paths in {
+                            "market_report": ["market_report.json", "execution/market_report.json"],
+                            "market_report_daily": ["market_report_daily.json", "execution/market_report_daily.json"],
+                        }.items():
+                            for path in paths:
+                                if os.path.exists(path):
+                                    with open(path, "r", encoding="utf-8") as f:
+                                        supabase.table("app_state").upsert({
+                                            "key": key,
+                                            "value": _json.load(f),
+                                            "updated_at": "now()",
+                                        }).execute()
+                                    break
+                        st.success("Analise atualizada.")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao atualizar Market Report: {e}")
 
     if not reports:
         st.info("Nenhum Market Report registrado para hoje ainda.")
