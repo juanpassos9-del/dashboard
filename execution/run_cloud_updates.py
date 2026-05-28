@@ -91,6 +91,12 @@ try:
             with open(p, "r", encoding="utf-8") as f:
                 sync_to_supabase("market_report", json.load(f))
             break
+    daily_paths = ["market_report_daily.json", "execution/market_report_daily.json"]
+    for p in daily_paths:
+        if os.path.exists(p):
+            with open(p, "r", encoding="utf-8") as f:
+                sync_to_supabase("market_report_daily", json.load(f))
+            break
 except Exception as e:
     print(f"[!] Erro em Market Report: {e}")
 

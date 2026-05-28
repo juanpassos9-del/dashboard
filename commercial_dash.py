@@ -736,6 +736,54 @@ def secao_market_report_fragment():
             </div>
         """, unsafe_allow_html=True)
 
+@st.fragment(run_every=300)
+def secao_market_report_fragment():
+    """Renderiza o Market Report com os tres registros do dia."""
+    daily_data = fetch_app_state("market_report_daily")
+    latest_report = fetch_app_state("market_report")
+    reports = []
+    if isinstance(daily_data, dict):
+        reports = daily_data.get("reports") or []
+    if not reports and latest_report:
+        reports = [latest_report]
+
+    st.markdown("---")
+    st.markdown("### Market Report")
+    st.caption("Tres leituras por dia: manha, tarde e noite. Os reports ficam registrados ate virar o dia.")
+
+    if not reports:
+        st.info("Nenhum Market Report registrado para hoje ainda.")
+        return
+
+    slot_order = {"manha": 1, "tarde": 2, "noite": 3}
+    reports = sorted(reports, key=lambda item: slot_order.get(item.get("slot"), 99))
+    latest = reports[-1]
+
+    st.markdown(f"""
+        <div style="background: #0A0A0A; border: 1px solid #1a1a1a; border-top: 4px solid #FF9800; padding: 22px; border-radius: 8px; margin: 15px 0;">
+            <div style="display: flex; justify-content: space-between; gap: 15px; align-items: center; margin-bottom: 12px;">
+                <h3 style="margin: 0; color: #FF9800; font-family: 'Inter', sans-serif;">ULTIMO REPORT: {sanitize_text(latest.get('slot_label', 'Market Report')).upper()}</h3>
+                <span style="color: #777; font-size: 0.75rem; font-family: 'Roboto Mono', monospace;">{latest.get('updated_at', '---')}</span>
+            </div>
+            <div style="color: #CCC; font-size: 0.9rem; line-height: 1.6; font-family: 'Inter', sans-serif;">
+                {sanitize_text(latest.get('report', '')).replace(chr(10), '<br>')}
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    tab_labels = [
+        f"{report.get('slot_label', report.get('slot', 'Report'))} - {report.get('updated_at', '---')[-8:-3]}"
+        for report in reports
+    ]
+    tabs = st.tabs(tab_labels)
+    for tab, report in zip(tabs, reports):
+        with tab:
+            st.markdown(
+                f"**Janela:** `{report.get('slot_window', '---')}`  "
+                f"**Atualizado:** `{report.get('updated_at', '---')}`"
+            )
+            st.markdown(sanitize_text(report.get("report", "")))
+
 
 @st.fragment(run_every=1)
 def painel_inferior_rtd():
@@ -2237,13 +2285,23 @@ def pagina_painel_controle():
                     
             with st.spinner("Atualizando Market Report..."):
                 try:
-                    generate_market_report()
+                    generate_market_report(force=True)
                     paths = ["market_report.json", "execution/market_report.json"]
                     for p in paths:
                         if os.path.exists(p):
                             with open(p, "r", encoding="utf-8") as f:
                                 supabase.table("app_state").upsert({
                                     "key": "market_report",
+                                    "value": json.load(f),
+                                    "updated_at": "now()"
+                                }).execute()
+                            break
+                    daily_paths = ["market_report_daily.json", "execution/market_report_daily.json"]
+                    for p in daily_paths:
+                        if os.path.exists(p):
+                            with open(p, "r", encoding="utf-8") as f:
+                                supabase.table("app_state").upsert({
+                                    "key": "market_report_daily",
                                     "value": json.load(f),
                                     "updated_at": "now()"
                                 }).execute()

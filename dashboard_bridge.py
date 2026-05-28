@@ -118,6 +118,9 @@ class TerminalBridge:
                     if os.path.exists("market_report.json"):
                         with open("market_report.json", "r", encoding="utf-8") as f:
                             self.sync_to_app_state("market_report", json.load(f))
+                    if os.path.exists("market_report_daily.json"):
+                        with open("market_report_daily.json", "r", encoding="utf-8") as f:
+                            self.sync_to_app_state("market_report_daily", json.load(f))
                     self.last_report_fetch = current_time
 
                 # 4. Busca Calendário (1 hora)
