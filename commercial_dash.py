@@ -1394,37 +1394,7 @@ def pagina_terminal_bloomberg():
     </style>
     """, unsafe_allow_html=True)
 
-    # 1. Ticker de Ativos Globais no Topo do Terminal
-    st.markdown('<div style="text-transform: uppercase; font-size: 0.7rem; color: #888; font-family: \'Consolas\', monospace; margin-bottom: 2px; font-weight: bold;">📺 Bloomberg Global Ticker (Supabase Real-Time)</div>', unsafe_allow_html=True)
-    
     global_data = fetch_app_state("mercados_globais")
-    if global_data:
-        ticker_items = []
-        try:
-            categories = global_data.get("categories", global_data)
-            for cat_assets in categories.values():
-                if not isinstance(cat_assets, list): continue
-                for asset in cat_assets:
-                    name = asset.get('name', '---').split(" ")[0] # Abrevia
-                    price = asset.get('price', 0)
-                    change = asset.get('change', 0)
-                    arrow = "▲" if change >= 0 else "▼"
-                    sign = "+" if change >= 0 else ""
-                    color_class = "bb-ticker-up" if change >= 0 else "bb-ticker-down"
-                    price_fmt = f"{price:.4f}" if price < 10 else f"{price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-                    
-                    ticker_items.append(
-                        f'<span class="bb-ticker-item">'
-                        f'<span style="color: #888;">{esc(name)}</span> '
-                        f'<span style="color: #FFF; font-weight: bold;">{price_fmt}</span> '
-                        f'<span class="{color_class}">{arrow} {sign}{change:.2f}%</span>'
-                        f'</span>'
-                    )
-            st.markdown(f'<div class="bb-ticker-bar">{"".join(ticker_items)}</div>', unsafe_allow_html=True)
-        except Exception as e:
-            st.markdown('<div class="bb-ticker-bar"><span style="color: #666;">Erro ao carregar Ticker em tempo real</span></div>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="bb-ticker-bar"><span style="color: #666;">Aguardando Ticker...</span></div>', unsafe_allow_html=True)
 
     def render_quote_grids(data):
         if not data:
