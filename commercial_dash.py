@@ -1036,6 +1036,84 @@ def pagina_terminal_bloomberg():
             color: #FF4B4B !important;
             font-weight: bold;
         }
+
+        .bb-quote-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 26px 16px;
+            margin: 14px 0 18px;
+        }
+
+        .bb-quote-panel {
+            min-width: 0;
+        }
+
+        .bb-quote-title {
+            color: #f4f7fb;
+            font-family: "Inter", "Segoe UI", Arial, sans-serif;
+            font-size: 1.02rem;
+            font-weight: 900;
+            letter-spacing: 0;
+            margin: 0 0 10px;
+            text-transform: uppercase;
+        }
+
+        .bb-quote-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            overflow: hidden;
+            border: 1px solid #26303c;
+            border-radius: 7px;
+            background: #0b1016;
+            font-family: "Roboto Mono", "Consolas", monospace;
+            font-size: 0.78rem;
+        }
+
+        .bb-quote-table th {
+            background: #1a1f27;
+            color: #aab6c5;
+            font-weight: 500;
+            text-align: left;
+            padding: 9px 8px;
+            border-right: 1px solid #303846;
+            border-bottom: 1px solid #303846;
+        }
+
+        .bb-quote-table th:last-child,
+        .bb-quote-table td:last-child {
+            border-right: 0;
+            text-align: right;
+        }
+
+        .bb-quote-table td {
+            color: #f3f7fb;
+            padding: 8px;
+            border-right: 1px solid #26303c;
+            border-bottom: 1px solid #202833;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .bb-quote-table tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .bb-quote-table td:nth-child(2) {
+            text-align: right;
+        }
+
+        .bb-quote-table .quote-up {
+            color: #00ffa3;
+        }
+
+        .bb-quote-table .quote-down {
+            color: #ff4b4b;
+        }
+
+        .bb-quote-table .quote-flat {
+            color: #cbd5e1;
+        }
         
         .bb-news-feed {
             position: sticky;
@@ -1280,6 +1358,10 @@ def pagina_terminal_bloomberg():
         }
 
         @media (max-width: 900px) {
+            .bb-quote-grid {
+                grid-template-columns: 1fr;
+                gap: 18px;
+            }
             .bb-news-toolbar {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
@@ -1337,6 +1419,72 @@ def pagina_terminal_bloomberg():
             st.markdown('<div class="bb-ticker-bar"><span style="color: #666;">Erro ao carregar Ticker em tempo real</span></div>', unsafe_allow_html=True)
     else:
         st.markdown('<div class="bb-ticker-bar"><span style="color: #666;">Aguardando Ticker...</span></div>', unsafe_allow_html=True)
+
+    def render_quote_grids(data):
+        if not data:
+            st.info("Aguardando grades de cotacoes globais.")
+            return
+
+        categories = data.get("categories", data)
+        preferred_order = [
+            "📊 ÍNDICES",
+            "💱 MOEDAS / FOREX",
+            "🇺🇸 ETFs SETORIAIS",
+            "🌏 EMERGENTES & BRASIL",
+            "🇺🇸 TREASURIES (YIELDS)",
+            "🛢️ COMMODITIES & CRIPTO",
+        ]
+
+        def find_category(name):
+            if name in categories:
+                return categories.get(name)
+            normalized = name.split(" ", 1)[-1].lower()
+            for key, value in categories.items():
+                if str(key).split(" ", 1)[-1].lower() == normalized:
+                    return value
+            return None
+
+        def fmt_num(value):
+            try:
+                return f"{float(value):.6f}"
+            except Exception:
+                return "---"
+
+        panels = []
+        for category_name in preferred_order:
+            assets = find_category(category_name)
+            if not isinstance(assets, list) or not assets:
+                continue
+
+            rows = []
+            for asset in assets:
+                name = esc(asset.get("name", "---"))
+                price = fmt_num(asset.get("price"))
+                try:
+                    change_value = float(asset.get("change", 0))
+                    change = f"{change_value:.6f}"
+                    change_class = "quote-up" if change_value > 0 else "quote-down" if change_value < 0 else "quote-flat"
+                except Exception:
+                    change = "---"
+                    change_class = "quote-flat"
+                rows.append(
+                    f"<tr><td>{name}</td><td>{price}</td><td class='{change_class}'>{change}</td></tr>"
+                )
+
+            panels.append(
+                f"<section class='bb-quote-panel'>"
+                f"<h3 class='bb-quote-title'>{esc(category_name)}</h3>"
+                f"<table class='bb-quote-table'>"
+                f"<thead><tr><th>Ativo</th><th>Preço</th><th>Var %</th></tr></thead>"
+                f"<tbody>{''.join(rows)}</tbody>"
+                f"</table>"
+                f"</section>"
+            )
+
+        if panels:
+            st.markdown(f"<div class='bb-quote-grid'>{''.join(panels)}</div>", unsafe_allow_html=True)
+
+    render_quote_grids(global_data)
 
     render_bloomberg_news_feed_fragment()
     return
