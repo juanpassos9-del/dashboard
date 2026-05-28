@@ -9,6 +9,7 @@ from execution.ai_analyst import generate_macro_insight
 from execution.fetch_calendar import fetch_economic_calendar
 from execution.market_report import generate_market_report
 from execution.logger_setup import setup_logger
+from execution.fetch_financial_juice import fetch_financial_juice_news
 
 # Configura Logger
 logger = setup_logger("TerminalBridge")
@@ -39,6 +40,7 @@ class TerminalBridge:
         self.last_calendar_fetch = 0
         self.last_report_fetch = 0
         self.last_reconnect_attempt = 0
+        self.last_news_fetch = 0
         
     def sync_to_app_state(self, key: str, value: dict | list):
         """Salva o JSON completo na tabela app_state com retentativa."""
@@ -125,6 +127,13 @@ class TerminalBridge:
                         with open("calendario_economico.json", "r", encoding="utf-8") as f:
                             self.sync_to_app_state("calendario_economico", json.load(f))
                     self.last_calendar_fetch = current_time
+
+                # 6. Busca notícias do Financial Juice (10 segundos)
+                if current_time - self.last_news_fetch > 10:
+                    news_list = self.run_task("Financial Juice News", fetch_financial_juice_news, 50)
+                    if news_list:
+                        self.sync_to_app_state("financial_juice_news", news_list)
+                    self.last_news_fetch = current_time
 
                 # 5. Dados RTD (Tempo Real - 1s)
                 sheet = None

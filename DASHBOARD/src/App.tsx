@@ -8,12 +8,15 @@ import {
   Calendar as CalendarIcon,
   LayoutDashboard
 } from 'lucide-react';
-import { 
-  ResponsiveContainer,
-  AreaChart,
-  Area
-} from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
+import { createClient, type RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+
+type MarketQuote = {
+  symbol: string;
+  last_price?: number | null;
+  change_percent?: number | null;
+  category?: string | null;
+};
 
 // --- CONFIGURAÇÃO SUPABASE ---
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -22,7 +25,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('quotes');
-  const [quotes, setQuotes] = useState<any[]>([]);
+  const [quotes, setQuotes] = useState<MarketQuote[]>([]);
 
   // Efeito para buscar dados e ouvir o Realtime
   useEffect(() => {
@@ -39,15 +42,18 @@ const App: React.FC = () => {
       .channel('market_changes')
       .on('postgres_changes', 
         { event: '*', schema: 'public', table: 'market_data' }, 
-        (payload) => {
+        (payload: RealtimePostgresChangesPayload<MarketQuote>) => {
+          if (!payload.new || !('symbol' in payload.new)) return;
+
           setQuotes(current => {
-            const index = current.findIndex(q => q.symbol === (payload.new as any).symbol);
+            const nextQuote = payload.new as MarketQuote;
+            const index = current.findIndex(q => q.symbol === nextQuote.symbol);
             if (index > -1) {
               const updated = [...current];
-              updated[index] = payload.new;
+              updated[index] = nextQuote;
               return updated;
             }
-            return [...current, payload.new];
+            return [...current, nextQuote];
           });
         }
       )

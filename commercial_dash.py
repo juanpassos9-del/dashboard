@@ -2,6 +2,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 import os
+import html
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
@@ -72,6 +73,56 @@ def save_credentials(creds):
         }).execute()
     except Exception as e:
         print(f"[ERROR] Save Creds: {e}")
+
+# ── Persistência de Trades Manuais ─────────────────────────────────────────
+_TRADES_KEY  = "risk_manual_trades"
+_TRADES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".tmp", "manual_trades.json")
+
+def load_manual_trades() -> list:
+    """Carrega trades do Supabase; usa cache local como fallback."""
+    # Tenta Supabase primeiro
+    if supabase:
+        try:
+            resp = supabase.table("app_state").select("value").eq("key", _TRADES_KEY).execute()
+            if resp.data and len(resp.data) > 0:
+                val = resp.data[0]["value"]
+                if isinstance(val, list):
+                    return val
+                if isinstance(val, str):
+                    import json as _json
+                    return _json.loads(val)
+        except Exception as e:
+            print(f"[WARN] load_manual_trades supabase: {e}")
+    # Fallback local
+    try:
+        if os.path.exists(_TRADES_FILE):
+            import json as _json
+            with open(_TRADES_FILE, "r", encoding="utf-8") as f:
+                return _json.load(f)
+    except Exception as e:
+        print(f"[WARN] load_manual_trades local: {e}")
+    return []
+
+def save_manual_trades(trades: list):
+    """Salva trades no Supabase e em cache local (.tmp/manual_trades.json)."""
+    import json as _json
+    # Salva local (backup)
+    try:
+        os.makedirs(os.path.dirname(_TRADES_FILE), exist_ok=True)
+        with open(_TRADES_FILE, "w", encoding="utf-8") as f:
+            _json.dump(trades, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[WARN] save_manual_trades local: {e}")
+    # Salva Supabase
+    if supabase:
+        try:
+            supabase.table("app_state").upsert({
+                "key": _TRADES_KEY,
+                "value": trades,
+                "updated_at": "now()"
+            }).execute()
+        except Exception as e:
+            print(f"[WARN] save_manual_trades supabase: {e}")
 
 def sanitize_text(text):
     """Proteção básica contra injeção de scripts."""
@@ -567,6 +618,514 @@ def painel_corpo_global():
                 df = pd.DataFrame(assets)[['name', 'price', 'change']]
                 df.columns = ['Ativo', 'Preço', 'Var %']
                 st.dataframe(df.style.applymap(color_change, subset=['Var %']), hide_index=True, use_container_width=True)
+
+@st.fragment(run_every=10)
+def pagina_terminal_bloomberg():
+    """Página do Terminal Bloomberg de Notícias com atualização automática assíncrona (10s)."""
+    def esc(value) -> str:
+        return html.escape(str(value or ""), quote=True)
+
+    def infer_tags(item) -> list[str]:
+        text = f"{item.get('title_pt', '')} {item.get('title_en', '')} {item.get('summary', '')}".lower()
+        rules = [
+            ("Fed", ["fed", "fomc", "powell"]),
+            ("Inflação", ["inflação", "inflation", "cpi", "pce"]),
+            ("Títulos dos EUA", ["treasury", "treasuries", "yield", "yields", "títulos"]),
+            ("Índices dos EUA", ["s&p", "nasdaq", "dow", "índices", "stocks", "ações"]),
+            ("USD", ["dólar", "dollar", "usd", "dxy"]),
+            ("Energia", ["petróleo", "oil", "crude", "brent", "wti"]),
+            ("Geopolítica", ["irã", "iran", "israel", "ataque", "war", "guerra"]),
+            ("China", ["china", "pboc", "yuan"]),
+            ("Brasil", ["brasil", "bcb", "copom", "real", "ibovespa"]),
+        ]
+        tags = [label for label, needles in rules if any(needle in text for needle in needles)]
+        return tags[:4] or ["Macro"]
+
+    def market_impact(item):
+        text = (
+            f"{item.get('title_pt', '')} {item.get('title_en', '')} "
+            f"{item.get('summary_pt', '')} {item.get('summary', '')}"
+        ).lower()
+        source = str(item.get("source", "")).lower()
+        score = 0
+        reasons = []
+
+        rules = [
+            (5, "Banco Central", ["fed", "fomc", "powell", "williams", "jefferson", "musalem", "bce", "ecb", "boj", "boe", "copom", "bcb", "juros", "taxa de juros", "interest rate"]),
+            (5, "Inflação", ["cpi", "pce", "ppi", "inflação", "inflation", "núcleo", "core prices"]),
+            (4, "Treasuries", ["treasury", "treasuries", "yield", "yields", "títulos dos eua", "rendimentos"]),
+            (4, "USD", ["dólar", "dollar", "usd", "dxy", "forex", "câmbio"]),
+            (4, "Energia", ["petróleo", "oil", "crude", "brent", "wti", "opep", "opec", "hormuz"]),
+            (4, "Geopolítica", ["irã", "iran", "israel", "china", "russia", "rússia", "guerra", "war", "ataque", "missile", "sanções"]),
+            (4, "Dados Macro", ["payroll", "emprego", "jobs", "jobless", "gdp", "pib", "retail sales", "pmi", "ism"]),
+            (3, "Bolsas", ["s&p", "nasdaq", "dow", "stocks", "ações", "índices", "futuros"]),
+            (3, "Emergentes", ["brazil", "brasil", "real", "ibovespa", "ewz", "eem", "china", "yuan"]),
+            (3, "Cripto", ["bitcoin", "crypto", "ethereum", "cripto"]),
+        ]
+
+        for weight, label, keywords in rules:
+            if any(keyword in text for keyword in keywords):
+                score += weight
+                reasons.append(label)
+
+        if any(word in text for word in ["breaking", "urgente", "alerta", "unexpected", "surpresa", "forecast", "previsão", "acima do esperado", "abaixo do esperado"]):
+            score += 3
+            reasons.append("Surpresa")
+
+        if any(name in source for name in ["financial", "reuters", "bloomberg", "cnbc"]):
+            score += 1
+
+        unique_reasons = []
+        for reason in reasons:
+            if reason not in unique_reasons:
+                unique_reasons.append(reason)
+
+        if score >= 8:
+            return "high", "ALTO IMPACTO", unique_reasons[:3]
+        if score >= 4:
+            return "medium", "IMPACTO", unique_reasons[:3]
+        return "low", "", unique_reasons[:2]
+    
+    # CSS Customizado Exclusivo para o Terminal Bloomberg
+    st.markdown("""
+    <style>
+        .bb-terminal-container {
+            background-color: #000000 !important;
+            color: #00FF00 !important;
+            font-family: 'Consolas', 'Courier New', monospace !important;
+            padding: 1.5rem;
+            border-radius: 8px;
+            border: 2px solid #222222;
+            margin-bottom: 20px;
+        }
+        
+        .bb-ticker-bar {
+            background-color: #000000;
+            border: 1px solid #222222;
+            padding: 0.5rem;
+            border-radius: 6px;
+            display: flex;
+            overflow-x: auto;
+            white-space: nowrap;
+            margin-bottom: 15px;
+            font-family: 'Consolas', monospace;
+            font-size: 0.8rem;
+        }
+        
+        .bb-ticker-item {
+            margin-right: 1.5rem;
+            display: inline-block;
+        }
+        
+        .bb-ticker-up {
+            color: #00FFA3 !important;
+            font-weight: bold;
+        }
+        
+        .bb-ticker-down {
+            color: #FF4B4B !important;
+            font-weight: bold;
+        }
+        
+        .bb-news-feed {
+            position: sticky;
+            top: 0.75rem;
+            max-height: calc(100vh - 225px);
+            min-height: 420px;
+            overflow-y: auto;
+            background: #111820;
+            border: 1px solid #1d2834;
+            border-radius: 7px;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+        }
+
+        .bb-feed-header {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 7px 10px;
+            background: #151f2a;
+            border-bottom: 1px solid #283544;
+            color: #9aa6b2;
+            font-family: "Consolas", monospace;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+        }
+
+        .bb-live-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            color: #00FFA3;
+            font-weight: 800;
+        }
+
+        .bb-news-card {
+            position: relative;
+            display: grid;
+            grid-template-columns: 34px minmax(0, 1fr) 22px;
+            gap: 8px;
+            padding: 8px 10px 7px 6px;
+            min-height: 54px;
+            background: #202b37;
+            border-bottom: 4px solid #111820;
+            color: #d8dee7;
+            font-family: "Inter", "Segoe UI", Arial, sans-serif;
+        }
+
+        .bb-news-card.bb-featured {
+            background: #22303d;
+            min-height: 118px;
+        }
+
+        .bb-news-card.bb-impact-high {
+            background: #241b1e;
+            border-left: 4px solid #ff3b30;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 0 0 1px rgba(255,59,48,0.18);
+        }
+
+        .bb-news-card.bb-impact-medium {
+            background: #242118;
+            border-left: 4px solid #ff9900;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 0 0 1px rgba(255,153,0,0.14);
+        }
+
+        .bb-news-card.bb-impact-high .bb-news-title {
+            color: #ff6b5f;
+            font-weight: 800;
+        }
+
+        .bb-news-card.bb-impact-medium .bb-news-title {
+            color: #ffb24a;
+        }
+
+        .bb-news-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 4px;
+            background: #18222d;
+            border: 3px solid #36d5f5;
+            color: #d8f8ff;
+            font-size: 0.62rem;
+            font-weight: 900;
+            letter-spacing: 0.2px;
+        }
+
+        .bb-news-title {
+            color: #edf2f7;
+            font-size: 0.88rem;
+            font-weight: 700;
+            line-height: 1.25;
+            margin-bottom: 2px;
+        }
+
+        .bb-news-card:not(.bb-featured) .bb-news-title {
+            font-weight: 500;
+        }
+
+        .bb-news-summary {
+            color: #c2cad5;
+            font-size: 0.86rem;
+            line-height: 1.38;
+            margin-top: 2px;
+        }
+
+        .bb-news-card:not(.bb-featured) .bb-news-summary {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .bb-news-meta {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 5px;
+            margin-top: 4px;
+            color: #9aa6b2;
+            font-size: 0.76rem;
+            line-height: 1.25;
+        }
+
+        .bb-news-tag {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 4px;
+            padding: 1px 6px;
+            background: #303946;
+            color: #b7c0ca;
+            font-size: 0.7rem;
+            line-height: 1.45;
+        }
+
+        .bb-impact-badge {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 4px;
+            padding: 1px 6px;
+            font-size: 0.68rem;
+            line-height: 1.45;
+            font-weight: 900;
+            letter-spacing: 0.3px;
+        }
+
+        .bb-impact-badge.high {
+            background: #4a1111;
+            color: #ff6b5f;
+            border: 1px solid rgba(255,59,48,0.35);
+        }
+
+        .bb-impact-badge.medium {
+            background: #3d2804;
+            color: #ffb24a;
+            border: 1px solid rgba(255,153,0,0.35);
+        }
+
+        .bb-news-link {
+            color: #aeb8c4 !important;
+            text-decoration: none !important;
+            align-self: end;
+            justify-self: center;
+            font-size: 0.9rem;
+            opacity: 0.85;
+        }
+
+        .bb-news-link:hover {
+            color: #36d5f5 !important;
+            opacity: 1;
+        }
+
+        .bb-news-close {
+            position: absolute;
+            top: 4px;
+            right: 6px;
+            color: #bac4ce;
+            font-size: 1.2rem;
+            font-weight: 800;
+            line-height: 1;
+        }
+        
+        .bb-status-footer {
+            background-color: #050505;
+            border: 1px solid #222222;
+            padding: 0.4rem 1rem;
+            border-radius: 4px;
+            font-family: 'Consolas', monospace;
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-top: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .bb-status-led {
+            display: inline-block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background-color: #00FFA3;
+            box-shadow: 0 0 6px #00FFA3;
+            margin-right: 5px;
+            animation: bb-led-pulse 1.2s infinite;
+        }
+        
+        @keyframes bb-led-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # 1. Ticker de Ativos Globais no Topo do Terminal
+    st.markdown('<div style="text-transform: uppercase; font-size: 0.7rem; color: #888; font-family: \'Consolas\', monospace; margin-bottom: 2px; font-weight: bold;">📺 Bloomberg Global Ticker (Supabase Real-Time)</div>', unsafe_allow_html=True)
+    
+    global_data = fetch_app_state("mercados_globais")
+    if global_data:
+        ticker_items = []
+        try:
+            categories = global_data.get("categories", global_data)
+            for cat_assets in categories.values():
+                if not isinstance(cat_assets, list): continue
+                for asset in cat_assets:
+                    name = asset.get('name', '---').split(" ")[0] # Abrevia
+                    price = asset.get('price', 0)
+                    change = asset.get('change', 0)
+                    arrow = "▲" if change >= 0 else "▼"
+                    sign = "+" if change >= 0 else ""
+                    color_class = "bb-ticker-up" if change >= 0 else "bb-ticker-down"
+                    price_fmt = f"{price:.4f}" if price < 10 else f"{price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                    
+                    ticker_items.append(
+                        f'<span class="bb-ticker-item">'
+                        f'<span style="color: #888;">{esc(name)}</span> '
+                        f'<span style="color: #FFF; font-weight: bold;">{price_fmt}</span> '
+                        f'<span class="{color_class}">{arrow} {sign}{change:.2f}%</span>'
+                        f'</span>'
+                    )
+            st.markdown(f'<div class="bb-ticker-bar">{"".join(ticker_items)}</div>', unsafe_allow_html=True)
+        except Exception as e:
+            st.markdown('<div class="bb-ticker-bar"><span style="color: #666;">Erro ao carregar Ticker em tempo real</span></div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="bb-ticker-bar"><span style="color: #666;">Aguardando Ticker...</span></div>', unsafe_allow_html=True)
+
+    filter_term = ""
+
+    # Carrega notícias em tempo real: Supabase/Bridge primeiro, RSS direto como fallback automático.
+    news_sources = []
+    news_list = fetch_app_state("financial_juice_news") or []
+    if news_list:
+        news_sources.append("Financial Juice")
+    if not news_list:
+        try:
+            from execution.fetch_financial_juice import fetch_financial_juice_news
+            news_list = fetch_financial_juice_news(limit=40)
+            if news_list:
+                news_sources.append("Financial Juice RSS")
+        except Exception as e:
+            st.error(f"Erro ao buscar notícias do Financial Juice: {e}")
+            news_list = []
+    if not news_list:
+        st.info("⏳ Aguardando notícias do Financial Juice.")
+        news_list = []
+
+    try:
+        from execution.fetch_gdelt_news import fetch_gdelt_news
+        gdelt_news = fetch_gdelt_news(limit=25, timespan="3h")
+        if gdelt_news:
+            news_list.extend(gdelt_news)
+            news_sources.append("GDELT")
+    except Exception as e:
+        st.warning(f"GDELT indisponÃ­vel no momento: {e}")
+
+    try:
+        from execution.fetch_source_news import fetch_source_news
+        source_news = fetch_source_news(limit=35, timespan="6h")
+        if source_news:
+            news_list.extend(source_news)
+            news_sources.append("Reuters/Bloomberg/CNBC/SCMP")
+    except Exception as e:
+        st.warning(f"Fontes editoriais indisponÃ­veis no momento: {e}")
+
+    if not news_list:
+        st.info("â³ Aguardando notÃ­cias em tempo real.")
+        return
+
+    seen_news = set()
+    unique_news = []
+    for item in news_list:
+        key = (item.get("link") or item.get("title_en") or item.get("title_pt") or "").strip().lower()[:160]
+        if not key or key in seen_news:
+            continue
+        seen_news.add(key)
+        unique_news.append(item)
+    news_list = unique_news
+
+    def news_sort_key(item):
+        try:
+            return float(item.get("timestamp") or 0)
+        except Exception:
+            return 0
+
+    news_list = sorted(news_list, key=news_sort_key, reverse=True)
+    try:
+        from execution.fetch_financial_juice import normalize_news_translations
+        news_list = normalize_news_translations(news_list, {})
+    except Exception:
+        pass
+
+    # Filtra notícias se houver termo ativo
+    if filter_term:
+        filtered_news = [
+            item for item in news_list
+            if filter_term.lower() in item.get("title_pt", "").lower()
+            or filter_term.lower() in item.get("title_en", "").lower()
+        ]
+    else:
+        filtered_news = news_list
+
+    # Notícia ativa
+    if "selected_news_id" not in st.session_state:
+        st.session_state.selected_news_id = None
+    if not st.session_state.selected_news_id and filtered_news:
+        st.session_state.selected_news_id = filtered_news[0]["id"]
+
+    # 3. Feed de Notícias fixo
+    if filtered_news:
+        cards = []
+        for idx, item in enumerate(filtered_news):
+            is_featured = item.get("id") == st.session_state.selected_news_id or idx == 0
+            impact_level, impact_label, impact_reasons = market_impact(item)
+            title_pt = esc(item.get("title_pt") or item.get("title_en") or "---")
+            summary_raw = item.get("summary_pt") or item.get("title_pt") or item.get("summary") or ""
+            summary = esc(summary_raw)
+            published = esc(item.get("published_str", "00:00"))
+            source = esc(item.get("source", "Financial Juice"))
+            link = esc(item.get("link", "#"))
+            icon_text = esc("FJ" if source == "Financial Juice" else source[:2].upper())
+            tags_html = "".join(f'<span class="bb-news-tag">{esc(tag)}</span>' for tag in infer_tags(item))
+            impact_badge = (
+                f'<span class="bb-impact-badge {impact_level}">{esc(impact_label)}</span>'
+                if impact_label
+                else ""
+            )
+            reason_tags = "".join(f'<span class="bb-news-tag">{esc(reason)}</span>' for reason in impact_reasons)
+            featured_class = " bb-featured" if is_featured else ""
+            impact_class = f" bb-impact-{impact_level}" if impact_level in ["high", "medium"] else ""
+            close_html = '<span class="bb-news-close">×</span>' if is_featured else ""
+            summary_html = (
+                f'<div class="bb-news-summary">{summary}</div>'
+                if summary and summary != title_pt
+                else ""
+            )
+
+            cards.append(
+                f'<div class="bb-news-card{featured_class}{impact_class}">'
+                f'{close_html}'
+                f'<div class="bb-news-icon">{icon_text}</div>'
+                f'<div class="bb-news-content">'
+                f'<div class="bb-news-title">{title_pt}</div>'
+                f'{summary_html}'
+                f'<div class="bb-news-meta">'
+                f'<span>{published}</span><span>{source}</span>{impact_badge}{reason_tags}{tags_html}'
+                f'</div>'
+                f'</div>'
+                f'<a class="bb-news-link" href="{link}" target="_blank" rel="noopener noreferrer">↗</a>'
+                f'</div>'
+            )
+        feed_header = (
+            f'<div class="bb-feed-header">'
+            f'<span>Feed de Noticias em Tempo Real</span>'
+            f'<span class="bb-live-pill"><span class="bb-status-led"></span>LIVE • {esc(" + ".join(news_sources) or "Fontes")} • {len(filtered_news)} noticias</span>'
+            f'</div>'
+        )
+        st.markdown(f'<div class="bb-news-feed">{feed_header}{"".join(cards)}</div>', unsafe_allow_html=True)
+    else:
+        st.info("Nenhuma manchete correspondente encontrada.")
+
+    # 4. Status Bar inferior
+    st.markdown(f"""
+    <div class="bb-status-footer">
+        <div>
+            <span class="bb-status-led"></span>
+            <span style="color: #00FFA3; font-weight: bold;">LIVE FEED</span>
+            &nbsp;|&nbsp; Atualização da tela a cada 10s
+            &nbsp;|&nbsp; Origem: {esc(" + ".join(news_sources) or "Fontes")}
+        </div>
+        <div>
+            Último Refresh: {datetime.now().strftime("%H:%M:%S")}
+            &nbsp;|&nbsp; Fontes: Financial Juice + Reuters + Bloomberg + CNBC + SCMP + GDELT
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 def pagina_terminal_global():
     """Página de Terminal Global."""
@@ -1473,319 +2032,450 @@ def pagina_painel_controle():
     """)
 
 def pagina_gestao_risco():
-    """Página de Gestão de Risco com análise IA de relatório de performance."""
-    import json, base64, io
+    """Página de Gestão de Risco com backtest manual por estratégia."""
+    import json, base64, uuid
     import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
 
-    st.markdown("### 🛡️ Gestão de Risco & Performance")
-    st.markdown("<p style='color:#888; font-size:0.9rem;'>Envie seu relatório de performance (tabela Excel/CSV ou print/foto) e receba análise IA, tamanho de posição ideal e feedbacks para evolução.</p>", unsafe_allow_html=True)
+    st.markdown("### 🛡️ Gestão de Risco & Backtest por Estratégia")
+    st.markdown("<p style='color:#888; font-size:0.9rem;'>Registre suas operações por estratégia, acompanhe a curva de capital individual, compare estratégias e receba análise IA de performance.</p>", unsafe_allow_html=True)
 
-    # ── CSS da página ──
+    # ── CSS ──
     st.markdown("""
     <style>
     .risk-card { background: #111; border: 1px solid #222; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
     .risk-metric { font-size: 2rem; font-weight: bold; color: #FFF; }
     .risk-label  { font-size: 0.7rem; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
-    .risk-badge-g { display:inline-block; background:#002611; color:#00FFA3; border:1px solid #00FFA344; border-radius:6px; padding:4px 12px; font-weight:bold; font-size:0.85rem; }
-    .risk-badge-r { display:inline-block; background:#400000; color:#FF4B4B; border:1px solid #FF4B4B44; border-radius:6px; padding:4px 12px; font-weight:bold; font-size:0.85rem; }
     .ai-feedback  { background:#0A0A0A; border:1px solid #333; border-left:6px solid #FF9800; padding:20px; border-radius:8px; margin-top:12px; color:#E0E0E0; font-size:0.9rem; line-height:1.7; }
     </style>
     """, unsafe_allow_html=True)
 
     # ══════════════════════════════════════════════════
-    # BLOCO 1 — Upload de Relatório
+    # BLOCO 1 — Calculadora de Tamanho de Posição
     # ══════════════════════════════════════════════════
-    st.markdown("#### 📤 Upload do Relatório de Performance")
-    st.markdown("<p style='color:#666; font-size:0.8rem;'>Aceita: Excel (.xlsx), CSV, ou imagem (print/foto do relatório)</p>", unsafe_allow_html=True)
+    with st.expander("📐 Calculadora de Tamanho de Posição", expanded=False):
+        col_p, col_m = st.columns([1, 1])
+        with col_p:
+            capital_total   = st.number_input("Capital Total (R$)", min_value=1000.0, value=10000.0, step=500.0, format="%.2f", key="risk_capital")
+            risco_por_trade = st.slider("Risco por Trade (%)", 0.5, 5.0, 1.0, 0.25, key="risk_pct", format="%.2f%%")
+        with col_m:
+            stop_pontos     = st.number_input("Stop Loss (pontos)", min_value=1.0, value=50.0, step=5.0, key="risk_stop")
+            valor_por_ponto = st.number_input("Valor por Contrato/Ponto (R$)", min_value=0.1, value=0.20, step=0.05, format="%.2f", key="risk_vpp")
 
-    col_up, col_param = st.columns([1.5, 1])
+        risco_valor = capital_total * (risco_por_trade / 100.0)
+        denom       = stop_pontos * valor_por_ponto
+        tamanho_pos = risco_valor / denom if denom > 0 else 0
+        alv_2r      = risco_valor * 2
+        stop_total  = stop_pontos * valor_por_ponto * tamanho_pos
 
-    with col_up:
-        uploaded_file = st.file_uploader(
-            "Selecione o arquivo",
-            type=["xlsx", "csv", "png", "jpg", "jpeg", "webp"],
-            label_visibility="collapsed",
-            key="risk_upload"
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Risco (R$)",      f"R$ {risco_valor:,.2f}")
+        m2.metric("Contratos",       f"{tamanho_pos:.1f}")
+        m3.metric("Stop Total (R$)", f"R$ {stop_total:,.2f}")
+        m4.metric("Alvo 2:1 (R$)",  f"R$ {alv_2r:,.2f}")
+
+    st.markdown("---")
+
+    # ══════════════════════════════════════════════════
+    # BLOCO 2 — Registro Manual de Trades por Estratégia
+    # ══════════════════════════════════════════════════
+    st.markdown("#### ✏️ Registro de Trades por Estratégia")
+
+    # Carrega histórico persistido (Supabase → local)
+    if "manual_trades" not in st.session_state:
+        st.session_state["manual_trades"] = load_manual_trades()
+
+    trades: list = st.session_state["manual_trades"]
+
+    # Deriva lista de estratégias já cadastradas
+    estrategias_existentes = sorted(set(t.get("estrategia", "") for t in trades if t.get("estrategia")))
+
+    col_form, col_hist = st.columns([1, 1.4], gap="large")
+
+    with col_form:
+        st.markdown("<div style='background:#0d0d0d; border:1px solid #1e1e1e; border-radius:10px; padding:18px;'>", unsafe_allow_html=True)
+        st.markdown("<div class='risk-label'>📋 Novo Trade</div>", unsafe_allow_html=True)
+
+        with st.form("form_novo_trade", clear_on_submit=True):
+            opcoes_estrategia = ["+ Nova Estratégia"] + estrategias_existentes
+            sel = st.selectbox("Estratégia", opcoes_estrategia, key="form_sel_estrategia")
+            nova_nome = ""
+            if sel == "+ Nova Estratégia":
+                nova_nome = st.text_input("Nome da nova estratégia",
+                                          placeholder="Ex: Wyckoff M5, Filippo M15, ICT HTF...",
+                                          key="form_nova_nome")
+            estrategia_final = nova_nome.strip() if sel == "+ Nova Estratégia" else sel
+
+            c1f, c2f = st.columns(2)
+            with c1f:
+                ativo    = st.text_input("Ativo", placeholder="WIN, WDO, EURUSD", key="form_ativo")
+                direcao  = st.selectbox("Direção", ["Compra", "Venda"], key="form_dir")
+            with c2f:
+                resultado  = st.number_input("Resultado (R$)", value=0.0, step=10.0, format="%.2f", key="form_res")
+                data_trade = st.date_input("Data do Trade", value=datetime.now().date(), key="form_data")
+
+            obs = st.text_input("Observação (opcional)",
+                                placeholder="Ex: Setup no teste de estrutura...", key="form_obs")
+
+            submitted = st.form_submit_button("➕ Registrar Trade",
+                                              use_container_width=True, type="primary")
+
+        if submitted:
+            if not estrategia_final:
+                st.warning("⚠️ Informe o nome da estratégia.")
+            else:
+                novo_trade = {
+                    "id":         str(uuid.uuid4())[:8],
+                    "estrategia": estrategia_final,
+                    "ativo":      ativo.upper().strip() if ativo else "—",
+                    "direcao":    direcao,
+                    "resultado":  resultado,
+                    "data":       str(data_trade),
+                    "obs":        obs,
+                }
+                trades.append(novo_trade)
+                st.session_state["manual_trades"] = trades
+                save_manual_trades(trades)
+                st.success(f"✅ Trade registrado em **{estrategia_final}**: R$ {resultado:+.2f}")
+                st.rerun()
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with col_hist:
+        if trades:
+            st.markdown(f"<div class='risk-label'>📚 Histórico — {len(trades)} operações</div>",
+                        unsafe_allow_html=True)
+            df_hist = pd.DataFrame(trades)
+            df_hist["resultado"] = pd.to_numeric(df_hist["resultado"], errors="coerce").fillna(0)
+            df_hist_show = df_hist[["data", "estrategia", "ativo", "direcao", "resultado", "obs"]].copy()
+            df_hist_show.columns = ["Data", "Estratégia", "Ativo", "Dir.", "Resultado (R$)", "Obs."]
+            df_hist_show = df_hist_show.sort_values("Data", ascending=False)
+
+            def color_row(row):
+                c = "#003318" if row["Resultado (R$)"] >= 0 else "#330000"
+                return [f"background-color: {c}" for _ in row]
+
+            styled = (
+                df_hist_show.style
+                .apply(color_row, axis=1)
+                .format({"Resultado (R$)": "R$ {:+,.2f}"})
+                .set_properties(**{"font-size": "0.78rem", "color": "#DDD"})
+            )
+            st.dataframe(styled, use_container_width=True, hide_index=True, height=260)
+
+            # Exclusão por índice
+            col_del1, col_del2 = st.columns([2, 1])
+            with col_del1:
+                labels_del = [
+                    f"{t['data']} | {t['estrategia']} | R$ {float(t.get('resultado', 0)):+.2f}"
+                    for t in trades
+                ]
+                idx_del = st.selectbox(
+                    "Selecionar trade para excluir",
+                    options=range(len(trades)),
+                    format_func=lambda i: labels_del[i],
+                    key="sel_del_trade"
+                )
+            with col_del2:
+                st.markdown("<div style='margin-top:24px;'></div>", unsafe_allow_html=True)
+                if st.button("🗑️ Excluir", key="btn_del_trade", use_container_width=True):
+                    trades.pop(idx_del)
+                    st.session_state["manual_trades"] = trades
+                    save_manual_trades(trades)
+                    st.success("Trade excluído.")
+                    st.rerun()
+
+            if st.button("🗑️ Limpar TODO o histórico", key="btn_clear_all", type="secondary"):
+                st.session_state["manual_trades"] = []
+                save_manual_trades([])
+                st.rerun()
+        else:
+            st.info("📭 Nenhum trade registrado ainda. Use o formulário ao lado para começar.")
+
+    st.markdown("---")
+
+    # ══════════════════════════════════════════════════
+    # BLOCO 3 — Gráficos e Métricas por Estratégia
+    # ══════════════════════════════════════════════════
+    st.markdown("#### 📊 Performance por Estratégia")
+
+    if not trades:
+        st.info("✏️ Registre operações para visualizar os gráficos de rentabilidade.")
+    else:
+        df_all = pd.DataFrame(trades)
+        df_all["resultado"] = pd.to_numeric(df_all["resultado"], errors="coerce").fillna(0)
+        df_all["data"]      = pd.to_datetime(df_all["data"], errors="coerce")
+        df_all = df_all.sort_values("data").reset_index(drop=True)
+
+        estrategias_list = sorted(df_all["estrategia"].unique().tolist())
+
+        tab_todas, *tabs_ind = st.tabs(
+            ["📈 Todas Consolidadas"] + [f"🎯 {e}" for e in estrategias_list]
         )
 
-    with col_param:
-        st.markdown("<div class='risk-label'>Parâmetros de Risco</div>", unsafe_allow_html=True)
-        capital_total = st.number_input("Capital Total (R$)", min_value=1000.0, value=10000.0, step=500.0, format="%.2f", key="risk_capital")
-        risco_por_trade = st.slider("Risco por Trade (%)", 0.5, 5.0, 1.0, 0.25, key="risk_pct", format="%.2f%%")
-        stop_pontos = st.number_input("Stop Loss (pontos)", min_value=1.0, value=50.0, step=5.0, key="risk_stop")
-        valor_por_ponto = st.number_input("Valor por Contrato/Ponto (R$)", min_value=0.1, value=0.20, step=0.05, format="%.2f", key="risk_vpp")
+        # ── Aba Consolidada ──
+        with tab_todas:
+            _plot_rentabilidade_df(df_all, "Curva de Capital Consolidada — Todas as Estratégias")
 
-    # ── Cálculo de tamanho de posição (Kelly simplificado + risco fixo) ──
-    risco_valor = capital_total * (risco_por_trade / 100.0)
-    tamanho_pos = risco_valor / (stop_pontos * valor_por_ponto) if (stop_pontos * valor_por_ponto) > 0 else 0
+            st.markdown("##### 📊 Comparativo entre Estratégias")
+            resumo = []
+            for est in estrategias_list:
+                df_e  = df_all[df_all["estrategia"] == est]
+                res   = df_e["resultado"].tolist()
+                n_e   = len(res)
+                wins  = sum(1 for r in res if r > 0)
+                total = sum(res)
+                wr_e  = wins / n_e * 100 if n_e else 0
+                gross_w = sum(r for r in res if r > 0)
+                gross_l = abs(sum(r for r in res if r < 0))
+                pf_e = gross_w / gross_l if gross_l else float("inf")
+                peak_e = s_e = max_dd_e = 0.0
+                for r in res:
+                    s_e += r
+                    if s_e > peak_e: peak_e = s_e
+                    dd_e = peak_e - s_e
+                    if dd_e > max_dd_e: max_dd_e = dd_e
+                resumo.append({
+                    "Estratégia":    est,
+                    "Trades":        n_e,
+                    "Win Rate":      f"{wr_e:.0f}%",
+                    "Total (R$)":    total,
+                    "Profit Factor": f"{pf_e:.2f}" if pf_e != float("inf") else "∞",
+                    "Max DD (R$)":   max_dd_e,
+                })
+
+            df_resumo = pd.DataFrame(resumo)
+            cores_bar = ["#00FFA3" if v >= 0 else "#FF4B4B" for v in df_resumo["Total (R$)"]]
+
+            fig_comp = go.Figure(go.Bar(
+                x=df_resumo["Estratégia"],
+                y=df_resumo["Total (R$)"],
+                marker_color=cores_bar,
+                text=[f"R$ {v:+,.0f}" for v in df_resumo["Total (R$)"]],
+                textposition="outside",
+                marker_line_width=0,
+            ))
+            fig_comp.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#E0E0E0", size=11),
+                margin=dict(l=10, r=10, t=30, b=10), height=280,
+                xaxis=dict(showgrid=False, color="#888"),
+                yaxis=dict(showgrid=True, gridcolor="#1a1a1a", zeroline=True,
+                           zerolinecolor="#444", tickprefix="R$ "),
+                showlegend=False,
+            )
+            fig_comp.add_hline(y=0, line_dash="dot", line_color="#444")
+            st.plotly_chart(fig_comp, use_container_width=True, config={"displayModeBar": False})
+
+            def _color_total(val):
+                return "color: #00FFA3; font-weight:bold" if val >= 0 else "color: #FF4B4B; font-weight:bold"
+
+            styled_resumo = (
+                df_resumo.style
+                .applymap(_color_total, subset=["Total (R$)"])
+                .format({"Total (R$)": "R$ {:+,.2f}", "Max DD (R$)": "R$ {:.2f}"})
+                .set_properties(**{"font-size": "0.82rem", "color": "#DDD",
+                                   "background-color": "#0d0d0d"})
+            )
+            st.dataframe(styled_resumo, use_container_width=True, hide_index=True)
+
+        # ── Abas individuais ──
+        for tab_e, est in zip(tabs_ind, estrategias_list):
+            with tab_e:
+                df_e = df_all[df_all["estrategia"] == est].reset_index(drop=True)
+                _plot_rentabilidade_df(df_e, f"Curva de Capital — {est}")
 
     st.markdown("---")
-    st.markdown("#### 📐 Tamanho de Posição Calculado")
-    m1, m2, m3, m4 = st.columns(4)
-    with m1:
-        st.markdown(f"<div class='risk-card'><div class='risk-label'>Risco em R$</div><div class='risk-metric'>R$ {risco_valor:,.2f}</div></div>", unsafe_allow_html=True)
-    with m2:
-        st.markdown(f"<div class='risk-card'><div class='risk-label'>Contratos / Lotes</div><div class='risk-metric' style='color:#FF9800;'>{tamanho_pos:.1f}</div></div>", unsafe_allow_html=True)
-    with m3:
-        st.markdown(f"<div class='risk-card'><div class='risk-label'>Stop Loss (R$)</div><div class='risk-metric' style='color:#FF4B4B;'>R$ {(stop_pontos * valor_por_ponto * tamanho_pos):,.2f}</div></div>", unsafe_allow_html=True)
-    with m4:
-        alv_2r = risco_valor * 2
-        st.markdown(f"<div class='risk-card'><div class='risk-label'>Alvo 2:1 (R$)</div><div class='risk-metric' style='color:#00FFA3;'>R$ {alv_2r:,.2f}</div></div>", unsafe_allow_html=True)
 
     # ══════════════════════════════════════════════════
-    # BLOCO 2 — Processar arquivo e analisar IA
+    # BLOCO 4 — Upload + Análise IA
     # ══════════════════════════════════════════════════
-    if uploaded_file is not None:
-        file_ext = uploaded_file.name.split(".")[-1].lower()
-        df_trades = None
-        img_bytes  = None
-        img_b64    = None
+    with st.expander("🤖 Análise IA de Relatório (Upload CSV/Excel/Imagem)", expanded=False):
+        st.markdown("<p style='color:#666; font-size:0.8rem;'>Aceita: Excel (.xlsx), CSV, ou imagem (print/foto)</p>",
+                    unsafe_allow_html=True)
+        col_up, col_p2 = st.columns([1.5, 1])
+        with col_up:
+            uploaded_file = st.file_uploader(
+                "Selecione o arquivo",
+                type=["xlsx", "csv", "png", "jpg", "jpeg", "webp"],
+                label_visibility="collapsed", key="risk_upload"
+            )
+        with col_p2:
+            cap_ia = st.number_input("Capital (R$)", min_value=1000.0, value=10000.0,
+                                     step=500.0, format="%.2f", key="risk_cap_ia")
+            rpc_ia = st.slider("Risco/Trade (%)", 0.5, 5.0, 1.0, 0.25,
+                               key="risk_pct_ia", format="%.2f%%")
+            stp_ia = st.number_input("Stop (pts)", min_value=1.0, value=50.0,
+                                     step=5.0, key="risk_stop_ia")
+            vpp_ia = st.number_input("Vlr/Ponto (R$)", min_value=0.1, value=0.20,
+                                     step=0.05, format="%.2f", key="risk_vpp_ia")
 
-        # Lê CSV / Excel
-        if file_ext in ["csv", "xlsx"]:
-            try:
-                if file_ext == "csv":
-                    df_trades = pd.read_csv(uploaded_file)
-                else:
-                    df_trades = pd.read_excel(uploaded_file)
-                st.success(f"✅ Arquivo '{uploaded_file.name}' carregado — {len(df_trades)} registros encontrados.")
-                with st.expander("📋 Pré-visualização do Relatório", expanded=False):
-                    st.dataframe(df_trades.head(30), use_container_width=True, hide_index=True)
-            except Exception as e:
-                st.error(f"Erro ao ler arquivo: {e}")
-        else:
-            # Imagem
-            img_bytes = uploaded_file.read()
-            img_b64   = base64.b64encode(img_bytes).decode()
-            st.image(img_bytes, caption="Relatório enviado", use_column_width=True)
+        if uploaded_file:
+            file_ext = uploaded_file.name.split(".")[-1].lower()
+            df_trades_ia = None
+            img_b64 = None
 
-        # ── Botão Analisar ──
-        st.markdown("")
-        if st.button("🤖 Analisar com IA e Calcular Posição", use_container_width=True, type="primary"):
-            api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
-            try:
-                api_key = api_key or st.secrets.get("GOOGLE_API_KEY", st.secrets.get("GEMINI_API_KEY", ""))
-            except Exception:
-                pass
-
-            if not api_key:
-                st.error("🔑 Configure GOOGLE_API_KEY no .env ou nos segredos do Streamlit.")
+            if file_ext in ["csv", "xlsx"]:
+                try:
+                    df_trades_ia = (pd.read_csv(uploaded_file) if file_ext == "csv"
+                                    else pd.read_excel(uploaded_file))
+                    st.success(f"✅ {len(df_trades_ia)} registros carregados.")
+                    with st.expander("Pré-visualização", expanded=False):
+                        st.dataframe(df_trades_ia.head(30), use_container_width=True, hide_index=True)
+                except Exception as e:
+                    st.error(f"Erro ao ler arquivo: {e}")
             else:
-                import google.generativeai as genai
-                genai.configure(api_key=api_key)
+                img_bytes = uploaded_file.read()
+                img_b64 = base64.b64encode(img_bytes).decode()
+                st.image(img_bytes, caption="Relatório enviado", use_column_width=True)
 
-                prompt_base = f"""
-                Você é um Coach de Trading e Gestor de Risco profissional com expertise em:
-                - Análise estatística de performance de traders
-                - Psicologia do trading e controle emocional
-                - Gestão de risco e sizing de posição
-                - Método Wyckoff, VSA e Smart Money Concepts
+            risco_v = cap_ia * (rpc_ia / 100.0)
+            den2    = stp_ia * vpp_ia
+            tam_ia  = risco_v / den2 if den2 > 0 else 0
 
-                PARÂMETROS DO TRADER:
-                - Capital total: R$ {capital_total:,.2f}
-                - Risco por trade configurado: {risco_por_trade:.2f}%
-                - Stop loss: {stop_pontos:.0f} pontos
-                - Valor por ponto/contrato: R$ {valor_por_ponto:.2f}
-                - Tamanho de posição calculado: {tamanho_pos:.1f} contratos
-
-                RELATÓRIO DE PERFORMANCE ENVIADO:
-                {df_trades.to_string() if df_trades is not None else '[Imagem enviada — analise visualmente]'}
-
-                Analise o relatório e forneça:
-
-                1. 📊 DIAGNÓSTICO DE PERFORMANCE
-                (Win rate, fator de lucro, drawdown máximo, relação risco/retorno média)
-
-                2. 📐 TAMANHO DE POSIÇÃO RECOMENDADO
-                (Com base nos dados reais de performance. Justifique se deve aumentar, manter ou reduzir o sizing atual de {tamanho_pos:.1f} contratos)
-
-                3. 🧠 ANÁLISE PSICOLÓGICA
-                (Identifique padrões emocionais: overtrading, revenge trading, FOMO, cortar gains cedo, deixar losses crescer)
-
-                4. 🎯 PLANO DE MELHORIA (TOP 3 AÇÕES)
-                (Ações concretas e mensuráveis para melhorar nos próximos 30 dias)
-
-                5. ⚠️ ALERTAS DE RISCO
-                (Pontos críticos que podem destruir o capital se não corrigidos)
-
-                Seja direto, honesto e cirúrgico. Não seja genérico. Fale como um gestor sênior falaria para um trader júnior.
-                """
-
-                with st.spinner("🧠 IA analisando seu relatório de performance..."):
-                    try:
-                        if img_b64:
-                            model = genai.GenerativeModel("gemini-2.0-flash")
-                            img_part = {"mime_type": f"image/{file_ext if file_ext != 'jpg' else 'jpeg'}", "data": img_b64}
-                            response = model.generate_content([prompt_base, img_part])
-                        else:
-                            model = genai.GenerativeModel("gemini-2.0-flash")
-                            response = model.generate_content(prompt_base)
-
-                        st.session_state["risco_ia_resultado"] = response.text
-                        st.session_state["risco_ia_sizing"]    = tamanho_pos
-                        st.session_state["risco_capital"]      = capital_total
-                    except Exception as e:
-                        st.error(f"Erro na análise IA: {e}")
-
-                # Constrói gráfico de rentabilidade se vier de tabela
-                if df_trades is not None:
-                    result_col = None
-                    for c in df_trades.columns:
-                        if any(k in c.lower() for k in ["resultado", "result", "pnl", "lucro", "profit", "retorno", "gain", "loss"]):
-                            result_col = c
-                            break
-                    if result_col:
-                        try:
-                            df_trades["_r"] = pd.to_numeric(df_trades[result_col].astype(str).str.replace("R$","").str.replace(".","").str.replace(",",".").str.strip(), errors="coerce")
-                            df_trades["_acum"] = df_trades["_r"].cumsum()
-                            st.session_state["risco_df_acum"] = df_trades[["_r","_acum"]].dropna()
-                        except Exception:
-                            pass
-
-        # ── Exibe resultado da IA ──
-        if "risco_ia_resultado" in st.session_state:
-            st.markdown("---")
-            st.markdown("#### 🤖 Análise IA do Relatório de Performance")
-
-            # Sizing recomendado
-            sz = st.session_state.get("risco_ia_sizing", 0)
-            cap = st.session_state.get("risco_capital", capital_total)
-            s1, s2 = st.columns([1, 2])
-            with s1:
-                badge_color = "#FF9800"
-                st.markdown(f"""
-                    <div class='risk-card' style='border-left: 5px solid {badge_color}; text-align:center;'>
-                        <div class='risk-label'>📐 Posição p/ Próximo Trade</div>
-                        <div style='font-size: 3rem; font-weight: bold; color: {badge_color};'>{sz:.1f}</div>
-                        <div style='color:#888; font-size:0.8rem;'>contratos / lotes</div>
-                        <div style='color:#666; font-size:0.75rem; margin-top:8px;'>Risco: R$ {cap*(risco_por_trade/100):,.2f} ({risco_por_trade:.2f}% do capital)</div>
-                    </div>
-                """, unsafe_allow_html=True)
-            with s2:
-                ia_text = st.session_state["risco_ia_resultado"]
-                st.markdown(f"<div class='ai-feedback'>{sanitize_text(ia_text).replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
-
-    # ══════════════════════════════════════════════════
-    # BLOCO 3 — Gráfico de Rentabilidade Acumulada
-    # ══════════════════════════════════════════════════
-    st.markdown("---")
-    st.markdown("#### 📈 Rentabilidade Acumulada")
-
-    tab_graf1, tab_graf2 = st.tabs(["📂 Do Relatório Enviado", "✏️ Entrada Manual"])
-
-    with tab_graf1:
-        if "risco_df_acum" in st.session_state:
-            df_a = st.session_state["risco_df_acum"].reset_index(drop=True)
-            df_a.index += 1
-            _plot_rentabilidade(df_a["_r"].tolist(), df_a["_acum"].tolist())
-        else:
-            st.info("📤 Envie um relatório CSV/Excel com coluna de resultado (PnL) para visualizar o gráfico automaticamente.")
-
-    with tab_graf2:
-        st.markdown("<p style='color:#666; font-size:0.8rem;'>Cole os resultados dos trades separados por vírgula ou um por linha (em R$). Ex: 120, -80, 200, -50</p>", unsafe_allow_html=True)
-        manual_input = st.text_area("Resultados dos trades (R$)", placeholder="120, -80, 200, -50, 300, -100", height=100, key="risk_manual_input")
-        if st.button("📊 Gerar Gráfico Manual", key="risk_manual_btn"):
-            try:
-                raw = manual_input.replace("\n", ",").replace(";", ",")
-                vals = [float(x.strip().replace("R$","").replace(".","").replace(",",".")) for x in raw.split(",") if x.strip()]
-                if vals:
-                    acum = []
-                    soma = 0.0
-                    for v in vals:
-                        soma += v
-                        acum.append(soma)
-                    _plot_rentabilidade(vals, acum)
+            if st.button("🤖 Analisar com IA", use_container_width=True,
+                         type="primary", key="btn_ia_analise"):
+                api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+                try:
+                    api_key = api_key or st.secrets.get(
+                        "GOOGLE_API_KEY", st.secrets.get("GEMINI_API_KEY", ""))
+                except Exception:
+                    pass
+                if not api_key:
+                    st.error("🔑 Configure GOOGLE_API_KEY nos segredos.")
                 else:
-                    st.warning("Nenhum valor válido encontrado.")
-            except Exception as e:
-                st.error(f"Erro ao processar valores: {e}")
+                    import google.generativeai as genai
+                    genai.configure(api_key=api_key)
+                    prompt_base = f"""
+Você é um Coach de Trading e Gestor de Risco profissional. Analise o relatório e forneça:
+
+PARÂMETROS: Capital R$ {cap_ia:,.2f} | Risco {rpc_ia:.2f}% | Stop {stp_ia:.0f}pts | Vlr/ponto R$ {vpp_ia:.2f} | Sizing calculado: {tam_ia:.1f} contratos
+
+RELATÓRIO: {df_trades_ia.to_string() if df_trades_ia is not None else '[Imagem enviada]'}
+
+Forneça:
+1. 📊 DIAGNÓSTICO (Win Rate, Profit Factor, Max Drawdown, R/R médio)
+2. 📐 SIZING RECOMENDADO (manter, aumentar ou reduzir {tam_ia:.1f} contratos — justifique)
+3. 🧠 ANÁLISE PSICOLÓGICA (overtrading, revenge, FOMO, cortar gains, deixar losses)
+4. 🎯 TOP 3 AÇÕES para os próximos 30 dias
+5. ⚠️ ALERTAS DE RISCO críticos
+Seja direto e cirúrgico.
+                    """
+                    with st.spinner("🧠 Analisando..."):
+                        try:
+                            model = genai.GenerativeModel("gemini-2.0-flash")
+                            if img_b64:
+                                mime = f"image/{file_ext if file_ext != 'jpg' else 'jpeg'}"
+                                response = model.generate_content(
+                                    [prompt_base, {"mime_type": mime, "data": img_b64}])
+                            else:
+                                response = model.generate_content(prompt_base)
+                            st.session_state["risco_ia_resultado"] = response.text
+                        except Exception as e:
+                            st.error(f"Erro na análise IA: {e}")
+
+        if "risco_ia_resultado" in st.session_state:
+            ia_text = st.session_state["risco_ia_resultado"]
+            st.markdown(
+                f"<div class='ai-feedback'>"
+                f"{sanitize_text(ia_text).replace(chr(10), '<br>')}"
+                f"</div>",
+                unsafe_allow_html=True
+            )
 
 
-def _plot_rentabilidade(resultados: list, acumulado: list):
-    """Plota gráfico premium de rentabilidade acumulada."""
+def _plot_rentabilidade_df(df: "pd.DataFrame", titulo: str = "Curva de Capital"):
+    """Plota gráfico premium de rentabilidade acumulada a partir de um DataFrame de trades."""
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
 
-    n = len(acumulado)
+    if df.empty:
+        st.info("Nenhum dado para exibir.")
+        return
+
+    df = df.copy()
+    df["resultado"] = pd.to_numeric(df["resultado"], errors="coerce").fillna(0)
+    resultados = df["resultado"].tolist()
+    acumulado  = []
+    soma = 0.0
+    for r in resultados:
+        soma += r
+        acumulado.append(soma)
+
+    n      = len(acumulado)
     trades = list(range(1, n + 1))
-    cores_barras = ["#00FFA3" if r >= 0 else "#FF4B4B" for r in resultados]
-    max_dd = 0.0
-    peak = acumulado[0] if acumulado else 0
+    ultimo = acumulado[-1]
+    wins   = sum(1 for r in resultados if r > 0)
+    wr     = wins / n * 100 if n else 0
+    gross_w = sum(r for r in resultados if r > 0)
+    gross_l = abs(sum(r for r in resultados if r < 0))
+    pf      = gross_w / gross_l if gross_l else float("inf")
+    peak = max_dd = 0.0
     for v in acumulado:
         if v > peak: peak = v
         dd = peak - v
         if dd > max_dd: max_dd = dd
 
-    fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        row_heights=[0.65, 0.35],
-        vertical_spacing=0.06,
-        subplot_titles=("Curva de Capital Acumulada (R$)", "Resultado por Trade (R$)")
-    )
+    cores_barras = ["#00FFA3" if r >= 0 else "#FF4B4B" for r in resultados]
+    color_tot    = "#00FFA3" if ultimo >= 0 else "#FF4B4B"
+    pf_str = f"{pf:.2f}" if pf != float("inf") else "∞"
 
-    # Linha de capital
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True,
+        row_heights=[0.65, 0.35], vertical_spacing=0.06,
+        subplot_titles=(titulo, "Resultado por Trade (R$)")
+    )
     fig.add_trace(go.Scatter(
         x=trades, y=acumulado, mode="lines+markers",
         line=dict(color="#FF9800", width=2.5),
         marker=dict(size=5, color="#FF9800"),
-        fill="tozeroy",
-        fillcolor="rgba(255,152,0,0.08)",
+        fill="tozeroy", fillcolor="rgba(255,152,0,0.08)",
         name="Capital Acumulado"
     ), row=1, col=1)
-
-    # Linha de referência zero
     fig.add_hline(y=0, line_dash="dot", line_color="#444", row=1, col=1)
-
-    # Barras por trade
     fig.add_trace(go.Bar(
         x=trades, y=resultados,
-        marker_color=cores_barras,
-        name="Resultado",
-        marker_line_width=0,
-        opacity=0.85
+        marker_color=cores_barras, name="Resultado",
+        marker_line_width=0, opacity=0.85
     ), row=2, col=1)
-
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(family='"Roboto Mono", monospace', color="#E0E0E0", size=11),
-        margin=dict(l=10, r=10, t=30, b=10),
-        height=480,
-        showlegend=False,
-        xaxis2=dict(title="Nº do Trade", showgrid=False, color="#888"),
-        yaxis=dict(showgrid=True, gridcolor="#1a1a1a", zeroline=True, zerolinecolor="#444", tickprefix="R$ "),
-        yaxis2=dict(showgrid=True, gridcolor="#1a1a1a", zeroline=True, zerolinecolor="#444", tickprefix="R$ "),
-    )
-
-    # Annotations de resumo
-    ultimo = acumulado[-1] if acumulado else 0
-    wins = sum(1 for r in resultados if r > 0)
-    wr = wins / n * 100 if n else 0
-    color_tot = "#00FFA3" if ultimo >= 0 else "#FF4B4B"
-
     fig.add_annotation(
-        text=f"Total: R$ {ultimo:+,.2f} | Win Rate: {wr:.0f}% | Max DD: R$ {max_dd:,.2f}",
+        text=(f"Total: R$ {ultimo:+,.2f} | Win Rate: {wr:.0f}% | "
+              f"Profit Factor: {pf_str} | Max DD: R$ {max_dd:,.2f}"),
         xref="paper", yref="paper", x=0.5, y=1.02,
         showarrow=False, font=dict(size=11, color=color_tot),
         bgcolor="rgba(0,0,0,0.5)"
     )
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family='"Roboto Mono", monospace', color="#E0E0E0", size=11),
+        margin=dict(l=10, r=10, t=40, b=10), height=440,
+        showlegend=False,
+        xaxis2=dict(title="Nº do Trade", showgrid=False, color="#888"),
+        yaxis=dict(showgrid=True, gridcolor="#1a1a1a", zeroline=True,
+                   zerolinecolor="#444", tickprefix="R$ "),
+        yaxis2=dict(showgrid=True, gridcolor="#1a1a1a", zeroline=True,
+                    zerolinecolor="#444", tickprefix="R$ "),
+    )
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-    import streamlit as _st
-    _st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Total Trades",  n)
+    c2.metric("Win Rate",      f"{wr:.1f}%")
+    c3.metric("Resultado",     f"R$ {ultimo:+,.2f}")
+    c4.metric("Profit Factor", pf_str)
+    c5.metric("Max Drawdown",  f"R$ {max_dd:,.2f}")
 
-    # Métricas rápidas
-    c1, c2, c3, c4 = _st.columns(4)
-    c1.metric("Total Trades", n)
-    c2.metric("Win Rate", f"{wr:.1f}%")
-    c3.metric("Resultado Total", f"R$ {ultimo:+,.2f}")
-    c4.metric("Drawdown Máx.", f"R$ {max_dd:,.2f}")
+
+def _plot_rentabilidade(resultados: list, acumulado: list):
+    """Wrapper legado — mantido para compatibilidade."""
+    df_tmp = pd.DataFrame({"resultado": resultados})
+    _plot_rentabilidade_df(df_tmp)
 
 
 # Navegação na Barra Lateral
 with st.sidebar:
     st.markdown("### 🧭 Navegação")
-    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📰 Market Report", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], label_visibility="collapsed")
+    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📺 Terminal Bloomberg", "📰 Market Report", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], label_visibility="collapsed")
     
     st.markdown("---")
     
@@ -1798,6 +2488,8 @@ if page == "📉 Terminal de Trading":
     pagina_terminal()
 elif page == "🌎 Terminal Global":
     pagina_terminal_global()
+elif page == "📺 Terminal Bloomberg":
+    pagina_terminal_bloomberg()
 elif page == "📰 Market Report":
     pagina_market_report()
 elif page == "📊 Gráficos Avançados":

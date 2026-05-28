@@ -1,6 +1,30 @@
 import requests
 import json
-from datetime import datetime
+import pandas as pd
+
+
+IMPACT_LABELS = {
+    "HIGH": "Alto",
+    "MEDIUM": "Médio",
+    "LOW": "Baixo",
+}
+
+
+def _events_to_dataframe(events):
+    """Converte o JSON semanal em DataFrame compatível com os dashboards legados."""
+    rows = []
+    for event in events:
+        rows.append({
+            "Data": event.get("date", ""),
+            "Horário": event.get("time", ""),
+            "País": event.get("currency", "???"),
+            "Evento": event.get("event", "Evento"),
+            "Impacto": IMPACT_LABELS.get(event.get("impact", ""), event.get("impact", "")),
+            "Atual": event.get("actual", "---"),
+            "Previsão": event.get("forecast", "---"),
+            "Anterior": event.get("previous", "---"),
+        })
+    return pd.DataFrame(rows)
 
 def fetch_economic_calendar():
     # Este endpoint da ForexFactory (via faireconomy) fornece a semana inteira
@@ -41,16 +65,11 @@ def fetch_economic_calendar():
         with open("calendario_economico.json", "w", encoding="utf-8") as f:
             json.dump(processed_events, f, ensure_ascii=False)
             
-        return processed_events
+        return _events_to_dataframe(processed_events)
         
     except Exception as e:
         print(f"Erro ao buscar calendário semanal: {e}")
-        return []
-
-        
-    except Exception as e:
-        print(f"Erro ao buscar calendário: {e}")
-        return []
+        return _events_to_dataframe([])
 
 if __name__ == "__main__":
     fetch_economic_calendar()

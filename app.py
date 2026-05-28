@@ -286,7 +286,6 @@ def load_news():
 def load_calendar():
     return fetch_economic_calendar()
 
-
 # ============================================================
 # Funções de Renderização
 # ============================================================
