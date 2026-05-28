@@ -1039,8 +1039,8 @@ def pagina_terminal_bloomberg():
 
         .bb-quote-grid {
             display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 26px 16px;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 18px 14px;
             margin: 14px 0 18px;
         }
 
@@ -1051,7 +1051,7 @@ def pagina_terminal_bloomberg():
         .bb-quote-title {
             color: #f4f7fb;
             font-family: "Inter", "Segoe UI", Arial, sans-serif;
-            font-size: 1.02rem;
+            font-size: 0.88rem;
             font-weight: 900;
             letter-spacing: 0;
             margin: 0 0 10px;
@@ -1067,7 +1067,7 @@ def pagina_terminal_bloomberg():
             border-radius: 7px;
             background: #0b1016;
             font-family: "Roboto Mono", "Consolas", monospace;
-            font-size: 0.78rem;
+            font-size: 0.68rem;
         }
 
         .bb-quote-table th {
@@ -1075,7 +1075,7 @@ def pagina_terminal_bloomberg():
             color: #aab6c5;
             font-weight: 500;
             text-align: left;
-            padding: 9px 8px;
+            padding: 7px 6px;
             border-right: 1px solid #303846;
             border-bottom: 1px solid #303846;
         }
@@ -1088,7 +1088,7 @@ def pagina_terminal_bloomberg():
 
         .bb-quote-table td {
             color: #f3f7fb;
-            padding: 8px;
+            padding: 6px;
             border-right: 1px solid #26303c;
             border-bottom: 1px solid #202833;
             font-weight: 800;
@@ -1359,7 +1359,7 @@ def pagina_terminal_bloomberg():
 
         @media (max-width: 900px) {
             .bb-quote-grid {
-                grid-template-columns: 1fr;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
                 gap: 18px;
             }
             .bb-news-toolbar {
@@ -1367,6 +1367,12 @@ def pagina_terminal_bloomberg():
             }
             .bb-status-footer {
                 display: block;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .bb-quote-grid {
+                grid-template-columns: 1fr;
             }
         }
         
