@@ -40,7 +40,7 @@ def fetch_app_state(key: str):
         print(f"[ERROR] Fetch {key}: {e}")
     return None
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=5, show_spinner=False)
 def load_bloomberg_news_feed(refresh_nonce: int = 0):
     """Monta o feed pesado com cache para evitar travamentos no rerender."""
     del refresh_nonce
@@ -101,6 +101,182 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
         warnings.append(f"Normalizacao de traducoes indisponivel: {e}")
 
     return unique_news, news_sources, warnings, datetime.now().strftime("%H:%M:%S")
+
+@st.fragment(run_every=5)
+def render_bloomberg_news_feed_fragment():
+    """Atualiza somente o feed de noticias, sem redesenhar o terminal inteiro."""
+    def esc(value) -> str:
+        return html.escape(str(value or ""), quote=True)
+
+    def infer_tags(item) -> list[str]:
+        text = f"{item.get('title_pt', '')} {item.get('title_en', '')} {item.get('summary', '')}".lower()
+        rules = [
+            ("Fed", ["fed", "fomc", "powell"]),
+            ("Inflacao", ["inflacao", "inflação", "inflation", "cpi", "pce"]),
+            ("Treasuries", ["treasury", "treasuries", "yield", "yields", "titulos", "títulos"]),
+            ("USD", ["dolar", "dólar", "dollar", "usd", "dxy"]),
+            ("Energia", ["petroleo", "petróleo", "oil", "crude", "brent", "wti"]),
+            ("Geopolitica", ["ira", "irã", "iran", "israel", "ataque", "war", "guerra"]),
+            ("China", ["china", "pboc", "yuan"]),
+            ("Brasil", ["brasil", "bcb", "copom", "real", "ibovespa"]),
+        ]
+        tags = [label for label, needles in rules if any(needle in text for needle in needles)]
+        return tags[:4] or ["Macro"]
+
+    def market_impact(item):
+        text = (
+            f"{item.get('title_pt', '')} {item.get('title_en', '')} "
+            f"{item.get('summary_pt', '')} {item.get('summary', '')}"
+        ).lower()
+        source = str(item.get("source", "")).lower()
+        score = 0
+        reasons = []
+        rules = [
+            (5, "Banco Central", ["fed", "fomc", "powell", "ecb", "bce", "boj", "boe", "copom", "bcb", "juros", "interest rate"]),
+            (5, "Inflacao", ["cpi", "pce", "ppi", "inflacao", "inflação", "inflation", "core prices"]),
+            (4, "Treasuries", ["treasury", "treasuries", "yield", "yields", "titulos", "títulos", "rendimentos"]),
+            (4, "USD", ["dolar", "dólar", "dollar", "usd", "dxy", "forex", "cambio", "câmbio"]),
+            (4, "Energia", ["petroleo", "petróleo", "oil", "crude", "brent", "wti", "opep", "opec"]),
+            (4, "Geopolitica", ["ira", "irã", "iran", "israel", "china", "russia", "rússia", "guerra", "war", "ataque", "sanctions", "sanções"]),
+            (4, "Dados Macro", ["payroll", "emprego", "jobs", "jobless", "gdp", "pib", "retail sales", "pmi", "ism"]),
+            (3, "Bolsas", ["s&p", "nasdaq", "dow", "stocks", "acoes", "ações", "indices", "índices", "futuros"]),
+            (3, "Emergentes", ["brazil", "brasil", "real", "ibovespa", "ewz", "eem", "china", "yuan"]),
+        ]
+        for weight, label, keywords in rules:
+            if any(keyword in text for keyword in keywords):
+                score += weight
+                reasons.append(label)
+        if any(word in text for word in ["breaking", "urgente", "alerta", "unexpected", "surpresa", "forecast", "previsao", "previsão"]):
+            score += 3
+            reasons.append("Surpresa")
+        if any(name in source for name in ["financial", "reuters", "bloomberg", "cnbc"]):
+            score += 1
+
+        unique_reasons = []
+        for reason in reasons:
+            if reason not in unique_reasons:
+                unique_reasons.append(reason)
+        if score >= 8:
+            return "high", "ALTO IMPACTO", unique_reasons[:3]
+        if score >= 4:
+            return "medium", "IMPACTO", unique_reasons[:3]
+        return "low", "", unique_reasons[:2]
+
+    st.caption("Somente este feed atualiza a cada 5s. O restante do terminal permanece estavel.")
+    if st.button("Atualizar feed agora", use_container_width=True, key="bb_refresh_news_fast"):
+        load_bloomberg_news_feed.clear()
+
+    filter_term = st.text_input(
+        "Filtrar noticias",
+        placeholder="Digite Fed, dolar, petroleo, Brasil...",
+        label_visibility="collapsed",
+        key="bb_news_filter_fast",
+    ).strip()
+
+    news_list, news_sources, news_warnings, feed_loaded_at = load_bloomberg_news_feed(0)
+    for warning in news_warnings[:2]:
+        st.warning(warning)
+    if not news_list:
+        st.info("Aguardando noticias em tempo real.")
+        return
+
+    if filter_term:
+        term = filter_term.lower()
+        filtered_news = [
+            item for item in news_list
+            if term in item.get("title_pt", "").lower()
+            or term in item.get("title_en", "").lower()
+            or term in item.get("summary_pt", "").lower()
+            or term in item.get("summary", "").lower()
+        ]
+    else:
+        filtered_news = news_list
+
+    high_count = sum(1 for item in filtered_news if market_impact(item)[0] == "high")
+    medium_count = sum(1 for item in filtered_news if market_impact(item)[0] == "medium")
+    latest_time = esc(filtered_news[0].get("published_str", "--:--")) if filtered_news else "--:--"
+    st.markdown(
+        f'<div class="bb-news-toolbar">'
+        f'<div class="bb-news-stat"><span>Noticias</span><strong>{len(filtered_news)}</strong></div>'
+        f'<div class="bb-news-stat"><span>Alto impacto</span><strong style="color:#ff6b5f;">{high_count}</strong></div>'
+        f'<div class="bb-news-stat"><span>Impacto medio</span><strong style="color:#ffb24a;">{medium_count}</strong></div>'
+        f'<div class="bb-news-stat"><span>Refresh feed</span><strong>{feed_loaded_at}</strong></div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    if "selected_news_id" not in st.session_state:
+        st.session_state.selected_news_id = None
+    if not st.session_state.selected_news_id and filtered_news:
+        st.session_state.selected_news_id = filtered_news[0].get("id")
+
+    if not filtered_news:
+        st.info("Nenhuma manchete correspondente encontrada.")
+        return
+
+    cards = []
+    for idx, item in enumerate(filtered_news[:45]):
+        is_featured = item.get("id") == st.session_state.selected_news_id or idx == 0
+        impact_level, impact_label, impact_reasons = market_impact(item)
+        title_pt = esc(item.get("title_pt") or item.get("title_en") or "---")
+        summary_raw = item.get("summary_pt") or item.get("title_pt") or item.get("summary") or ""
+        summary = esc(summary_raw)
+        published = esc(item.get("published_str", "00:00"))
+        source = esc(item.get("source", "Financial Juice"))
+        link = esc(item.get("link", "#"))
+        icon_text = esc("FJ" if source == "Financial Juice" else source[:2].upper())
+        tags_html = "".join(f'<span class="bb-news-tag">{esc(tag)}</span>' for tag in infer_tags(item))
+        impact_badge = (
+            f'<span class="bb-impact-badge {impact_level}">{esc(impact_label)}</span>'
+            if impact_label
+            else ""
+        )
+        reason_tags = "".join(f'<span class="bb-news-tag">{esc(reason)}</span>' for reason in impact_reasons)
+        featured_class = " bb-featured" if is_featured else ""
+        impact_class = f" bb-impact-{impact_level}" if impact_level in ["high", "medium"] else ""
+        close_html = '<span class="bb-news-close">x</span>' if is_featured else ""
+        summary_html = (
+            f'<div class="bb-news-summary">{summary}</div>'
+            if summary and summary != title_pt
+            else ""
+        )
+        cards.append(
+            f'<div class="bb-news-card{featured_class}{impact_class}">'
+            f'{close_html}'
+            f'<div class="bb-news-rail"></div>'
+            f'<div class="bb-news-icon">{icon_text}</div>'
+            f'<div class="bb-news-content">'
+            f'<div class="bb-news-title">{title_pt}</div>'
+            f'{summary_html}'
+            f'<div class="bb-news-meta">'
+            f'<span>{published}</span><span>{source}</span>{impact_badge}{reason_tags}{tags_html}'
+            f'</div>'
+            f'</div>'
+            f'<a class="bb-news-link" href="{link}" target="_blank" rel="noopener noreferrer">↗</a>'
+            f'</div>'
+        )
+
+    feed_header = (
+        f'<div class="bb-feed-header">'
+        f'<span>Feed de Noticias em Tempo Real</span>'
+        f'<span class="bb-live-pill"><span class="bb-status-led"></span>LIVE 5s - {esc(" + ".join(news_sources) or "Fontes")} - {len(filtered_news)} noticias</span>'
+        f'</div>'
+    )
+    st.markdown(f'<div class="bb-news-feed">{feed_header}{"".join(cards)}</div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="bb-status-footer">
+        <div>
+            <span class="bb-status-led"></span>
+            <span style="color: #00FFA3; font-weight: bold;">LIVE FEED</span>
+            &nbsp;|&nbsp; Somente o feed atualiza a cada 5s
+            &nbsp;|&nbsp; Origem: {esc(" + ".join(news_sources) or "Fontes")}
+        </div>
+        <div>
+            Ultimo Refresh: {feed_loaded_at}
+            &nbsp;|&nbsp; Fontes: Financial Juice + Reuters + Bloomberg + CNBC + SCMP + GDELT
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 def fetch_app_state_with_time(key: str):
     """Busca dados no Supabase e retorna uma tupla (valor, data_atualizacao_formatada_local, dt_utc)."""
@@ -681,7 +857,6 @@ def painel_corpo_global():
                 df.columns = ['Ativo', 'Preço', 'Var %']
                 st.dataframe(df.style.applymap(color_change, subset=['Var %']), hide_index=True, use_container_width=True)
 
-@st.fragment(run_every=60)
 def pagina_terminal_bloomberg():
     """Pagina do Terminal Bloomberg de noticias com atualizacao leve e cacheada."""
     def esc(value) -> str:
@@ -1089,6 +1264,9 @@ def pagina_terminal_bloomberg():
             st.markdown('<div class="bb-ticker-bar"><span style="color: #666;">Erro ao carregar Ticker em tempo real</span></div>', unsafe_allow_html=True)
     else:
         st.markdown('<div class="bb-ticker-bar"><span style="color: #666;">Aguardando Ticker...</span></div>', unsafe_allow_html=True)
+
+    render_bloomberg_news_feed_fragment()
+    return
 
     st.caption("Atualizacao automatica reduzida para 60s para manter a pagina responsiva. Use o filtro para focar nas manchetes relevantes.")
     if st.button("Atualizar feed agora", use_container_width=True, key="bb_refresh_news"):
