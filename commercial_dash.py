@@ -1697,6 +1697,7 @@ def pagina_terminal_global():
                 </div>
             """, unsafe_allow_html=True)
             
+    secao_calendario_global_fragment()
     painel_corpo_global()
 
 @st.fragment(run_every=30)
@@ -1803,6 +1804,71 @@ def sidebar_calendario():
                 </div>
             </div>
         """, unsafe_allow_html=True)
+
+@st.fragment(run_every=1800)
+def secao_calendario_global_fragment():
+    """Calendario economico compacto dentro do Terminal Global."""
+    calendar_data = fetch_app_state("calendario_economico")
+    if not calendar_data:
+        return
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    selected_currencies = ["USD", "EUR", "GBP", "JPY", "CNY", "CAD", "AUD", "NZD", "CHF"]
+    impact_rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "HOLIDAY": 3}
+
+    events = [
+        event for event in calendar_data
+        if event.get("date") == today_str and event.get("currency") in selected_currencies
+    ]
+    events.sort(key=lambda item: (item.get("time", "99:99"), impact_rank.get(item.get("impact", ""), 9)))
+
+    st.markdown("---")
+    st.markdown("#### Calendario Economico")
+    st.caption(f"Eventos de hoje ({today_str}) | Fonte: ForexFactory/Faireconomy")
+
+    if not events:
+        st.info("Nenhum evento economico relevante para hoje.")
+        return
+
+    rows = []
+    for event in events[:40]:
+        impact = event.get("impact", "")
+        if impact == "HIGH":
+            impact_label = "ALTO"
+        elif impact == "MEDIUM":
+            impact_label = "MEDIO"
+        elif impact == "LOW":
+            impact_label = "BAIXO"
+        else:
+            impact_label = impact or "---"
+
+        rows.append({
+            "Hora": event.get("time", "---"),
+            "Moe.": event.get("currency", "---"),
+            "Imp.": impact_label,
+            "Evento": event.get("event", "---"),
+            "Atual": event.get("actual", "---") or "---",
+            "Projecao": event.get("forecast", "---") or "---",
+            "Anterior": event.get("previous", "---") or "---",
+        })
+
+    df = pd.DataFrame(rows)
+
+    def color_impact(value):
+        if value == "ALTO":
+            return "color: #FF4B4B; font-weight: bold"
+        if value == "MEDIO":
+            return "color: #FF9800; font-weight: bold"
+        if value == "BAIXO":
+            return "color: #888; font-weight: bold"
+        return "color: #AAA"
+
+    styler = df.style
+    if hasattr(styler, "map"):
+        styler = styler.map(color_impact, subset=["Imp."])
+    else:
+        styler = styler.applymap(color_impact, subset=["Imp."])
+    st.dataframe(styler, hide_index=True, use_container_width=True, height=360)
 
 @st.fragment(run_every=300)
 def secao_fluxo_estrangeiro_fragment():
