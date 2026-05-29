@@ -1880,7 +1880,7 @@ def secao_calendario_global_fragment():
     investing_calendar_url = (
         "https://sslecal2.investing.com?"
         "ecoDayBackground=%230b0f17&"
-        "defaultFont=%23ffffff&"
+        "defaultFont=%23000000&"
         "innerBorderColor=%23242b36&"
         "borderColor=%23242b36&"
         "ecoDayFontColor=%23ffffff&"
