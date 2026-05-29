@@ -889,6 +889,20 @@ def painel_corpo_global():
     if not global_data: return
     
     categories = global_data.get("categories", global_data)
+
+    def styled_change_dataframe(df):
+        def color_change(val):
+            try:
+                v = float(val)
+                color = '#00FFA3' if v >= 0 else '#FF4B4B'
+                return f'color: {color}; font-weight: bold'
+            except Exception:
+                return ''
+
+        styler = df.style
+        if hasattr(styler, "map"):
+            return styler.map(color_change, subset=['Var %'])
+        return styler.applymap(color_change, subset=['Var %'])
     
     st.markdown("---")
     # Organizar em colunas de 2 para economizar espaço
@@ -907,7 +921,7 @@ def painel_corpo_global():
                     color = '#00FFA3' if v >= 0 else '#FF4B4B'
                     return f'color: {color}; font-weight: bold'
                 except: return ''
-            st.dataframe(df.style.applymap(color_change, subset=['Var %']), hide_index=True, use_container_width=True)
+            st.dataframe(styled_change_dataframe(df), hide_index=True, use_container_width=True)
         
         if i + 1 < len(cat_names):
             with c2:
@@ -916,7 +930,7 @@ def painel_corpo_global():
                 assets = categories[cat]
                 df = pd.DataFrame(assets)[['name', 'price', 'change']]
                 df.columns = ['Ativo', 'Preço', 'Var %']
-                st.dataframe(df.style.applymap(color_change, subset=['Var %']), hide_index=True, use_container_width=True)
+                st.dataframe(styled_change_dataframe(df), hide_index=True, use_container_width=True)
 
 def pagina_terminal_bloomberg():
     """Pagina do Terminal Bloomberg de noticias com atualizacao leve e cacheada."""
@@ -2746,9 +2760,13 @@ def pagina_gestao_risco():
             def _color_total(val):
                 return "color: #00FFA3; font-weight:bold" if val >= 0 else "color: #FF4B4B; font-weight:bold"
 
+            resumo_styler = df_resumo.style
+            if hasattr(resumo_styler, "map"):
+                resumo_styler = resumo_styler.map(_color_total, subset=["Total (R$)"])
+            else:
+                resumo_styler = resumo_styler.applymap(_color_total, subset=["Total (R$)"])
             styled_resumo = (
-                df_resumo.style
-                .applymap(_color_total, subset=["Total (R$)"])
+                resumo_styler
                 .format({"Total (R$)": "R$ {:+,.2f}", "Max DD (R$)": "R$ {:.2f}"})
                 .set_properties(**{"font-size": "0.82rem", "color": "#DDD",
                                    "background-color": "#0d0d0d"})
