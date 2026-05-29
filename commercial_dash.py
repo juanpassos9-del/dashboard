@@ -5,6 +5,7 @@ import os
 import html
 import pandas as pd
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from supabase import create_client, Client
 
 
@@ -1816,7 +1817,8 @@ def secao_calendario_global_fragment():
     if not calendar_data:
         return
 
-    today_str = datetime.now().strftime("%Y-%m-%d")
+    now_br = datetime.now(ZoneInfo("America/Sao_Paulo"))
+    today_str = now_br.strftime("%Y-%m-%d")
     selected_currencies = ["USD", "EUR", "GBP", "JPY", "CNY", "CAD", "AUD", "NZD", "CHF"]
     impact_rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "HOLIDAY": 3}
 
@@ -1828,11 +1830,52 @@ def secao_calendario_global_fragment():
 
     st.markdown("---")
     st.markdown("#### Calendario Economico")
-    st.caption(f"Eventos de hoje ({today_str}) | Fonte: ForexFactory/Faireconomy")
+    source_label = next((event.get("source") for event in events if event.get("source")), "Supabase")
+    st.caption(f"Eventos de hoje ({today_str}) | Horario de Brasilia | Fonte: {source_label}")
 
     if not events:
         st.info("Nenhum evento economico relevante para hoje.")
         return
+
+    def event_datetime(event):
+        try:
+            return datetime.strptime(
+                f"{event.get('date')} {event.get('time')}",
+                "%Y-%m-%d %H:%M",
+            ).replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+        except Exception:
+            return None
+
+    next_event = None
+    for event in events:
+        event_dt = event_datetime(event)
+        if event_dt and event_dt >= now_br:
+            next_event = event
+            break
+
+    next_event_key = None
+    if next_event:
+        next_event_key = (
+            next_event.get("date"),
+            next_event.get("time"),
+            next_event.get("currency"),
+            next_event.get("event"),
+        )
+        impact = next_event.get("impact", "")
+        impact_color = "#FF4B4B" if impact == "HIGH" else ("#FF9800" if impact == "MEDIUM" else "#888")
+        st.markdown(
+            f"""
+            <div style="border:1px solid {impact_color}; border-left:5px solid {impact_color}; border-radius:8px; padding:12px 14px; margin:10px 0 14px 0; background:#111;">
+                <div style="font-size:0.72rem; color:#888; font-weight:700; text-transform:uppercase;">Proximo evento</div>
+                <div style="display:flex; justify-content:space-between; gap:18px; align-items:center; flex-wrap:wrap;">
+                    <div style="font-size:1rem; font-weight:700; color:#FFF;">{next_event.get('time', '---')} | {next_event.get('currency', '---')} | {next_event.get('event', '---')}</div>
+                    <div style="color:{impact_color}; font-weight:800;">{impact or '---'}</div>
+                </div>
+                <div style="font-size:0.78rem; color:#AAA; margin-top:6px;">Atual: <b style="color:#FFF;">{next_event.get('actual', '---') or '---'}</b> &nbsp;|&nbsp; Projecao: <b>{next_event.get('forecast', '---') or '---'}</b> &nbsp;|&nbsp; Anterior: <b>{next_event.get('previous', '---') or '---'}</b></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     rows = []
     for event in events[:40]:
@@ -1846,7 +1889,14 @@ def secao_calendario_global_fragment():
         else:
             impact_label = impact or "---"
 
+        event_key = (
+            event.get("date"),
+            event.get("time"),
+            event.get("currency"),
+            event.get("event"),
+        )
         rows.append({
+            "Status": "PROXIMO" if event_key == next_event_key else "",
             "Hora": event.get("time", "---"),
             "Moe.": event.get("currency", "---"),
             "Imp.": impact_label,
@@ -1867,11 +1917,21 @@ def secao_calendario_global_fragment():
             return "color: #888; font-weight: bold"
         return "color: #AAA"
 
+    def highlight_next(row):
+        if row.get("Status") == "PROXIMO":
+            return ["background-color: #2a2110; font-weight: bold"] * len(row)
+        return [""] * len(row)
+
     styler = df.style
     if hasattr(styler, "map"):
         styler = styler.map(color_impact, subset=["Imp."])
     else:
         styler = styler.applymap(color_impact, subset=["Imp."])
+    styler = styler.apply(highlight_next, axis=1)
+    try:
+        styler = styler.hide(axis="columns", subset=["Status"])
+    except Exception:
+        pass
     st.dataframe(styler, hide_index=True, use_container_width=True, height=360)
 
 @st.fragment(run_every=300)

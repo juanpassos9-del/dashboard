@@ -1,4 +1,6 @@
 import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -114,8 +116,9 @@ def _fetch_faireconomy_calendar():
     processed_events = []
     for event in all_events_raw:
         impact = event.get("impact", "").upper()
-        date_part = event["date"].split("T")[0]
-        time_part = event["date"].split("T")[1][:5]
+        event_dt = datetime.fromisoformat(event["date"]).astimezone(ZoneInfo("America/Sao_Paulo"))
+        date_part = event_dt.strftime("%Y-%m-%d")
+        time_part = event_dt.strftime("%H:%M")
 
         processed_events.append({
             "date": date_part,
