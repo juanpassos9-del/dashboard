@@ -71,7 +71,7 @@ def _fetch_investing_calendar():
         "limit_from": "0",
     }
 
-    response = requests.post(url, headers=headers, data=payload, timeout=20)
+    response = requests.post(url, headers=headers, data=payload, timeout=8)
     response.raise_for_status()
     payload_json = response.json()
     soup = BeautifulSoup(payload_json.get("data", ""), "html.parser")
