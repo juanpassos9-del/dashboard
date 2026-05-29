@@ -1544,7 +1544,7 @@ def pagina_terminal_global():
     
     global_chart_assets = {
         "S&P 500": {"tv": "USA500", "yf": "^GSPC"},
-        "NASDAQ": {"tv": "CME_MINI:NQ1!", "yf": "^IXIC"},
+        "NASDAQ": {"tv": "ACTIVTRADES:USATEC", "yf": "^IXIC"},
         "BRENT OIL": {"tv": "TVC:UKOIL", "yf": "BZ=F"},
         "WTI OIL": {"tv": "TVC:USOIL", "yf": "CL=F"},
         "GOLD": {"tv": "TVC:GOLD", "yf": "GC=F"},
@@ -1555,9 +1555,9 @@ def pagina_terminal_global():
         "EEM (Emerging Markets)": {"tv": "AMEX:EEM", "yf": "EEM"},
     }
     
-    c1, c2 = st.columns([2, 1])
+    chart_col_1, chart_col_2 = st.columns(2)
     
-    with c1:
+    with chart_col_1:
         st.markdown("#### 📈 Gráfico Global")
         col_sel, col_int = st.columns([2, 1])
         with col_sel:
@@ -1582,15 +1582,60 @@ def pagina_terminal_global():
             "enable_publishing": false,
             "hide_top_toolbar": false,
             "save_image": true,
-            "hide_volume": false,
-            "container_id": "tv_global"
+            "hide_volume": true,
+            "container_id": "tv_global",
+            "studies": [
+              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Session" }}, "plots": {{ "VWAP": {{ "color": "#FFD166" }} }} }},
+              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Week" }}, "plots": {{ "VWAP": {{ "color": "#06D6A0" }} }} }},
+              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Month" }}, "plots": {{ "VWAP": {{ "color": "#118AB2" }} }} }}
+            ]
           }});
           </script>
         </div>
         """
         components.html(tv_html, height=500)
 
-    with c2:
+    with chart_col_2:
+        st.markdown("#### Grafico Global 2")
+        col_sel_2, col_int_2 = st.columns([2, 1])
+        with col_sel_2:
+            sym_2 = st.selectbox("Ativo", list(global_chart_assets.keys()), index=1, key="global_sym_2")
+        with col_int_2:
+            interval_2 = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=4, key="global_int_2")
+
+        tv_html_2 = f"""
+        <div class="tradingview-widget-container" style="height: 480px; width: 100%;">
+          <div id="tv_global_2" style="height: 100%; width: 100%;"></div>
+          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+          <script type="text/javascript">
+          new TradingView.widget({{
+            "autosize": true,
+            "symbol": "{global_chart_assets[sym_2]['tv']}",
+            "interval": "{interval_2}",
+            "timezone": "America/Sao_Paulo",
+            "theme": "dark",
+            "style": "1",
+            "locale": "br",
+            "toolbar_bg": "#f1f3f6",
+            "enable_publishing": false,
+            "hide_top_toolbar": false,
+            "save_image": true,
+            "hide_volume": true,
+            "container_id": "tv_global_2",
+            "studies": [
+              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Session" }}, "plots": {{ "VWAP": {{ "color": "#FFD166" }} }} }},
+              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Week" }}, "plots": {{ "VWAP": {{ "color": "#06D6A0" }} }} }},
+              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Month" }}, "plots": {{ "VWAP": {{ "color": "#118AB2" }} }} }}
+            ]
+          }});
+          </script>
+        </div>
+        """
+        components.html(tv_html_2, height=500)
+
+    st.markdown("---")
+
+    with st.container():
         st.markdown("#### 🤖 Analista Técnico IA")
         st.info(f"Análise baseada no histórico diário (OHLC) de {sym}.")
         if st.button("Gerar Análise Técnica (IA)", use_container_width=True):
@@ -1621,7 +1666,6 @@ def pagina_terminal_global():
                 </div>
             """, unsafe_allow_html=True)
             
-    secao_market_report_fragment()
     painel_corpo_global()
 
 @st.fragment(run_every=60)
@@ -1896,7 +1940,7 @@ def pagina_graficos():
         "MINI DÓLAR (WDO)": "BMFBOVESPA:WDO1!",
         "IBOVESPA": "BMFBOVESPA:IBOV",
         "S&P 500 (Futuro)": "USA500",
-        "NASDAQ (Futuro)": "CME_MINI:NQ1!",
+        "NASDAQ (Futuro)": "ACTIVTRADES:USATEC",
         "VIX": "CBOE:VIX",
         "DXY (Dólar Index)": "CAPITALCOM:DXY",
         "USDBRL": "FX_IDC:USDBRL",
@@ -1959,7 +2003,12 @@ def pagina_graficos():
         "hide_top_toolbar": false,
         "save_image": true,
         "hide_volume": true,
-        "container_id": "tv_chart_1"
+        "container_id": "tv_chart_1",
+        "studies": [
+          {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Session" }}, "plots": {{ "VWAP": {{ "color": "#FFD166" }} }} }},
+          {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Week" }}, "plots": {{ "VWAP": {{ "color": "#06D6A0" }} }} }},
+          {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Month" }}, "plots": {{ "VWAP": {{ "color": "#118AB2" }} }} }}
+        ]
       }});
       </script>
     </div>
@@ -1992,7 +2041,12 @@ def pagina_graficos():
         "hide_top_toolbar": false,
         "save_image": true,
         "hide_volume": true,
-        "container_id": "tv_chart_2"
+        "container_id": "tv_chart_2",
+        "studies": [
+          {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Session" }}, "plots": {{ "VWAP": {{ "color": "#FFD166" }} }} }},
+          {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Week" }}, "plots": {{ "VWAP": {{ "color": "#06D6A0" }} }} }},
+          {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Month" }}, "plots": {{ "VWAP": {{ "color": "#118AB2" }} }} }}
+        ]
       }});
       </script>
     </div>
@@ -2047,6 +2101,9 @@ def pagina_correlacao():
             "mainSeriesProperties.lineStyle.linewidth": 3
         }},
         "studies": [
+          {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Session" }}, "plots": {{ "VWAP": {{ "color": "#FFD166" }} }} }},
+          {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Week" }}, "plots": {{ "VWAP": {{ "color": "#06D6A0" }} }} }},
+          {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Month" }}, "plots": {{ "VWAP": {{ "color": "#118AB2" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:GOLD" }}, "plots": {{ "Plot": {{ "color": "#FFFF00" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:UKOIL" }}, "plots": {{ "Plot": {{ "color": "#006400" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "US10Y" }} }},
@@ -2095,6 +2152,9 @@ def pagina_correlacao():
             "scalesProperties.scaleMode": 2
         }},
         "studies": [
+          {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Session" }}, "plots": {{ "VWAP": {{ "color": "#FFD166" }} }} }},
+          {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Week" }}, "plots": {{ "VWAP": {{ "color": "#06D6A0" }} }} }},
+          {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Month" }}, "plots": {{ "VWAP": {{ "color": "#118AB2" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "FX_IDC:BRLUSD" }}, "plots": {{ "Plot": {{ "color": "#00FFA3" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "FX:EURUSD" }}, "plots": {{ "Plot": {{ "color": "#00BFFF" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "FX_IDC:JPYUSD" }}, "plots": {{ "Plot": {{ "color": "#FF4B4B" }} }} }}
