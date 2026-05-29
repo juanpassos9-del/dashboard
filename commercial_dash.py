@@ -57,6 +57,40 @@ def get_global_markets_data():
         return live_data
     return fetch_app_state("mercados_globais")
 
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_live_calendar_data():
+    """Busca calendario economico direto da fonte com cache curto."""
+    try:
+        from execution.fetch_calendar import fetch_economic_calendar
+        df = fetch_economic_calendar(save_file=False)
+        if df is None or df.empty:
+            return None
+        events = []
+        for _, row in df.iterrows():
+            impact_raw = str(row.get("Impacto", "")).upper()
+            impact = {"ALTO": "HIGH", "MEDIO": "MEDIUM", "MÉDIO": "MEDIUM", "BAIXO": "LOW"}.get(impact_raw, impact_raw)
+            events.append({
+                "date": row.get("Data", ""),
+                "time": row.get("Horário", row.get("Horario", "")),
+                "currency": row.get("País", row.get("Pais", "")),
+                "event": row.get("Evento", ""),
+                "impact": impact,
+                "actual": row.get("Atual", "---"),
+                "forecast": row.get("Previsão", row.get("Previsao", "---")),
+                "previous": row.get("Anterior", "---"),
+            })
+        return events
+    except Exception as e:
+        print(f"[ERROR] Live calendar: {e}")
+        return None
+
+def get_calendar_data():
+    """Usa calendario ao vivo quando possivel e Supabase como fallback."""
+    live_data = fetch_live_calendar_data()
+    if live_data:
+        return live_data
+    return fetch_app_state("calendario_economico")
+
 @st.cache_data(ttl=5, show_spinner=False)
 def load_bloomberg_news_feed(refresh_nonce: int = 0):
     """Monta o feed pesado com cache para evitar travamentos no rerender."""
@@ -1751,7 +1785,7 @@ def sidebar_mercados():
 
 @st.fragment(run_every=3600)
 def sidebar_calendario():
-    calendar_data = fetch_app_state("calendario_economico")
+    calendar_data = get_calendar_data()
     if not calendar_data: 
         st.info("Carregando calendário...")
         return
@@ -1808,7 +1842,7 @@ def sidebar_calendario():
 @st.fragment(run_every=1800)
 def secao_calendario_global_fragment():
     """Calendario economico compacto dentro do Terminal Global."""
-    calendar_data = fetch_app_state("calendario_economico")
+    calendar_data = get_calendar_data()
     if not calendar_data:
         return
 
