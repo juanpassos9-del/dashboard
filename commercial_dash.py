@@ -2060,14 +2060,20 @@ def pagina_correlacao():
     # Controles Gerais
     c1, c2, c3 = st.columns([1, 1, 2])
     with c1:
-        interval = st.selectbox("Intervalo", ["5", "15", "60", "D", "W"], index=3)
+        interval = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=4)
     with c2:
         theme = st.selectbox("Tema", ["dark", "light"], index=0)
     with c3:
         c_height = st.slider("Altura do Gráfico", 400, 1200, 800, 50)
 
+    treasury_symbols = {
+        "10y": "CBOT:ZN1!",
+        "30y": "CBOT:ZB1!",
+    }
+
     # Legenda customizada com cores sugeridas para o usuário ajustar no widget
     st.info("💡 Dica: Nos gráficos abaixo, você pode clicar em cada ativo na legenda (canto superior esquerdo) para ajustar a cor e a espessura da linha para melhor visibilidade.")
+    st.caption("US10Y/US30Y usam proxies futuros CBOT:ZN1!/CBOT:ZB1! para preservar a comparação ao alternar para 1 minuto.")
 
     # Widget 1: Correlação Macro Tradicional
     st.markdown("#### 📊 Correlação Macro (USA500, Ouro, Petróleo, US10Y, US30Y)")
@@ -2103,8 +2109,8 @@ def pagina_correlacao():
         "studies": [
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:GOLD" }}, "plots": {{ "Plot": {{ "color": "#FFFF00" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:UKOIL" }}, "plots": {{ "Plot": {{ "color": "#006400" }} }} }},
-          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "PYTH:US10Y" }}, "plots": {{ "Plot": {{ "color": "#FF9800" }} }} }},
-          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "PYTH:US30Y" }}, "plots": {{ "Plot": {{ "color": "#00BFFF" }} }} }}
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "{treasury_symbols['10y']}" }}, "plots": {{ "Plot": {{ "color": "#FF9800" }} }} }},
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "{treasury_symbols['30y']}" }}, "plots": {{ "Plot": {{ "color": "#00BFFF" }} }} }}
         ]
       }}
       );
