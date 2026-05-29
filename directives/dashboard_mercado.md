@@ -66,3 +66,4 @@ Dashboard em Python (Streamlit) que exibe cotações quasi-tempo-real de ativos 
 - **Windows cp1252:** Console do Windows não suporta emojis Unicode (▲▼🔴🟡🟢). Usar caracteres ASCII no console, emojis só no Streamlit (UTF-8).
 - **DI Futuro B3:** Contratos DI1F26/DI1F27 não estão disponíveis no yfinance. Precisa de scraping direto da B3 ou API especializada.
 - **Investing.com:** Scraping do calendário econômico pode falhar (403/CloudFlare). Fallback estático por dia da semana implementado.
+- **Cotações globais no Streamlit Cloud:** O painel deve buscar `mercados_globais` direto via `execution/fetch_global_markets.py` com cache curto no app e usar Supabase apenas como fallback. Nao depender exclusivamente do `dashboard_bridge.py`, porque ele roda localmente e, se estiver offline, deixa os dados congelados no horario do ultimo sync.

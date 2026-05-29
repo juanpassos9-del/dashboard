@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 
 
-def fetch_global_data():
+def fetch_global_data(save_file=True):
     # Estrutura de categorias e nomes amigáveis
     categories_config = {
         "📊 ÍNDICES": {
@@ -77,7 +77,7 @@ def fetch_global_data():
 
     if data is None or data.empty:
         print("[!] Erro crítico: Não foi possível baixar dados do Yahoo Finance.")
-        return
+        return None
 
     results = {
         "metadata": {
@@ -125,13 +125,15 @@ def fetch_global_data():
             
     # Só salva se tivermos dados mínimos (ex: pelo menos 5 ativos válidos)
     if valid_data_count > 5:
-        with open("mercados_globais.json", "w") as f:
-            json.dump(results, f)
+        if save_file:
+            with open("mercados_globais.json", "w") as f:
+                json.dump(results, f)
         print(f"[+] Sucesso: {valid_data_count} ativos atualizados.")
+        return results
     else:
         print("[!] Erro: Poucos dados válidos recebidos. Abortando salvamento para proteger dados antigos.")
+        return None
 
 
 if __name__ == "__main__":
     fetch_global_data()
-

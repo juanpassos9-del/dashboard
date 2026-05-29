@@ -40,6 +40,23 @@ def fetch_app_state(key: str):
         print(f"[ERROR] Fetch {key}: {e}")
     return None
 
+@st.cache_data(ttl=30, show_spinner=False)
+def fetch_live_global_markets():
+    """Busca cotacoes globais direto da fonte com cache curto para o Streamlit Cloud."""
+    try:
+        from execution.fetch_global_markets import fetch_global_data
+        return fetch_global_data(save_file=False)
+    except Exception as e:
+        print(f"[ERROR] Live global markets: {e}")
+        return None
+
+def get_global_markets_data():
+    """Usa dados ao vivo quando possivel e Supabase como fallback."""
+    live_data = fetch_live_global_markets()
+    if live_data:
+        return live_data
+    return fetch_app_state("mercados_globais")
+
 @st.cache_data(ttl=5, show_spinner=False)
 def load_bloomberg_news_feed(refresh_nonce: int = 0):
     """Monta o feed pesado com cache para evitar travamentos no rerender."""
@@ -425,10 +442,10 @@ st.markdown("""
 # FRAGMENTS
 # ══════════════════════════════════════════════════════════════════════════════
 
-@st.fragment(run_every=60)
+@st.fragment(run_every=30)
 def painel_tickers_topo():
     """Mini cards de cotações globais no topo do terminal."""
-    global_data = fetch_app_state("mercados_globais")
+    global_data = get_global_markets_data()
     if not global_data: return
 
     # Suporte para formato com ou sem chave 'categories'
@@ -841,10 +858,10 @@ def painel_inferior_rtd():
         html += '</div>'
         st.markdown(html, unsafe_allow_html=True)
 
-@st.fragment(run_every=60)
+@st.fragment(run_every=30)
 def painel_topo_global():
     """Cards de destaque para o mercado global."""
-    global_data = fetch_app_state("mercados_globais")
+    global_data = get_global_markets_data()
     if not global_data: return
     
     categories = global_data.get("categories", global_data)
@@ -882,10 +899,10 @@ def painel_topo_global():
             else:
                 st.markdown(f"<div class='main-card' style='padding:15px;'>{name}<br>---</div>", unsafe_allow_html=True)
 
-@st.fragment(run_every=60)
+@st.fragment(run_every=30)
 def painel_corpo_global():
     """Tabelas detalhadas de mercados globais."""
-    global_data = fetch_app_state("mercados_globais")
+    global_data = get_global_markets_data()
     if not global_data: return
     
     categories = global_data.get("categories", global_data)
@@ -1363,7 +1380,7 @@ def pagina_terminal_bloomberg():
     </style>
     """, unsafe_allow_html=True)
 
-    global_data = fetch_app_state("mercados_globais")
+    global_data = get_global_markets_data()
 
     def render_quote_grids(data):
         if not data:
@@ -1682,9 +1699,9 @@ def pagina_terminal_global():
             
     painel_corpo_global()
 
-@st.fragment(run_every=60)
+@st.fragment(run_every=30)
 def sidebar_mercados():
-    global_data = fetch_app_state("mercados_globais")
+    global_data = get_global_markets_data()
     if not global_data: 
         st.info("Carregando mercados...")
         return
