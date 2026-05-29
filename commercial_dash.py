@@ -2204,8 +2204,8 @@ def pagina_correlacao():
         "studies": [
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:GOLD" }}, "plots": {{ "Plot": {{ "color": "#FFFF00" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:UKOIL" }}, "plots": {{ "Plot": {{ "color": "#006400" }} }} }},
-          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "PYTH:US10Y" }}, "plots": {{ "Plot": {{ "color": "#FF9800" }} }} }},
-          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "PYTH:US30Y" }}, "plots": {{ "Plot": {{ "color": "#00BFFF" }} }} }}
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "OTCB:US10Y" }}, "plots": {{ "Plot": {{ "color": "#FF9800" }} }} }},
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "OTCB:US30Y" }}, "plots": {{ "Plot": {{ "color": "#00BFFF" }} }} }}
         ]
       }}
       );
