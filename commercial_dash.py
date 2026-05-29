@@ -1896,61 +1896,6 @@ def secao_calendario_global_fragment():
     st.caption("Widget oficial do Investing.com com Atual, Projecao e Anterior. Ajuste o fuso no proprio widget se necessario.")
     components.iframe(investing_calendar_url, height=520, scrolling=True)
 
-    rows = []
-    for event in events[:40]:
-        impact = event.get("impact", "")
-        if impact == "HIGH":
-            impact_label = "ALTO"
-        elif impact == "MEDIUM":
-            impact_label = "MEDIO"
-        elif impact == "LOW":
-            impact_label = "BAIXO"
-        else:
-            impact_label = impact or "---"
-
-        event_key = (
-            event.get("date"),
-            event.get("time"),
-            event.get("currency"),
-            event.get("event"),
-        )
-        rows.append({
-            "Status": "PROXIMO" if event_key == next_event_key else "",
-            "Hora": event.get("time", "---"),
-            "Moe.": event.get("currency", "---"),
-            "Imp.": impact_label,
-            "Evento": event.get("event", "---"),
-            "Atual": event.get("actual", "---") or "---",
-            "Projecao": event.get("forecast", "---") or "---",
-            "Anterior": event.get("previous", "---") or "---",
-        })
-
-    df = pd.DataFrame(rows)
-    status_series = df["Status"].copy()
-    display_df = df.drop(columns=["Status"])
-
-    def color_impact(value):
-        if value == "ALTO":
-            return "color: #FF4B4B; font-weight: bold"
-        if value == "MEDIO":
-            return "color: #FF9800; font-weight: bold"
-        if value == "BAIXO":
-            return "color: #888; font-weight: bold"
-        return "color: #AAA"
-
-    def highlight_next(row):
-        if status_series.get(row.name) == "PROXIMO":
-            return ["background-color: #2a2110; font-weight: bold"] * len(row)
-        return [""] * len(row)
-
-    styler = display_df.style
-    if hasattr(styler, "map"):
-        styler = styler.map(color_impact, subset=["Imp."])
-    else:
-        styler = styler.applymap(color_impact, subset=["Imp."])
-    styler = styler.apply(highlight_next, axis=1)
-    st.dataframe(styler, hide_index=True, use_container_width=True, height=360)
-
 @st.fragment(run_every=300)
 def secao_fluxo_estrangeiro_fragment():
     """Seção que exibe o Fluxo do Investidor Estrangeiro na B3."""
