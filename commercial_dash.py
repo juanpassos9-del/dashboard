@@ -1670,6 +1670,8 @@ def pagina_terminal_global():
         components.html(tv_html_2, height=500)
 
     st.markdown("---")
+    secao_calendario_global_fragment()
+    st.markdown("---")
 
     with st.container():
         st.markdown("#### 🤖 Analista Técnico IA")
@@ -1702,7 +1704,6 @@ def pagina_terminal_global():
                 </div>
             """, unsafe_allow_html=True)
             
-    secao_calendario_global_fragment()
     painel_corpo_global()
 
 @st.fragment(run_every=30)
