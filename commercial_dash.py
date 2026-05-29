@@ -1877,6 +1877,25 @@ def secao_calendario_global_fragment():
             unsafe_allow_html=True,
         )
 
+    investing_calendar_url = (
+        "https://sslecal2.investing.com?"
+        "ecoDayBackground=%230b0f17&"
+        "defaultFont=%23ffffff&"
+        "innerBorderColor=%23242b36&"
+        "borderColor=%23242b36&"
+        "ecoDayFontColor=%23ffffff&"
+        "columns=exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous&"
+        "importance=1,2,3&"
+        "features=datepicker,timezone,timeselector,filters&"
+        "countries=25,6,37,72,22,17,35,43,11,12,4,5&"
+        "calType=day&"
+        "timeZone=8&"
+        "lang=12"
+    )
+    st.markdown("##### Calendario em tempo real")
+    st.caption("Widget oficial do Investing.com com Atual, Projecao e Anterior. Ajuste o fuso no proprio widget se necessario.")
+    components.iframe(investing_calendar_url, height=520, scrolling=True)
+
     rows = []
     for event in events[:40]:
         impact = event.get("impact", "")
@@ -1907,6 +1926,8 @@ def secao_calendario_global_fragment():
         })
 
     df = pd.DataFrame(rows)
+    status_series = df["Status"].copy()
+    display_df = df.drop(columns=["Status"])
 
     def color_impact(value):
         if value == "ALTO":
@@ -1918,20 +1939,16 @@ def secao_calendario_global_fragment():
         return "color: #AAA"
 
     def highlight_next(row):
-        if row.get("Status") == "PROXIMO":
+        if status_series.get(row.name) == "PROXIMO":
             return ["background-color: #2a2110; font-weight: bold"] * len(row)
         return [""] * len(row)
 
-    styler = df.style
+    styler = display_df.style
     if hasattr(styler, "map"):
         styler = styler.map(color_impact, subset=["Imp."])
     else:
         styler = styler.applymap(color_impact, subset=["Imp."])
     styler = styler.apply(highlight_next, axis=1)
-    try:
-        styler = styler.hide(axis="columns", subset=["Status"])
-    except Exception:
-        pass
     st.dataframe(styler, hide_index=True, use_container_width=True, height=360)
 
 @st.fragment(run_every=300)
