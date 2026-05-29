@@ -2101,13 +2101,10 @@ def pagina_correlacao():
             "mainSeriesProperties.lineStyle.linewidth": 3
         }},
         "studies": [
-          {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Session" }}, "plots": {{ "VWAP": {{ "color": "#FFD166" }} }} }},
-          {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Week" }}, "plots": {{ "VWAP": {{ "color": "#06D6A0" }} }} }},
-          {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Month" }}, "plots": {{ "VWAP": {{ "color": "#118AB2" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:GOLD" }}, "plots": {{ "Plot": {{ "color": "#FFFF00" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:UKOIL" }}, "plots": {{ "Plot": {{ "color": "#006400" }} }} }},
-          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "US10Y" }} }},
-          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "OTCB:US30Y" }}, "plots": {{ "Plot": {{ "color": "#00BFFF" }} }} }}
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "PYTH:US10Y" }}, "plots": {{ "Plot": {{ "color": "#FF9800" }} }} }},
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "PYTH:US30Y" }}, "plots": {{ "Plot": {{ "color": "#00BFFF" }} }} }}
         ]
       }}
       );
