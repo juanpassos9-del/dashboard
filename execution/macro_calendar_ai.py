@@ -263,13 +263,13 @@ def _market_change(global_data: dict, target_names: list[str]) -> Optional[float
 
 
 def _risk_classification(score: int) -> str:
-    if score >= 70:
+    if score >= 50:
         return "Risk-on forte"
-    if score >= 30:
+    if score >= 20:
         return "Risk-on moderado"
-    if score > -30:
+    if score > -20:
         return "Neutro"
-    if score > -70:
+    if score > -50:
         return "Risk-off moderado"
     return "Risk-off forte"
 
@@ -538,9 +538,9 @@ def _interpret_event_legacy(raw_event: dict, global_data: Optional[dict] = None)
                 win_bias = asset_impacts["WIN"]
                 conduct = "projeção sem assimetria forte; aguardar o Atual antes de tomar direção."
             summary = (
-                f"{risk_classification}. Projecao do evento {event.event}: consenso {event.forecast_raw} vs anterior {event.previous_raw}, "
-                f"leitura {projection_label}, choque esperado {macro_shock}. "
-                f"Score Investing projetado: {score:+d}; sem uso de cotacoes ou fontes externas. "
+                f"{risk_classification}. Projecao do evento {event.event}: consenso {event.forecast_raw} vs anterior {event.previous_raw}. "
+                f"A leitura indica {projection_label} e choque esperado {macro_shock}. "
+                f"Efeito esperado: {risk_classification}, usando somente dados do Investing. "
                 f"Para WIN, vies {win_bias}: {conduct}"
             )
             return {
@@ -705,9 +705,9 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
                 win_bias = asset_impacts["WIN"]
                 conduct = "projecao sem assimetria forte; aguardar o Atual antes de tomar direcao."
             summary = (
-                f"{risk_classification}. Projecao do evento {event.event}: consenso {event.forecast_raw} vs anterior {event.previous_raw}, "
-                f"leitura {projection_label}, choque esperado {macro_shock}. "
-                f"Score Investing projetado: {score:+d}; sem uso de cotacoes ou fontes externas. "
+                f"{risk_classification}. Projecao do evento {event.event}: consenso {event.forecast_raw} vs anterior {event.previous_raw}. "
+                f"A leitura indica {projection_label} e choque esperado {macro_shock}. "
+                f"Efeito esperado: {risk_classification}, usando somente dados do Investing. "
                 f"Para WIN, vies {win_bias}: {conduct}"
             )
             return {
@@ -774,14 +774,11 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
         conduct = "reduzir lote, aguardar confirmacao tecnica e evitar antecipar direcao apenas pelo calendario."
 
     benchmark_text = f"consenso {event.forecast_raw}" if event.forecast is not None else f"anterior {event.previous_raw}"
-    if use_market_data:
-        score_text = f"Score: dado {data_score:+d}, regime {regime_score:+d}, intermercado {market_score:+d}."
-    else:
-        score_text = f"Score Investing: surpresa do dado {data_score:+d}; sem uso de cotacoes ou fontes externas."
     summary = (
         f"{risk_classification}. Evento {event.event} com surpresa {surprise_label} "
-        f"({event.actual_raw} vs {benchmark_text}), choque {macro_shock}. "
-        f"{score_text} Para WIN, vies {win_bias}: {conduct}"
+        f"({event.actual_raw} vs {benchmark_text}). Choque {macro_shock}. "
+        f"Efeito esperado: {risk_classification}, usando somente dados do Investing. "
+        f"Para WIN, vies {win_bias}: {conduct}"
     )
 
     return {

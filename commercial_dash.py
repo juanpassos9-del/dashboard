@@ -1913,7 +1913,7 @@ def secao_calendario_global_fragment():
             if not macro_ai:
                 raise StopIteration
             score = macro_ai.get("risk_score", 0)
-            score_color = "#00FFA3" if score > 20 else ("#FF4B4B" if score < -20 else "#FF9800")
+            effect_color = "#00FFA3" if score > 20 else ("#FF4B4B" if score < -20 else "#FF9800")
             impacts = macro_ai.get("asset_impacts", {})
             impacts_html = "".join(
                 f"<span style='display:inline-block; border:1px solid #334155; background:#111827; border-radius:6px; padding:5px 9px; margin:4px 6px 0 0; color:#CBD5E1; font-size:0.78rem;'>{asset}: <b style='color:#FFF;'>{bias}</b></span>"
@@ -1928,7 +1928,7 @@ def secao_calendario_global_fragment():
             previous = analysis_event.get("previous", "---") or "---"
             st.markdown(
                 f"""
-                <div style="border:1px solid #334155; border-left:5px solid {score_color}; border-radius:8px; padding:18px 20px; margin:0 0 16px 0; background:#0b1220;">
+                <div style="border:1px solid #334155; border-left:5px solid {effect_color}; border-radius:8px; padding:18px 20px; margin:0 0 16px 0; background:#0b1220;">
                     <div style="display:flex; justify-content:space-between; gap:16px; align-items:flex-start; flex-wrap:wrap;">
                         <div>
                             <div style="font-size:0.72rem; color:#94A3B8; font-weight:800; text-transform:uppercase;">IA Macro TTS - somente dados Investing</div>
@@ -1936,9 +1936,8 @@ def secao_calendario_global_fragment():
                             <div style="font-size:1.15rem; color:#FFF; font-weight:900; margin-top:4px;">{analysis_event.get('time', '---')} | {analysis_event.get('currency', '---')} | {analysis_event.get('event', '---')}</div>
                         </div>
                         <div style="text-align:right;">
-                            <div style="font-size:0.72rem; color:#94A3B8; font-weight:700;">Score Risk</div>
-                            <div style="font-size:2.2rem; color:{score_color}; font-weight:900; line-height:1;">{score:+d}</div>
-                            <div style="font-size:0.82rem; color:#FFF; font-weight:800; margin-top:4px;">{macro_ai.get('risk_classification', 'Neutro')}</div>
+                            <div style="font-size:0.72rem; color:#94A3B8; font-weight:700;">Efeito da surpresa</div>
+                            <div style="font-size:1.35rem; color:{effect_color}; font-weight:900; line-height:1.15; margin-top:4px;">{macro_ai.get('risk_classification', 'Neutro')}</div>
                         </div>
                     </div>
                     <div style="display:grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap:10px; margin-top:16px;">
@@ -1984,7 +1983,7 @@ def secao_calendario_global_fragment():
             history_cards = []
             for event, result in interpreted_history:
                 score = int(result.get("risk_score", 0))
-                score_color = "#00FFA3" if score > 20 else ("#FF4B4B" if score < -20 else "#FF9800")
+                effect_color = "#00FFA3" if score > 20 else ("#FF4B4B" if score < -20 else "#FF9800")
                 status_color = "#00FFA3" if result.get("status") == "Interpretado" else "#FF9800"
                 actual = event.get("actual", "---") or "---"
                 forecast = event.get("forecast", "---") or "---"
@@ -1998,8 +1997,8 @@ def secao_calendario_global_fragment():
                     f"<div style='font-size:0.9rem; color:#F8FAFC; margin-top:8px; line-height:1.5;'>{result.get('operational_summary', '')}</div>"
                     f"</div>"
                     f"<div style='text-align:right; min-width:130px;'>"
-                    f"<div style='color:{score_color}; font-weight:900; font-size:1.35rem;'>{score:+d}</div>"
-                    f"<div style='font-size:0.78rem; color:#CBD5E1; font-weight:800;'>{result.get('risk_classification', 'Neutro')}</div>"
+                    f"<div style='font-size:0.72rem; color:#94A3B8;'>Efeito</div>"
+                    f"<div style='color:{effect_color}; font-weight:900; font-size:0.9rem;'>{result.get('risk_classification', 'Neutro')}</div>"
                     f"</div>"
                     f"</div>"
                     f"</div>"
