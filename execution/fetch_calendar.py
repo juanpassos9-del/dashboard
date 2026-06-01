@@ -31,13 +31,41 @@ def _events_to_dataframe(events):
     return pd.DataFrame(rows)
 
 
+def _impact_from_bull_count(bull_count):
+    if bull_count >= 3:
+        return "HIGH"
+    if bull_count == 2:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _impact_from_investing_cell(cell):
+    """Classifica impacto pela escala oficial de touros do Investing."""
+    if not cell:
+        return "LOW", 1
+
+    data_key = cell.get("data-img_key", "")
+    if data_key.startswith("bull"):
+        try:
+            bull_count = int(data_key.replace("bull", ""))
+            return _impact_from_bull_count(bull_count), bull_count
+        except ValueError:
+            pass
+
+    bull_count = len(cell.select(".grayFullBullishIcon, .fullBullishIcon"))
+    if bull_count:
+        return _impact_from_bull_count(bull_count), bull_count
+
+    return _impact_from_investing_title(cell.get("title", "")), 1
+
+
 def _impact_from_investing_title(title):
     title = (title or "").lower()
     if "high" in title:
         return "HIGH"
-    if "moderate" in title or "medium" in title:
+    if "moderate" in title or "medium" in title or "moderada" in title:
         return "MEDIUM"
-    if "low" in title:
+    if "low" in title or "baixa" in title:
         return "LOW"
     return "LOW"
 
@@ -117,7 +145,7 @@ def _fetch_investing_calendar():
         date_part = event_datetime[:10].replace("/", "-") if event_datetime else ""
         time_part = cols[0] or (event_datetime[11:16] if len(event_datetime) >= 16 else "")
         impact_cell = row.select_one("td.sentiment")
-        impact = _impact_from_investing_title(impact_cell.get("title", "") if impact_cell else "")
+        impact, bull_count = _impact_from_investing_cell(impact_cell)
 
         events.append({
             "date": date_part,
@@ -125,6 +153,8 @@ def _fetch_investing_calendar():
             "currency": cols[1].strip() or "???",
             "event": cols[3].strip() or "Evento",
             "impact": impact,
+            "bull_count": bull_count,
+            "impact_source": "Investing touros",
             "icon": _impact_icon(impact),
             "actual": cols[4].strip() or "---",
             "forecast": cols[5].strip() or "---",

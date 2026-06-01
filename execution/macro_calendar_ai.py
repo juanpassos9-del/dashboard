@@ -21,6 +21,7 @@ class EconomicEvent:
     forecast: Optional[float]
     actual: Optional[float]
     unit: Optional[str]
+    bull_count: int = 0
     source: str = "Investing"
 
 
@@ -118,6 +119,10 @@ def normalize_event(raw_event: dict) -> EconomicEvent:
     actual_raw = str(_first(raw_event, ["actual", "realizado", "atual"], "---"))
     forecast_raw = str(_first(raw_event, ["forecast", "previsao", "previsão", "consensus", "consenso"], "---"))
     previous_raw = str(_first(raw_event, ["previous", "anterior"], "---"))
+    try:
+        bull_count = int(_first(raw_event, ["bull_count", "touros"], 0) or 0)
+    except Exception:
+        bull_count = 0
     actual, actual_unit = parse_economic_value(actual_raw)
     forecast, forecast_unit = parse_economic_value(forecast_raw)
     previous, previous_unit = parse_economic_value(previous_raw)
@@ -147,6 +152,7 @@ def normalize_event(raw_event: dict) -> EconomicEvent:
         forecast=forecast,
         actual=actual,
         unit=actual_unit or forecast_unit or previous_unit,
+        bull_count=bull_count,
         source=str(raw_event.get("source", "Investing")),
     )
 
@@ -287,6 +293,21 @@ def _importance_weight(importance: str) -> float:
     if "low" in value or "baixo" in value:
         return 0.75
     return 1.0
+
+
+def _event_weight(event: EconomicEvent) -> float:
+    """Peso pelo impacto oficial do Investing: mais touros, maior impacto."""
+    try:
+        bull_count = int(getattr(event, "bull_count", 0) or 0)
+    except Exception:
+        bull_count = 0
+    if bull_count >= 3:
+        return 1.50
+    if bull_count == 2:
+        return 1.00
+    if bull_count == 1:
+        return 0.55
+    return _importance_weight(event.importance)
 
 
 def _is_wages_event(event_name: str) -> bool:
@@ -521,6 +542,12 @@ def _macro_effect_text(asset_impacts: dict[str, str], risk_classification: str) 
     )
 
 
+def _impact_text(event: EconomicEvent) -> str:
+    if event.bull_count:
+        return f"Impacto oficial Investing: {event.bull_count} touro(s)."
+    return "Impacto oficial Investing indisponivel."
+
+
 def _interpret_event_legacy(raw_event: dict, global_data: Optional[dict] = None) -> dict:
     event = normalize_event(raw_event)
     surprise_value, surprise_pct, surprise_label = calculate_surprise(event)
@@ -530,7 +557,7 @@ def _interpret_event_legacy(raw_event: dict, global_data: Optional[dict] = None)
         projection_value, projection_pct, projection_label = calculate_projection(event)
         if projection_value is not None:
             dominant_regime = "Calendario Investing"
-            data_score = int(_surprise_score(event, projection_label, dominant_regime) * _importance_weight(event.importance) * 0.65)
+            data_score = int(_surprise_score(event, projection_label, dominant_regime) * _event_weight(event) * 0.65)
             score = max(-100, min(100, data_score))
             macro_shock = _macro_shock(event, projection_label, dominant_regime, score)
             risk_classification = _risk_classification(score)
@@ -548,7 +575,7 @@ def _interpret_event_legacy(raw_event: dict, global_data: Optional[dict] = None)
             summary = (
                 f"{risk_classification}. Projecao do evento {event.event}: consenso {event.forecast_raw} vs anterior {event.previous_raw}. "
                 f"A leitura indica {projection_label} e choque esperado {macro_shock}. "
-                f"Efeito esperado: {risk_classification}, usando somente dados do Investing. "
+                f"{_impact_text(event)} Efeito esperado: {risk_classification}, usando somente dados do Investing. "
                 f"Efeito macro {macro_bias}: {conduct}"
             )
             return {
@@ -697,7 +724,7 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
         projection_value, projection_pct, projection_label = calculate_projection(event)
         if projection_value is not None:
             dominant_regime = "Calendario Investing"
-            data_score = int(_surprise_score(event, projection_label, dominant_regime) * _importance_weight(event.importance) * 0.65)
+            data_score = int(_surprise_score(event, projection_label, dominant_regime) * _event_weight(event) * 0.65)
             score = max(-100, min(100, data_score))
             macro_shock = _macro_shock(event, projection_label, dominant_regime, score)
             risk_classification = _risk_classification(score)
@@ -707,7 +734,7 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
             summary = (
                 f"{risk_classification}. Projecao do evento {event.event}: consenso {event.forecast_raw} vs anterior {event.previous_raw}. "
                 f"A leitura indica {projection_label} e choque esperado {macro_shock}. "
-                f"Efeito esperado: {risk_classification}, usando somente dados do Investing. "
+                f"{_impact_text(event)} Efeito esperado: {risk_classification}, usando somente dados do Investing. "
                 f"{macro_effect} Confirmar a surpresa quando o campo Atual for divulgado."
             )
             return {
@@ -751,7 +778,7 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
     use_market_data = bool(global_data)
     market_map = _build_market_map(global_data) if use_market_data else {}
     dominant_regime = _detect_dominant_regime(market_map) if use_market_data else "Calendario Investing"
-    data_score = int(_surprise_score(event, surprise_label, dominant_regime) * _importance_weight(event.importance))
+    data_score = int(_surprise_score(event, surprise_label, dominant_regime) * _event_weight(event))
     regime_score = _regime_points(dominant_regime) if use_market_data else 0
     if use_market_data:
         market_score, confirmations, alignment_ratio = _market_confirmation(market_map)
@@ -768,7 +795,7 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
     summary = (
         f"{risk_classification}. Evento {event.event} com surpresa {surprise_label} "
         f"({event.actual_raw} vs {benchmark_text}). Choque {macro_shock}. "
-        f"Efeito esperado: {risk_classification}, usando somente dados do Investing. "
+        f"{_impact_text(event)} Efeito esperado: {risk_classification}, usando somente dados do Investing. "
         f"{macro_effect}"
     )
 

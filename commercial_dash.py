@@ -1859,7 +1859,7 @@ def sidebar_calendario():
             <div style='border-bottom:1px solid #222; padding:10px 0;'>
                 <div style='display:flex; justify-content:space-between; align-items:center;'>
                     <span style='font-size:0.7rem; color:#888;'>{event['time']} | {event['currency']}</span>
-                    <span style='font-size:0.65rem; background:#1a1a1a; padding:2px 6px; border-radius:10px; color:{impact_color}; border:1px solid {impact_color}44;'>{event['impact']}</span>
+                    <span style='font-size:0.65rem; background:#1a1a1a; padding:2px 6px; border-radius:10px; color:{impact_color}; border:1px solid {impact_color}44;'>{event['impact']} | {event.get('bull_count', 1)} touro(s)</span>
                 </div>
                 <div style='font-size:0.85rem; font-weight:bold; margin:4px 0;'>{event['icon']} {event['event']}</div>
                 <div style='display:flex; gap:15px; margin-top:5px;'>
@@ -1947,7 +1947,7 @@ def secao_calendario_global_fragment():
                     <div style="font-size:0.72rem; color:#888; font-weight:700; text-transform:uppercase;">Proximo evento</div>
                     <div style="display:flex; justify-content:space-between; gap:18px; align-items:center; flex-wrap:wrap;">
                         <div style="font-size:1rem; font-weight:700; color:#FFF;">{next_event.get('time', '---')} | {next_event.get('currency', '---')} | {next_event.get('event', '---')}</div>
-                        <div style="color:{impact_color}; font-weight:800;">{impact or '---'}</div>
+                        <div style="color:{impact_color}; font-weight:800;">{impact or '---'} | {next_event.get('bull_count', 1)} touro(s)</div>
                     </div>
                     <div style="font-size:0.78rem; color:#AAA; margin-top:6px;">Atual: <b style="color:#FFF;">{next_event.get('actual', '---') or '---'}</b> &nbsp;|&nbsp; Projecao: <b>{next_event.get('forecast', '---') or '---'}</b> &nbsp;|&nbsp; Anterior: <b>{next_event.get('previous', '---') or '---'}</b></div>
                 </div>
@@ -2001,7 +2001,7 @@ def secao_calendario_global_fragment():
                     <div style="display:grid; grid-template-columns: repeat(3, minmax(160px, 1fr)); gap:10px; margin-top:10px;">
                         <div><span style="color:#64748B;">Status</span><br><b>{macro_ai.get('status', '---')}</b></div>
                         <div><span style="color:#64748B;">Categoria</span><br><b>{macro_ai.get('category', '---')}</b></div>
-                        <div><span style="color:#64748B;">Confianca</span><br><b>{macro_ai.get('confidence', '---')}</b></div>
+                        <div><span style="color:#64748B;">Impacto Investing</span><br><b>{analysis_event.get('bull_count', 1)} touro(s)</b></div>
                     </div>
                     <div style="margin-top:14px; color:#E5E7EB; line-height:1.55; font-size:0.94rem;">{macro_ai.get('operational_summary', '')}</div>
                     <div style="margin-top:12px;">{impacts_html}</div>
