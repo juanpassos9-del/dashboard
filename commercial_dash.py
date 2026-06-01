@@ -1919,12 +1919,7 @@ def secao_calendario_global_fragment():
 
         interpreted_history = []
         for event in reversed(events):
-            actual = str(event.get("actual", "")).strip()
-            if not actual or actual in ["---", "-", "N/A"]:
-                continue
             result = interpret_event(event, get_global_markets_data())
-            if result.get("status") != "Interpretado":
-                continue
             interpreted_history.append((event, result))
             if len(interpreted_history) >= 5:
                 break
@@ -1934,12 +1929,13 @@ def secao_calendario_global_fragment():
             for event, result in interpreted_history:
                 score = int(result.get("risk_score", 0))
                 score_color = "#00FFA3" if score > 20 else ("#FF4B4B" if score < -20 else "#FF9800")
+                status_color = "#00FFA3" if result.get("status") == "Interpretado" else "#FF9800"
                 history_cards.append(
                     f"""
                     <div style="border-bottom:1px solid #222; padding:10px 0;">
                         <div style="display:flex; justify-content:space-between; gap:14px; align-items:flex-start;">
                             <div>
-                                <div style="font-size:0.78rem; color:#888;">{event.get('time', '---')} | {event.get('currency', '---')} | {event.get('event', '---')}</div>
+                                <div style="font-size:0.78rem; color:#888;">{event.get('time', '---')} | {event.get('currency', '---')} | {event.get('event', '---')} <span style="color:{status_color}; font-weight:800;">- {result.get('status', '---')}</span></div>
                                 <div style="font-size:0.86rem; color:#DDD; margin-top:4px;">{result.get('operational_summary', '')}</div>
                             </div>
                             <div style="text-align:right; min-width:130px;">
@@ -1953,7 +1949,7 @@ def secao_calendario_global_fragment():
             st.markdown(
                 f"""
                 <div style="border:1px solid #242b36; border-radius:8px; padding:14px; margin:0 0 14px 0; background:#0b0f17;">
-                    <div style="font-size:0.78rem; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:4px;">Historico IA Macro TTS - ultimos 5 eventos divulgados</div>
+                    <div style="font-size:0.78rem; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:4px;">Historico IA Macro TTS - ultimos 5 eventos do calendario</div>
                     {''.join(history_cards)}
                 </div>
                 """,
