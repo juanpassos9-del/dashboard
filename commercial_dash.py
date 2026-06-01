@@ -1876,6 +1876,44 @@ def secao_calendario_global_fragment():
             unsafe_allow_html=True,
         )
 
+        try:
+            from execution.macro_calendar_ai import interpret_event
+            macro_ai = interpret_event(next_event, get_global_markets_data())
+            score = macro_ai.get("risk_score", 0)
+            score_color = "#00FFA3" if score > 20 else ("#FF4B4B" if score < -20 else "#FF9800")
+            impacts = macro_ai.get("asset_impacts", {})
+            impacts_html = "".join(
+                f"<span style='border:1px solid #333; border-radius:6px; padding:3px 7px; margin-right:6px; color:#DDD;'>{asset}: <b>{bias}</b></span>"
+                for asset, bias in impacts.items()
+            )
+            st.markdown(
+                f"""
+                <div style="border:1px solid #242b36; border-radius:8px; padding:14px; margin:0 0 14px 0; background:#0d1117;">
+                    <div style="display:flex; justify-content:space-between; gap:16px; align-items:flex-start; flex-wrap:wrap;">
+                        <div>
+                            <div style="font-size:0.72rem; color:#888; font-weight:800; text-transform:uppercase;">IA Macro TTS - Interpretacao do Calendario</div>
+                            <div style="font-size:1rem; color:#FFF; font-weight:800; margin-top:4px;">{macro_ai.get('risk_classification', 'Neutro')}</div>
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="font-size:0.72rem; color:#888; font-weight:700;">Score Risk</div>
+                            <div style="font-size:1.7rem; color:{score_color}; font-weight:900;">{score:+d}</div>
+                        </div>
+                    </div>
+                    <div style="display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:8px; margin-top:12px;">
+                        <div><span style="color:#777;">Status</span><br><b>{macro_ai.get('status', '---')}</b></div>
+                        <div><span style="color:#777;">Categoria</span><br><b>{macro_ai.get('category', '---')}</b></div>
+                        <div><span style="color:#777;">Surpresa</span><br><b>{macro_ai.get('surprise_label', '---')}</b></div>
+                        <div><span style="color:#777;">Confianca</span><br><b>{macro_ai.get('confidence', '---')}</b></div>
+                    </div>
+                    <div style="margin-top:10px; color:#DDD; line-height:1.45;">{macro_ai.get('operational_summary', '')}</div>
+                    <div style="margin-top:12px;">{impacts_html}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        except Exception as e:
+            st.warning(f"IA Macro TTS indisponivel: {e}")
+
     investing_calendar_url = (
         "https://sslecal2.investing.com?"
         "ecoDayBackground=%230b0f17&"
