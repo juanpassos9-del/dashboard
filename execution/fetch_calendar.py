@@ -50,32 +50,61 @@ def _impact_icon(impact):
     return "⚪"
 
 
-def _fetch_investing_calendar():
-    """Busca calendario no Investing.com, que inclui Atual/Projecao/Anterior."""
-    url = "https://www.investing.com/economic-calendar/Service/getCalendarFilteredData"
+def _investing_request(base_url, language="pt-BR"):
+    url = f"{base_url}/economic-calendar/Service/getCalendarFilteredData"
+    session = requests.Session()
+    user_agent = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    )
+    session.headers.update({
+        "User-Agent": user_agent,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": f"{language},pt;q=0.9,en-US;q=0.8,en;q=0.7",
+    })
+    session.get(f"{base_url}/economic-calendar/", timeout=12)
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
         ),
         "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Accept-Language": f"{language},pt;q=0.9,en-US;q=0.8,en;q=0.7",
         "Content-Type": "application/x-www-form-urlencoded",
         "X-Requested-With": "XMLHttpRequest",
-        "Origin": "https://www.investing.com",
-        "Referer": "https://www.investing.com/economic-calendar/",
+        "Origin": base_url,
+        "Referer": f"{base_url}/economic-calendar/",
     }
     payload = {
         "country[]": ["5", "4", "17", "72", "35", "25", "6", "12", "37", "26", "10", "14", "48"],
         "importance[]": ["1", "2", "3"],
-        "timeZone": "12",
-        "timeFilter": "timeRemain",
-        "currentTab": "thisWeek",
+        "timeZone": "8",
+        "timeFilter": "timeOnly",
+        "currentTab": "today",
         "limit_from": "0",
     }
 
-    response = requests.post(url, headers=headers, data=payload, timeout=8)
+    response = session.post(url, headers=headers, data=payload, timeout=20)
     response.raise_for_status()
-    payload_json = response.json()
+    return response.json()
+
+
+def _fetch_investing_calendar():
+    """Busca calendario no Investing.com, que inclui Atual/Projecao/Anterior."""
+    last_error = None
+    payload_json = None
+    for base_url, language in [
+        ("https://br.investing.com", "pt-BR"),
+        ("https://www.investing.com", "en-US"),
+    ]:
+        try:
+            payload_json = _investing_request(base_url, language)
+            break
+        except Exception as e:
+            last_error = e
+    if payload_json is None:
+        raise last_error or RuntimeError("Investing.com indisponivel.")
+
     soup = BeautifulSoup(payload_json.get("data", ""), "html.parser")
 
     events = []

@@ -1930,11 +1930,18 @@ def secao_calendario_global_fragment():
         from execution.macro_calendar_ai import interpret_event
 
         interpreted_history = []
+        pending_history = []
         for event in reversed(events):
             result = interpret_event(event, get_global_markets_data())
-            interpreted_history.append((event, result))
+            if result.get("status") == "Interpretado":
+                interpreted_history.append((event, result))
+            else:
+                pending_history.append((event, result))
             if len(interpreted_history) >= 5:
                 break
+
+        if not interpreted_history:
+            interpreted_history = pending_history[:5]
 
         if interpreted_history:
             history_cards = []
@@ -1958,7 +1965,7 @@ def secao_calendario_global_fragment():
                 )
             st.markdown(
                 f"<div style='border:1px solid #242b36; border-radius:8px; padding:14px; margin:0 0 14px 0; background:#0b0f17;'>"
-                f"<div style='font-size:0.78rem; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:4px;'>Historico IA Macro TTS - ultimos 5 eventos do calendario</div>"
+                f"<div style='font-size:0.78rem; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:4px;'>Historico IA Macro TTS - ultimos 5 eventos divulgados</div>"
                 f"{''.join(history_cards)}"
                 f"</div>",
                 unsafe_allow_html=True,

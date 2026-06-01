@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -34,6 +35,11 @@ def _first(raw: dict, aliases: list[str], default=""):
     return default
 
 
+def _plain_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value or "")
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower()
+
+
 def parse_economic_value(value) -> tuple[Optional[float], Optional[str]]:
     if value is None:
         return None, None
@@ -41,7 +47,7 @@ def parse_economic_value(value) -> tuple[Optional[float], Optional[str]]:
     if not raw or raw in ["---", "-", "N/A", "nan"]:
         return None, None
 
-    raw = raw.replace("−", "-").replace(",", "")
+    raw = raw.replace("−", "-")
     multiplier = 1.0
     unit = "index"
     if raw.endswith("%"):
@@ -60,6 +66,15 @@ def parse_economic_value(value) -> tuple[Optional[float], Optional[str]]:
         multiplier = 1_000_000_000
         raw = raw[:-1]
 
+    raw = raw.replace(" ", "")
+    if "," in raw and "." in raw:
+        if raw.rfind(",") > raw.rfind("."):
+            raw = raw.replace(".", "").replace(",", ".")
+        else:
+            raw = raw.replace(",", "")
+    elif "," in raw:
+        raw = raw.replace(".", "").replace(",", ".")
+
     match = re.search(r"-?\d+(?:\.\d+)?", raw)
     if not match:
         return None, None
@@ -67,16 +82,16 @@ def parse_economic_value(value) -> tuple[Optional[float], Optional[str]]:
 
 
 def infer_event_category(event_name: str) -> str:
-    name = (event_name or "").lower()
-    if any(x in name for x in ["cpi", "consumer price", "pce", "ppi", "inflation", "ipca", "core cpi", "core pce"]):
+    name = _plain_text(event_name)
+    if any(x in name for x in ["cpi", "consumer price", "pce", "ppi", "inflation", "ipca", "core cpi", "core pce", "precos", "preco"]):
         return "inflation"
-    if any(x in name for x in ["nonfarm", "payroll", "unemployment", "jobless", "jolts", "adp", "earnings"]):
+    if any(x in name for x in ["nonfarm", "payroll", "unemployment", "jobless", "jolts", "adp", "earnings", "emprego", "desemprego"]):
         return "employment"
-    if any(x in name for x in ["gdp", "pmi", "ism", "retail sales", "industrial production", "durable goods", "consumer confidence", "chicago pmi"]):
+    if any(x in name for x in ["gdp", "pmi", "ism", "retail sales", "industrial production", "durable goods", "consumer confidence", "chicago pmi", "gastos de construcao", "construcao", "novos pedidos", "industrial", "manufatureiro"]):
         return "activity"
-    if any(x in name for x in ["interest rate", "rate decision", "fomc", "fed", "copom", "selic", "ecb", "boe", "boj", "monetary"]):
+    if any(x in name for x in ["interest rate", "rate decision", "fomc", "fed", "copom", "selic", "ecb", "boe", "boj", "monetary", "banco central"]):
         return "central_bank"
-    if any(x in name for x in ["crude oil inventories", "gasoline inventories", "distillate", "oil inventories"]):
+    if any(x in name for x in ["crude oil inventories", "gasoline inventories", "distillate", "oil inventories", "estoques de petroleo"]):
         return "commodities"
     if any(x in name for x in ["china", "caixin", "new loans", "aggregate financing"]):
         return "china"
@@ -84,7 +99,7 @@ def infer_event_category(event_name: str) -> str:
 
 
 def is_higher_worse(event_name: str) -> bool:
-    name = (event_name or "").lower()
+    name = _plain_text(event_name)
     return any(x in name for x in [
         "unemployment rate",
         "initial jobless claims",
@@ -137,11 +152,18 @@ def normalize_event(raw_event: dict) -> EconomicEvent:
 
 
 def calculate_surprise(event: EconomicEvent) -> tuple[Optional[float], Optional[float], str]:
-    if event.actual is None or event.forecast is None:
-        return None, None, "indisponivel"
-    surprise_value = event.actual - event.forecast
-    surprise_pct = None if event.forecast == 0 else surprise_value / abs(event.forecast)
+    benchmark = event.forecast
+    benchmark_label = ""
+    if benchmark is None and event.previous is not None:
+        benchmark = event.previous
+        benchmark_label = " vs anterior"
 
+    if event.actual is None or benchmark is None:
+        return None, None, "indisponivel"
+    surprise_value = event.actual - benchmark
+    surprise_pct = None if benchmark == 0 else surprise_value / abs(benchmark)
+
+    event_name = _plain_text(event.event)
     if event.category in ["inflation", "central_bank"] or event.unit == "%":
         abs_value = abs(surprise_value)
         if abs_value < 0.05:
@@ -154,7 +176,7 @@ def calculate_surprise(event: EconomicEvent) -> tuple[Optional[float], Optional[
             label = "muito abaixo"
         else:
             label = "abaixo"
-    elif "pmi" in event.event.lower() or "confidence" in event.event.lower():
+    elif "pmi" in event_name or "ism" in event_name or "confidence" in event_name:
         abs_value = abs(surprise_value)
         if abs_value < 0.3:
             label = "em linha"
@@ -177,7 +199,7 @@ def calculate_surprise(event: EconomicEvent) -> tuple[Optional[float], Optional[
             label = "muito abaixo"
         else:
             label = "abaixo"
-    return surprise_value, surprise_pct, label
+    return surprise_value, surprise_pct, f"{label}{benchmark_label}"
 
 
 def _market_change(global_data: dict, target_names: list[str]) -> Optional[float]:
@@ -228,29 +250,31 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
             "surprise_pct": None,
         }
 
+    surprise_direction = surprise_label.replace(" vs anterior", "")
+
     direction = 0
-    if surprise_label in ["acima", "muito acima"]:
+    if surprise_direction in ["acima", "muito acima"]:
         direction = 1
-    elif surprise_label in ["abaixo", "muito abaixo"]:
+    elif surprise_direction in ["abaixo", "muito abaixo"]:
         direction = -1
     if is_higher_worse(event.event):
         direction *= -1
 
     macro_shock = "Neutro"
     base_score = 0
-    if event.category == "inflation":
+    if direction != 0 and event.category == "inflation":
         macro_shock = "inflacionario / hawkish" if direction > 0 else "desinflacionario / dovish"
         base_score = -35 if direction > 0 else 35
-    elif event.category == "employment":
+    elif direction != 0 and event.category == "employment":
         macro_shock = "pro-crescimento" if direction > 0 else "recessivo"
         base_score = 25 if direction > 0 else -30
-    elif event.category in ["activity", "china"]:
+    elif direction != 0 and event.category in ["activity", "china"]:
         macro_shock = "pro-crescimento" if direction > 0 else "recessivo"
         base_score = 30 if direction > 0 else -35
-    elif event.category == "central_bank":
+    elif direction != 0 and event.category == "central_bank":
         macro_shock = "hawkish" if direction > 0 else "dovish"
         base_score = -35 if direction > 0 else 35
-    elif event.category == "commodities":
+    elif direction != 0 and event.category == "commodities":
         macro_shock = "altista para petroleo" if direction > 0 else "baixista para petroleo"
         base_score = -10 if direction > 0 else 10
 
@@ -283,7 +307,7 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
 
     score = max(-100, min(100, int(score)))
     risk_classification = _risk_classification(score)
-    confidence = "Alta" if abs(score) >= 50 and surprise_label in ["muito acima", "muito abaixo"] else ("Media" if abs(score) >= 25 else "Baixa")
+    confidence = "Alta" if abs(score) >= 50 and surprise_direction in ["muito acima", "muito abaixo"] else ("Media" if abs(score) >= 25 else "Baixa")
 
     if score > 20:
         win_bias = "comprador"
@@ -295,9 +319,10 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
         win_bias = "neutro"
         conduct = "reduzir lote e aguardar confirmacao tecnica."
 
+    benchmark_text = f"consenso {event.forecast_raw}" if event.forecast is not None else f"anterior {event.previous_raw}"
     summary = (
         f"{risk_classification}. Evento {event.event} com surpresa {surprise_label} "
-        f"({event.actual_raw} vs consenso {event.forecast_raw}), choque {macro_shock}. "
+        f"({event.actual_raw} vs {benchmark_text}), choque {macro_shock}. "
         f"Para WIN, vies {win_bias}: {conduct}"
     )
 
