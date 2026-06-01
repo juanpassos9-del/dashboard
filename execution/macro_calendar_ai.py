@@ -483,34 +483,42 @@ def _macro_shock(event: EconomicEvent, surprise_label: str, dominant_regime: str
 
 
 def _asset_impacts(score: int, macro_shock: str) -> dict[str, str]:
-    if score >= 70:
-        equities = "comprador forte"
+    if score >= 50:
+        equities = "risk-on forte"
     elif score > 20:
-        equities = "comprador"
-    elif score <= -70:
-        equities = "vendedor forte"
+        equities = "risk-on moderado"
+    elif score <= -50:
+        equities = "risk-off forte"
     elif score < -20:
-        equities = "vendedor"
+        equities = "risk-off moderado"
     else:
         equities = "neutro"
 
     risk_on = score > 20
     risk_off = score < -20
+    inflationary = "inflacionario" in macro_shock or "hawkish" in macro_shock
+    disinflationary = "desinflacionario" in macro_shock or "dovish" in macro_shock
     return {
-        "WIN": equities if equities != "comprador forte" else "comprador",
+        "Juros": "pressao de alta" if inflationary else ("alivio / queda" if disinflationary else "neutro"),
+        "Inflacao": "pressao inflacionaria" if inflationary else ("alivio inflacionario" if disinflationary else "neutra"),
+        "DXY": "tende a subir" if risk_off or inflationary else ("tende a cair" if risk_on or disinflationary else "neutro"),
+        "Petroleo": "suporte por crescimento" if risk_on else ("pressao por desaceleracao" if risk_off else "neutro"),
         "S&P 500": equities,
-        "Nasdaq": "comprador forte" if score >= 70 else ("vendedor forte" if score <= -70 else equities),
+        "Nasdaq": equities,
         "Dow Jones": equities,
-        "DXY": "vendedor" if risk_on else ("comprador" if risk_off else "neutro"),
-        "US10Y": "queda" if risk_on else ("alta" if risk_off and "inflacionario" in macro_shock else "misto" if risk_off else "neutro"),
-        "VIX": "queda" if risk_on else ("alta" if risk_off else "neutro"),
-        "Ouro": "alta" if risk_on and "dovish" in macro_shock else ("misto" if risk_off else "neutro"),
-        "PetrÃ³leo": "alta" if risk_on else ("queda" if risk_off else "neutro"),
-        "Bitcoin": equities,
-        "EWZ": equities if equities != "comprador forte" else "comprador",
-        "USD/BRL": "queda" if risk_on else ("alta" if risk_off else "neutro"),
-        "DI futuro": "queda" if risk_on else ("alta" if risk_off else "neutro"),
     }
+
+
+def _macro_effect_text(asset_impacts: dict[str, str], risk_classification: str) -> str:
+    return (
+        f"Juros: {asset_impacts.get('Juros', 'neutro')}; "
+        f"inflacao: {asset_impacts.get('Inflacao', 'neutra')}; "
+        f"DXY: {asset_impacts.get('DXY', 'neutro')}; "
+        f"petroleo: {asset_impacts.get('Petroleo', 'neutro')}; "
+        f"indices americanos: S&P 500 {asset_impacts.get('S&P 500', risk_classification)}, "
+        f"Nasdaq {asset_impacts.get('Nasdaq', risk_classification)} e "
+        f"Dow Jones {asset_impacts.get('Dow Jones', risk_classification)}."
+    )
 
 
 def _interpret_event_legacy(raw_event: dict, global_data: Optional[dict] = None) -> dict:
@@ -529,19 +537,19 @@ def _interpret_event_legacy(raw_event: dict, global_data: Optional[dict] = None)
             confidence = "Media" if abs(score) >= 15 else "Baixa"
             asset_impacts = _asset_impacts(score, macro_shock)
             if score > 20:
-                win_bias = asset_impacts["WIN"]
-                conduct = "a projeção cria viés pré-evento favorável ao risco, mas a entrada depende da confirmação do Atual no horário da divulgação."
+                macro_bias = risk_classification
+                conduct = "a projecao cria leitura pre-evento favoravel ao risco, mas depende da confirmacao do Atual no horario da divulgacao."
             elif score < -20:
-                win_bias = asset_impacts["WIN"]
-                conduct = "a projeção cria viés pré-evento defensivo, mas a entrada depende da confirmação do Atual no horário da divulgação."
+                macro_bias = risk_classification
+                conduct = "a projecao cria leitura pre-evento defensiva, mas depende da confirmacao do Atual no horario da divulgacao."
             else:
-                win_bias = asset_impacts["WIN"]
+                macro_bias = risk_classification
                 conduct = "projeção sem assimetria forte; aguardar o Atual antes de tomar direção."
             summary = (
                 f"{risk_classification}. Projecao do evento {event.event}: consenso {event.forecast_raw} vs anterior {event.previous_raw}. "
                 f"A leitura indica {projection_label} e choque esperado {macro_shock}. "
                 f"Efeito esperado: {risk_classification}, usando somente dados do Investing. "
-                f"Para WIN, vies {win_bias}: {conduct}"
+                f"Efeito macro {macro_bias}: {conduct}"
             )
             return {
                 "status": "Projecao analisada",
@@ -574,7 +582,7 @@ def _interpret_event_legacy(raw_event: dict, global_data: Optional[dict] = None)
             "risk_score": 0,
             "risk_classification": "Neutro",
             "confidence": "Baixa",
-            "operational_summary": "Aguardando o campo Atual do calendario Investing. Assim que o dado for divulgado, a IA calcula surpresa, choque macro e vies operacional.",
+            "operational_summary": "Aguardando o campo Atual do calendario Investing. Assim que o dado for divulgado, a IA calcula surpresa, choque macro e efeito em juros, inflacao, DXY, petroleo e indices americanos.",
             "asset_impacts": {},
             "surprise_value": None,
             "surprise_pct": None,
@@ -640,20 +648,20 @@ def _interpret_event_legacy(raw_event: dict, global_data: Optional[dict] = None)
     confidence = "Alta" if abs(score) >= 50 and surprise_direction in ["muito acima", "muito abaixo"] else ("Media" if abs(score) >= 25 else "Baixa")
 
     if score > 20:
-        win_bias = "comprador"
+        macro_bias = risk_classification
         conduct = "priorizar compras em pullbacks se EWZ/indices seguirem firmes e USD/BRL nao pressionar."
     elif score < -20:
-        win_bias = "vendedor"
+        macro_bias = risk_classification
         conduct = "priorizar vendas em repiques se EWZ/indices seguirem fracos e USD/BRL/DXY pressionarem."
     else:
-        win_bias = "neutro"
+        macro_bias = risk_classification
         conduct = "reduzir lote e aguardar confirmacao tecnica."
 
     benchmark_text = f"consenso {event.forecast_raw}" if event.forecast is not None else f"anterior {event.previous_raw}"
     summary = (
         f"{risk_classification}. Evento {event.event} com surpresa {surprise_label} "
         f"({event.actual_raw} vs {benchmark_text}), choque {macro_shock}. "
-        f"Para WIN, vies {win_bias}: {conduct}"
+        f"Efeito macro {macro_bias}: {conduct}"
     )
 
     return {
@@ -670,7 +678,7 @@ def _interpret_event_legacy(raw_event: dict, global_data: Optional[dict] = None)
         "confidence": confidence,
         "operational_summary": summary,
         "asset_impacts": {
-            "WIN": win_bias,
+            "Juros": "alta" if score < -20 else ("queda" if score > 20 else "neutro"),
             "S&P 500": "comprador" if score > 20 else ("vendedor" if score < -20 else "neutro"),
             "Nasdaq": "comprador" if score > 20 else ("vendedor" if score < -20 else "neutro"),
             "DXY": "vendedor" if score > 20 else ("comprador" if score < -20 else "neutro"),
@@ -695,20 +703,12 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
             risk_classification = _risk_classification(score)
             confidence = "Media" if abs(score) >= 15 else "Baixa"
             asset_impacts = _asset_impacts(score, macro_shock)
-            if score > 20:
-                win_bias = asset_impacts["WIN"]
-                conduct = "a projecao cria vies pre-evento favoravel ao risco, mas a entrada depende da confirmacao do Atual no horario da divulgacao."
-            elif score < -20:
-                win_bias = asset_impacts["WIN"]
-                conduct = "a projecao cria vies pre-evento defensivo, mas a entrada depende da confirmacao do Atual no horario da divulgacao."
-            else:
-                win_bias = asset_impacts["WIN"]
-                conduct = "projecao sem assimetria forte; aguardar o Atual antes de tomar direcao."
+            macro_effect = _macro_effect_text(asset_impacts, risk_classification)
             summary = (
                 f"{risk_classification}. Projecao do evento {event.event}: consenso {event.forecast_raw} vs anterior {event.previous_raw}. "
                 f"A leitura indica {projection_label} e choque esperado {macro_shock}. "
                 f"Efeito esperado: {risk_classification}, usando somente dados do Investing. "
-                f"Para WIN, vies {win_bias}: {conduct}"
+                f"{macro_effect} Confirmar a surpresa quando o campo Atual for divulgado."
             )
             return {
                 "status": "Projecao analisada",
@@ -742,7 +742,7 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
             "risk_score": 0,
             "risk_classification": "Neutro",
             "confidence": "Baixa",
-            "operational_summary": "Aguardando o campo Atual do calendario Investing. Assim que o dado for divulgado, a IA calcula surpresa, choque macro e vies operacional.",
+            "operational_summary": "Aguardando o campo Atual do calendario Investing. Assim que o dado for divulgado, a IA calcula surpresa, choque macro e efeito em juros, inflacao, DXY, petroleo e indices americanos.",
             "asset_impacts": {},
             "surprise_value": None,
             "surprise_pct": None,
@@ -762,23 +762,14 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
     risk_classification = _risk_classification(score)
     confidence = _confidence(event, surprise_label, score, confirmations, alignment_ratio) if use_market_data else ("Media" if abs(score) >= 20 else "Baixa")
     asset_impacts = _asset_impacts(score, macro_shock)
-
-    if score > 20:
-        win_bias = asset_impacts["WIN"]
-        conduct = "o calendario favorece compras; aguardar confirmacao tecnica no preco antes de aumentar lote."
-    elif score < -20:
-        win_bias = asset_impacts["WIN"]
-        conduct = "o calendario favorece vendas; aguardar repiques e confirmacao tecnica no preco."
-    else:
-        win_bias = asset_impacts["WIN"]
-        conduct = "reduzir lote, aguardar confirmacao tecnica e evitar antecipar direcao apenas pelo calendario."
+    macro_effect = _macro_effect_text(asset_impacts, risk_classification)
 
     benchmark_text = f"consenso {event.forecast_raw}" if event.forecast is not None else f"anterior {event.previous_raw}"
     summary = (
         f"{risk_classification}. Evento {event.event} com surpresa {surprise_label} "
         f"({event.actual_raw} vs {benchmark_text}). Choque {macro_shock}. "
         f"Efeito esperado: {risk_classification}, usando somente dados do Investing. "
-        f"Para WIN, vies {win_bias}: {conduct}"
+        f"{macro_effect}"
     )
 
     return {
