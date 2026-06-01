@@ -58,8 +58,20 @@ def get_global_markets_data():
         return live_data
     return fetch_app_state("mercados_globais")
 
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_investing_calendar_live():
+    try:
+        from execution.fetch_calendar import _fetch_investing_calendar
+        return _fetch_investing_calendar()
+    except Exception as e:
+        print(f"[WARN] Investing calendar unavailable: {e}")
+        return None
+
 def get_calendar_data():
-    """Usa o snapshot sincronizado no Supabase para nao bloquear a renderizacao."""
+    """Usa Investing.com ao vivo quando possivel e Supabase como fallback."""
+    live_events = fetch_investing_calendar_live()
+    if live_events:
+        return live_events
     return fetch_app_state("calendario_economico")
 
 @st.cache_data(ttl=5, show_spinner=False)
@@ -1931,28 +1943,24 @@ def secao_calendario_global_fragment():
                 score_color = "#00FFA3" if score > 20 else ("#FF4B4B" if score < -20 else "#FF9800")
                 status_color = "#00FFA3" if result.get("status") == "Interpretado" else "#FF9800"
                 history_cards.append(
-                    f"""
-                    <div style="border-bottom:1px solid #222; padding:10px 0;">
-                        <div style="display:flex; justify-content:space-between; gap:14px; align-items:flex-start;">
-                            <div>
-                                <div style="font-size:0.78rem; color:#888;">{event.get('time', '---')} | {event.get('currency', '---')} | {event.get('event', '---')} <span style="color:{status_color}; font-weight:800;">- {result.get('status', '---')}</span></div>
-                                <div style="font-size:0.86rem; color:#DDD; margin-top:4px;">{result.get('operational_summary', '')}</div>
-                            </div>
-                            <div style="text-align:right; min-width:130px;">
-                                <div style="color:{score_color}; font-weight:900;">{score:+d}</div>
-                                <div style="font-size:0.72rem; color:#AAA;">{result.get('risk_classification', 'Neutro')}</div>
-                            </div>
-                        </div>
-                    </div>
-                    """
+                    f"<div style='border-bottom:1px solid #222; padding:10px 0;'>"
+                    f"<div style='display:flex; justify-content:space-between; gap:14px; align-items:flex-start;'>"
+                    f"<div>"
+                    f"<div style='font-size:0.78rem; color:#888;'>{event.get('time', '---')} | {event.get('currency', '---')} | {event.get('event', '---')} <span style='color:{status_color}; font-weight:800;'>- {result.get('status', '---')}</span></div>"
+                    f"<div style='font-size:0.86rem; color:#DDD; margin-top:4px;'>{result.get('operational_summary', '')}</div>"
+                    f"</div>"
+                    f"<div style='text-align:right; min-width:130px;'>"
+                    f"<div style='color:{score_color}; font-weight:900;'>{score:+d}</div>"
+                    f"<div style='font-size:0.72rem; color:#AAA;'>{result.get('risk_classification', 'Neutro')}</div>"
+                    f"</div>"
+                    f"</div>"
+                    f"</div>"
                 )
             st.markdown(
-                f"""
-                <div style="border:1px solid #242b36; border-radius:8px; padding:14px; margin:0 0 14px 0; background:#0b0f17;">
-                    <div style="font-size:0.78rem; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:4px;">Historico IA Macro TTS - ultimos 5 eventos do calendario</div>
-                    {''.join(history_cards)}
-                </div>
-                """,
+                f"<div style='border:1px solid #242b36; border-radius:8px; padding:14px; margin:0 0 14px 0; background:#0b0f17;'>"
+                f"<div style='font-size:0.78rem; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:4px;'>Historico IA Macro TTS - ultimos 5 eventos do calendario</div>"
+                f"{''.join(history_cards)}"
+                f"</div>",
                 unsafe_allow_html=True,
             )
     except Exception as e:
