@@ -1914,6 +1914,54 @@ def secao_calendario_global_fragment():
         except Exception as e:
             st.warning(f"IA Macro TTS indisponivel: {e}")
 
+    try:
+        from execution.macro_calendar_ai import interpret_event
+
+        interpreted_history = []
+        for event in reversed(events):
+            actual = str(event.get("actual", "")).strip()
+            if not actual or actual in ["---", "-", "N/A"]:
+                continue
+            result = interpret_event(event, get_global_markets_data())
+            if result.get("status") != "Interpretado":
+                continue
+            interpreted_history.append((event, result))
+            if len(interpreted_history) >= 5:
+                break
+
+        if interpreted_history:
+            history_cards = []
+            for event, result in interpreted_history:
+                score = int(result.get("risk_score", 0))
+                score_color = "#00FFA3" if score > 20 else ("#FF4B4B" if score < -20 else "#FF9800")
+                history_cards.append(
+                    f"""
+                    <div style="border-bottom:1px solid #222; padding:10px 0;">
+                        <div style="display:flex; justify-content:space-between; gap:14px; align-items:flex-start;">
+                            <div>
+                                <div style="font-size:0.78rem; color:#888;">{event.get('time', '---')} | {event.get('currency', '---')} | {event.get('event', '---')}</div>
+                                <div style="font-size:0.86rem; color:#DDD; margin-top:4px;">{result.get('operational_summary', '')}</div>
+                            </div>
+                            <div style="text-align:right; min-width:130px;">
+                                <div style="color:{score_color}; font-weight:900;">{score:+d}</div>
+                                <div style="font-size:0.72rem; color:#AAA;">{result.get('risk_classification', 'Neutro')}</div>
+                            </div>
+                        </div>
+                    </div>
+                    """
+                )
+            st.markdown(
+                f"""
+                <div style="border:1px solid #242b36; border-radius:8px; padding:14px; margin:0 0 14px 0; background:#0b0f17;">
+                    <div style="font-size:0.78rem; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:4px;">Historico IA Macro TTS - ultimos 5 eventos divulgados</div>
+                    {''.join(history_cards)}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    except Exception as e:
+        st.warning(f"Historico IA Macro TTS indisponivel: {e}")
+
     investing_calendar_url = (
         "https://sslecal2.investing.com?"
         "ecoDayBackground=%230b0f17&"
