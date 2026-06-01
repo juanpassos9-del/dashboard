@@ -1864,65 +1864,92 @@ def secao_calendario_global_fragment():
             next_event = event
             break
 
+    investing_events = [event for event in events if event.get("source") == "Investing.com"]
+    released_investing_events = [
+        event for event in investing_events
+        if str(event.get("actual", "---")).strip() not in ["", "---", "-"]
+    ]
+    analysis_event = released_investing_events[-1] if released_investing_events else next_event
+
     next_event_key = None
-    if next_event:
-        next_event_key = (
-            next_event.get("date"),
-            next_event.get("time"),
-            next_event.get("currency"),
-            next_event.get("event"),
-        )
-        impact = next_event.get("impact", "")
-        impact_color = "#FF4B4B" if impact == "HIGH" else ("#FF9800" if impact == "MEDIUM" else "#888")
-        st.markdown(
-            f"""
-            <div style="border:1px solid {impact_color}; border-left:5px solid {impact_color}; border-radius:8px; padding:12px 14px; margin:10px 0 14px 0; background:#111;">
-                <div style="font-size:0.72rem; color:#888; font-weight:700; text-transform:uppercase;">Proximo evento</div>
-                <div style="display:flex; justify-content:space-between; gap:18px; align-items:center; flex-wrap:wrap;">
-                    <div style="font-size:1rem; font-weight:700; color:#FFF;">{next_event.get('time', '---')} | {next_event.get('currency', '---')} | {next_event.get('event', '---')}</div>
-                    <div style="color:{impact_color}; font-weight:800;">{impact or '---'}</div>
+    if next_event or analysis_event:
+        if next_event:
+            next_event_key = (
+                next_event.get("date"),
+                next_event.get("time"),
+                next_event.get("currency"),
+                next_event.get("event"),
+            )
+            impact = next_event.get("impact", "")
+            impact_color = "#FF4B4B" if impact == "HIGH" else ("#FF9800" if impact == "MEDIUM" else "#888")
+            st.markdown(
+                f"""
+                <div style="border:1px solid {impact_color}; border-left:5px solid {impact_color}; border-radius:8px; padding:12px 14px; margin:10px 0 14px 0; background:#111;">
+                    <div style="font-size:0.72rem; color:#888; font-weight:700; text-transform:uppercase;">Proximo evento</div>
+                    <div style="display:flex; justify-content:space-between; gap:18px; align-items:center; flex-wrap:wrap;">
+                        <div style="font-size:1rem; font-weight:700; color:#FFF;">{next_event.get('time', '---')} | {next_event.get('currency', '---')} | {next_event.get('event', '---')}</div>
+                        <div style="color:{impact_color}; font-weight:800;">{impact or '---'}</div>
+                    </div>
+                    <div style="font-size:0.78rem; color:#AAA; margin-top:6px;">Atual: <b style="color:#FFF;">{next_event.get('actual', '---') or '---'}</b> &nbsp;|&nbsp; Projecao: <b>{next_event.get('forecast', '---') or '---'}</b> &nbsp;|&nbsp; Anterior: <b>{next_event.get('previous', '---') or '---'}</b></div>
                 </div>
-                <div style="font-size:0.78rem; color:#AAA; margin-top:6px;">Atual: <b style="color:#FFF;">{next_event.get('actual', '---') or '---'}</b> &nbsp;|&nbsp; Projecao: <b>{next_event.get('forecast', '---') or '---'}</b> &nbsp;|&nbsp; Anterior: <b>{next_event.get('previous', '---') or '---'}</b></div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+                """,
+                unsafe_allow_html=True,
+            )
 
         try:
             from execution.macro_calendar_ai import interpret_event
-            macro_ai = interpret_event(next_event, get_global_markets_data())
+            if not analysis_event or analysis_event.get("source") != "Investing.com":
+                st.info("IA Macro TTS aguardando dados ao vivo do Investing.com para analisar.")
+                macro_ai = None
+            else:
+                macro_ai = interpret_event(analysis_event, None)
+            if not macro_ai:
+                raise StopIteration
             score = macro_ai.get("risk_score", 0)
             score_color = "#00FFA3" if score > 20 else ("#FF4B4B" if score < -20 else "#FF9800")
             impacts = macro_ai.get("asset_impacts", {})
             impacts_html = "".join(
-                f"<span style='border:1px solid #333; border-radius:6px; padding:3px 7px; margin-right:6px; color:#DDD;'>{asset}: <b>{bias}</b></span>"
+                f"<span style='display:inline-block; border:1px solid #334155; background:#111827; border-radius:6px; padding:5px 9px; margin:4px 6px 0 0; color:#CBD5E1; font-size:0.78rem;'>{asset}: <b style='color:#FFF;'>{bias}</b></span>"
                 for asset, bias in impacts.items()
             )
+            panel_label = "Ultimo dado divulgado analisado" if analysis_event in released_investing_events else "Proximo evento aguardando divulgacao"
+            actual = analysis_event.get("actual", "---") or "---"
+            forecast = analysis_event.get("forecast", "---") or "---"
+            previous = analysis_event.get("previous", "---") or "---"
             st.markdown(
                 f"""
-                <div style="border:1px solid #242b36; border-radius:8px; padding:14px; margin:0 0 14px 0; background:#0d1117;">
+                <div style="border:1px solid #334155; border-left:5px solid {score_color}; border-radius:8px; padding:18px 20px; margin:0 0 16px 0; background:#0b1220;">
                     <div style="display:flex; justify-content:space-between; gap:16px; align-items:flex-start; flex-wrap:wrap;">
                         <div>
-                            <div style="font-size:0.72rem; color:#888; font-weight:800; text-transform:uppercase;">IA Macro TTS - Interpretacao do Calendario</div>
-                            <div style="font-size:1rem; color:#FFF; font-weight:800; margin-top:4px;">{macro_ai.get('risk_classification', 'Neutro')}</div>
+                            <div style="font-size:0.72rem; color:#94A3B8; font-weight:800; text-transform:uppercase;">IA Macro TTS - somente dados Investing</div>
+                            <div style="font-size:0.74rem; color:#64748B; margin-top:6px; text-transform:uppercase;">{panel_label}</div>
+                            <div style="font-size:1.15rem; color:#FFF; font-weight:900; margin-top:4px;">{analysis_event.get('time', '---')} | {analysis_event.get('currency', '---')} | {analysis_event.get('event', '---')}</div>
                         </div>
                         <div style="text-align:right;">
-                            <div style="font-size:0.72rem; color:#888; font-weight:700;">Score Risk</div>
-                            <div style="font-size:1.7rem; color:{score_color}; font-weight:900;">{score:+d}</div>
+                            <div style="font-size:0.72rem; color:#94A3B8; font-weight:700;">Score Risk</div>
+                            <div style="font-size:2.2rem; color:{score_color}; font-weight:900; line-height:1;">{score:+d}</div>
+                            <div style="font-size:0.82rem; color:#FFF; font-weight:800; margin-top:4px;">{macro_ai.get('risk_classification', 'Neutro')}</div>
                         </div>
                     </div>
-                    <div style="display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:8px; margin-top:12px;">
-                        <div><span style="color:#777;">Status</span><br><b>{macro_ai.get('status', '---')}</b></div>
-                        <div><span style="color:#777;">Categoria</span><br><b>{macro_ai.get('category', '---')}</b></div>
-                        <div><span style="color:#777;">Surpresa</span><br><b>{macro_ai.get('surprise_label', '---')}</b></div>
-                        <div><span style="color:#777;">Confianca</span><br><b>{macro_ai.get('confidence', '---')}</b></div>
+                    <div style="display:grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap:10px; margin-top:16px;">
+                        <div style="background:#111827; border:1px solid #1F2937; border-radius:8px; padding:10px;"><span style="color:#94A3B8; font-size:0.78rem;">Atual</span><br><b style="font-size:1rem;">{actual}</b></div>
+                        <div style="background:#111827; border:1px solid #1F2937; border-radius:8px; padding:10px;"><span style="color:#94A3B8; font-size:0.78rem;">Projecao</span><br><b style="font-size:1rem;">{forecast}</b></div>
+                        <div style="background:#111827; border:1px solid #1F2937; border-radius:8px; padding:10px;"><span style="color:#94A3B8; font-size:0.78rem;">Anterior</span><br><b style="font-size:1rem;">{previous}</b></div>
+                        <div style="background:#111827; border:1px solid #1F2937; border-radius:8px; padding:10px;"><span style="color:#94A3B8; font-size:0.78rem;">Surpresa</span><br><b style="font-size:1rem;">{macro_ai.get('surprise_label', '---')}</b></div>
                     </div>
-                    <div style="margin-top:10px; color:#DDD; line-height:1.45;">{macro_ai.get('operational_summary', '')}</div>
+                    <div style="display:grid; grid-template-columns: repeat(3, minmax(160px, 1fr)); gap:10px; margin-top:10px;">
+                        <div><span style="color:#64748B;">Status</span><br><b>{macro_ai.get('status', '---')}</b></div>
+                        <div><span style="color:#64748B;">Categoria</span><br><b>{macro_ai.get('category', '---')}</b></div>
+                        <div><span style="color:#64748B;">Confianca</span><br><b>{macro_ai.get('confidence', '---')}</b></div>
+                    </div>
+                    <div style="margin-top:14px; color:#E5E7EB; line-height:1.55; font-size:0.94rem;">{macro_ai.get('operational_summary', '')}</div>
                     <div style="margin-top:12px;">{impacts_html}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
+        except StopIteration:
+            pass
         except Exception as e:
             st.warning(f"IA Macro TTS indisponivel: {e}")
 
@@ -1931,8 +1958,8 @@ def secao_calendario_global_fragment():
 
         interpreted_history = []
         pending_history = []
-        for event in reversed(events):
-            result = interpret_event(event, get_global_markets_data())
+        for event in reversed(investing_events):
+            result = interpret_event(event, None)
             if result.get("status") == "Interpretado":
                 interpreted_history.append((event, result))
             else:
@@ -1949,23 +1976,27 @@ def secao_calendario_global_fragment():
                 score = int(result.get("risk_score", 0))
                 score_color = "#00FFA3" if score > 20 else ("#FF4B4B" if score < -20 else "#FF9800")
                 status_color = "#00FFA3" if result.get("status") == "Interpretado" else "#FF9800"
+                actual = event.get("actual", "---") or "---"
+                forecast = event.get("forecast", "---") or "---"
+                previous = event.get("previous", "---") or "---"
                 history_cards.append(
-                    f"<div style='border-bottom:1px solid #222; padding:10px 0;'>"
+                    f"<div style='border-bottom:1px solid #1F2937; padding:13px 0;'>"
                     f"<div style='display:flex; justify-content:space-between; gap:14px; align-items:flex-start;'>"
-                    f"<div>"
-                    f"<div style='font-size:0.78rem; color:#888;'>{event.get('time', '---')} | {event.get('currency', '---')} | {event.get('event', '---')} <span style='color:{status_color}; font-weight:800;'>- {result.get('status', '---')}</span></div>"
-                    f"<div style='font-size:0.86rem; color:#DDD; margin-top:4px;'>{result.get('operational_summary', '')}</div>"
+                    f"<div style='min-width:0;'>"
+                    f"<div style='font-size:0.82rem; color:#94A3B8;'>{event.get('time', '---')} | {event.get('currency', '---')} | <b style='color:#E5E7EB;'>{event.get('event', '---')}</b> <span style='color:{status_color}; font-weight:800;'>- {result.get('status', '---')}</span></div>"
+                    f"<div style='font-size:0.78rem; color:#CBD5E1; margin-top:5px;'>Atual <b>{actual}</b> | Projecao <b>{forecast}</b> | Anterior <b>{previous}</b> | Surpresa <b>{result.get('surprise_label', '---')}</b></div>"
+                    f"<div style='font-size:0.9rem; color:#F8FAFC; margin-top:8px; line-height:1.5;'>{result.get('operational_summary', '')}</div>"
                     f"</div>"
                     f"<div style='text-align:right; min-width:130px;'>"
-                    f"<div style='color:{score_color}; font-weight:900;'>{score:+d}</div>"
-                    f"<div style='font-size:0.72rem; color:#AAA;'>{result.get('risk_classification', 'Neutro')}</div>"
+                    f"<div style='color:{score_color}; font-weight:900; font-size:1.35rem;'>{score:+d}</div>"
+                    f"<div style='font-size:0.78rem; color:#CBD5E1; font-weight:800;'>{result.get('risk_classification', 'Neutro')}</div>"
                     f"</div>"
                     f"</div>"
                     f"</div>"
                 )
             st.markdown(
-                f"<div style='border:1px solid #242b36; border-radius:8px; padding:14px; margin:0 0 14px 0; background:#0b0f17;'>"
-                f"<div style='font-size:0.78rem; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:4px;'>Historico IA Macro TTS - ultimos 5 eventos divulgados</div>"
+                f"<div style='border:1px solid #334155; border-radius:8px; padding:16px; margin:0 0 16px 0; background:#0b1220;'>"
+                f"<div style='font-size:0.78rem; color:#94A3B8; font-weight:800; text-transform:uppercase; margin-bottom:8px;'>Historico IA Macro TTS - ultimos 5 eventos Investing divulgados</div>"
                 f"{''.join(history_cards)}"
                 f"</div>",
                 unsafe_allow_html=True,

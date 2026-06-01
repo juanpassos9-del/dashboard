@@ -611,33 +611,40 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
             "surprise_pct": None,
         }
 
-    market_map = _build_market_map(global_data)
-    dominant_regime = _detect_dominant_regime(market_map)
+    use_market_data = bool(global_data)
+    market_map = _build_market_map(global_data) if use_market_data else {}
+    dominant_regime = _detect_dominant_regime(market_map) if use_market_data else "Calendario Investing"
     data_score = int(_surprise_score(event, surprise_label, dominant_regime) * _importance_weight(event.importance))
-    regime_score = _regime_points(dominant_regime)
-    market_score, confirmations, alignment_ratio = _market_confirmation(market_map)
+    regime_score = _regime_points(dominant_regime) if use_market_data else 0
+    if use_market_data:
+        market_score, confirmations, alignment_ratio = _market_confirmation(market_map)
+    else:
+        market_score, confirmations, alignment_ratio = 0, [], 0.0
     score = max(-100, min(100, int(data_score + regime_score + market_score)))
     macro_shock = _macro_shock(event, surprise_label, dominant_regime, score)
     risk_classification = _risk_classification(score)
-    confidence = _confidence(event, surprise_label, score, confirmations, alignment_ratio)
+    confidence = _confidence(event, surprise_label, score, confirmations, alignment_ratio) if use_market_data else ("Media" if abs(score) >= 20 else "Baixa")
     asset_impacts = _asset_impacts(score, macro_shock)
 
     if score > 20:
         win_bias = asset_impacts["WIN"]
-        conduct = "priorizar compras em pullbacks enquanto EWZ/indices confirmarem, DXY/VIX nao pressionarem e USD/BRL nao virar contra."
+        conduct = "o calendario favorece compras; aguardar confirmacao tecnica no preco antes de aumentar lote."
     elif score < -20:
         win_bias = asset_impacts["WIN"]
-        conduct = "priorizar vendas em repiques enquanto indices/EWZ seguirem fracos e DXY, VIX ou USD/BRL confirmarem pressao."
+        conduct = "o calendario favorece vendas; aguardar repiques e confirmacao tecnica no preco."
     else:
         win_bias = asset_impacts["WIN"]
         conduct = "reduzir lote, aguardar confirmacao tecnica e evitar antecipar direcao apenas pelo calendario."
 
     benchmark_text = f"consenso {event.forecast_raw}" if event.forecast is not None else f"anterior {event.previous_raw}"
+    if use_market_data:
+        score_text = f"Score: dado {data_score:+d}, regime {regime_score:+d}, intermercado {market_score:+d}."
+    else:
+        score_text = f"Score Investing: surpresa do dado {data_score:+d}; sem uso de cotacoes ou fontes externas."
     summary = (
         f"{risk_classification}. Evento {event.event} com surpresa {surprise_label} "
-        f"({event.actual_raw} vs {benchmark_text}), choque {macro_shock}, regime {dominant_regime}. "
-        f"Score: dado {data_score:+d}, regime {regime_score:+d}, intermercado {market_score:+d}. "
-        f"Para WIN, vies {win_bias}: {conduct}"
+        f"({event.actual_raw} vs {benchmark_text}), choque {macro_shock}. "
+        f"{score_text} Para WIN, vies {win_bias}: {conduct}"
     )
 
     return {
