@@ -228,7 +228,246 @@ def _risk_classification(score: int) -> str:
     return "Risk-off forte"
 
 
-def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict:
+def _label_base(surprise_label: str) -> str:
+    return (surprise_label or "").replace(" vs anterior", "")
+
+
+def _importance_weight(importance: str) -> float:
+    value = _plain_text(importance)
+    if "high" in value or "alto" in value:
+        return 1.15
+    if "medium" in value or "medio" in value or "moderate" in value:
+        return 1.0
+    if "low" in value or "baixo" in value:
+        return 0.75
+    return 1.0
+
+
+def _is_wages_event(event_name: str) -> bool:
+    name = _plain_text(event_name)
+    return any(x in name for x in ["earnings", "wages", "salarios", "salario", "hourly"])
+
+
+def _is_inflation_regime(regime: str) -> bool:
+    return "inflacao" in _plain_text(regime) or "aperto" in _plain_text(regime)
+
+
+def _is_recession_regime(regime: str) -> bool:
+    plain = _plain_text(regime)
+    return "recessao" in plain or "stress" in plain or "risk-off" in plain
+
+
+def _points_from_map(label: str, points: dict[str, int]) -> int:
+    return points.get(_label_base(label), 0)
+
+
+def _surprise_score(event: EconomicEvent, surprise_label: str, dominant_regime: str) -> int:
+    inflation_points = {
+        "muito acima": -35,
+        "acima": -20,
+        "em linha": 0,
+        "abaixo": 20,
+        "muito abaixo": 35,
+    }
+    growth_points = {
+        "muito acima": 30,
+        "acima": 15,
+        "em linha": 0,
+        "abaixo": -15,
+        "muito abaixo": -35,
+    }
+    activity_inflation_regime = {
+        "muito acima": -20,
+        "acima": -10,
+        "em linha": 0,
+        "abaixo": 10,
+        "muito abaixo": -30,
+    }
+    commodities_points = {
+        "muito acima": -20,
+        "acima": -10,
+        "em linha": 0,
+        "abaixo": 10,
+        "muito abaixo": 20,
+    }
+
+    if event.category == "inflation" or _is_wages_event(event.event):
+        score = _points_from_map(surprise_label, inflation_points)
+    elif event.category in ["activity", "employment"]:
+        if _is_inflation_regime(dominant_regime):
+            score = _points_from_map(surprise_label, activity_inflation_regime)
+        else:
+            score = _points_from_map(surprise_label, growth_points)
+        if is_higher_worse(event.event):
+            score *= -1
+    elif event.category == "central_bank":
+        score = _points_from_map(surprise_label, inflation_points)
+    elif event.category == "commodities":
+        score = _points_from_map(surprise_label, commodities_points)
+    elif event.category == "china":
+        score = _points_from_map(surprise_label, growth_points)
+    else:
+        score = int(_points_from_map(surprise_label, growth_points) * 0.5)
+    return score
+
+
+def _detect_dominant_regime(market_map: dict[str, Optional[float]]) -> str:
+    us10y = market_map.get("US10Y")
+    dxy = market_map.get("DXY")
+    vix = market_map.get("VIX")
+    sp500 = market_map.get("S&P 500")
+    nasdaq = market_map.get("NASDAQ")
+
+    if us10y is not None and dxy is not None and vix is not None:
+        if us10y > 0.15 and dxy > 0.3 and vix > 3:
+            return "Inflacao dominante / aperto financeiro"
+        if us10y < -0.15 and dxy < -0.3 and sp500 is not None and sp500 > 0.5:
+            return "Liquidez favoravel / risk-on"
+
+    if vix is not None and sp500 is not None and vix > 5 and sp500 < -0.5:
+        return "Risk-off / stress"
+    if sp500 is not None and nasdaq is not None and vix is not None:
+        if sp500 > 0.3 and nasdaq > 0.3 and vix < -2:
+            return "Goldilocks / risk-on"
+    return "Neutro"
+
+
+def _regime_points(dominant_regime: str) -> int:
+    points = {
+        "Inflacao dominante / aperto financeiro": -15,
+        "Risk-off / stress": -25,
+        "Liquidez favoravel / risk-on": 25,
+        "Goldilocks / risk-on": 20,
+        "Neutro": 0,
+    }
+    return points.get(dominant_regime, 0)
+
+
+def _build_market_map(global_data: Optional[dict]) -> dict[str, Optional[float]]:
+    return {
+        "S&P 500": _market_change(global_data, ["S&P 500", "SPY (S&P 500)", "SPY (S&P 500 ETF)"]),
+        "NASDAQ": _market_change(global_data, ["NASDAQ", "NASDAQ (Futuro)"]),
+        "DXY": _market_change(global_data, ["DXY (DÃ³lar Index)", "DXY (Dolar Index)"]),
+        "VIX": _market_change(global_data, ["VIX"]),
+        "EWZ": _market_change(global_data, ["EWZ (Brazil ETF)"]),
+        "USD/BRL": _market_change(global_data, ["USDBRL (Comercial)", "USDBRL"]),
+        "US10Y": _market_change(global_data, ["US 10Y (Yield)", "US10Y"]),
+        "US30Y": _market_change(global_data, ["US 30Y (Yield)", "US30Y"]),
+        "Bitcoin": _market_change(global_data, ["BITCOIN", "Bitcoin"]),
+        "Brent": _market_change(global_data, ["BRENT OIL", "Brent"]),
+        "WTI": _market_change(global_data, ["WTI OIL", "PetrÃ³leo WTI", "Petroleo WTI"]),
+        "Gold": _market_change(global_data, ["GOLD", "Ouro"]),
+    }
+
+
+def _market_confirmation(market_map: dict[str, Optional[float]]) -> tuple[int, list[dict], float]:
+    rules = [
+        ("US10Y", -0.15, 0.15, 10, "queda de juros", "alta de juros"),
+        ("DXY", -0.2, 0.2, 10, "dolar fraco", "dolar forte"),
+        ("VIX", -2.0, 2.0, 10, "volatilidade cedendo", "volatilidade subindo"),
+        ("S&P 500", 0.3, -0.3, 10, "indice forte", "indice fraco"),
+        ("NASDAQ", 0.3, -0.3, 10, "tech forte", "tech fraco"),
+        ("EWZ", 0.3, -0.3, 7, "Brasil forte", "Brasil fraco"),
+        ("USD/BRL", -0.3, 0.3, 7, "real forte", "real fraco"),
+        ("Bitcoin", 0.5, -0.5, 5, "cripto forte", "cripto fraco"),
+        ("Brent", 0.5, -0.5, 4, "energia firme", "energia fraca"),
+    ]
+    contribution = 0
+    confirmations = []
+    for asset, risk_on_threshold, risk_off_threshold, points, on_label, off_label in rules:
+        change = market_map.get(asset)
+        if change is None:
+            continue
+        signal = "neutro"
+        asset_points = 0
+        if risk_on_threshold >= 0 and change > risk_on_threshold:
+            signal = f"Risk-on: {on_label}"
+            asset_points = points
+        elif risk_on_threshold < 0 and change < risk_on_threshold:
+            signal = f"Risk-on: {on_label}"
+            asset_points = points
+        elif risk_off_threshold >= 0 and change > risk_off_threshold:
+            signal = f"Risk-off: {off_label}"
+            asset_points = -points
+        elif risk_off_threshold < 0 and change < risk_off_threshold:
+            signal = f"Risk-off: {off_label}"
+            asset_points = -points
+        contribution += asset_points
+        confirmations.append({"Ativo": asset, "Var %": change, "Sinal": signal, "Contrib.": asset_points})
+
+    directional = [item for item in confirmations if item["Contrib."] != 0]
+    aligned = [item for item in directional if (contribution >= 0 and item["Contrib."] > 0) or (contribution < 0 and item["Contrib."] < 0)]
+    ratio = len(aligned) / len(directional) if directional else 0.0
+    return contribution, confirmations, ratio
+
+
+def _confidence(event: EconomicEvent, surprise_label: str, score: int, confirmations: list[dict], alignment_ratio: float) -> str:
+    directional_count = len([item for item in confirmations if item.get("Contrib.")])
+    levels = ["Baixa", "Media", "Alta", "Muito alta"]
+    level = 0
+    if alignment_ratio >= 0.75:
+        level = 2
+    elif alignment_ratio >= 0.55:
+        level = 1
+
+    if event.importance.upper() == "HIGH" and _label_base(surprise_label) in ["muito acima", "muito abaixo"]:
+        level += 1
+    if abs(score) < 20:
+        level -= 1
+    if directional_count < 5:
+        level -= 1
+    return levels[max(0, min(len(levels) - 1, level))]
+
+
+def _macro_shock(event: EconomicEvent, surprise_label: str, dominant_regime: str, score: int) -> str:
+    direction = 1 if _surprise_score(event, surprise_label, dominant_regime) > 0 else -1 if _surprise_score(event, surprise_label, dominant_regime) < 0 else 0
+    if direction == 0:
+        return "Neutro"
+    if event.category == "inflation" or _is_wages_event(event.event):
+        return "desinflacionario / dovish" if direction > 0 else "inflacionario / hawkish"
+    if event.category in ["activity", "employment", "china"]:
+        if _is_inflation_regime(dominant_regime) and direction < 0:
+            return "hawkish / juros pressionados"
+        return "pro-crescimento" if direction > 0 else "recessivo"
+    if event.category == "central_bank":
+        return "dovish" if direction > 0 else "hawkish"
+    if event.category == "commodities":
+        return "baixista para energia / desinflacionario" if direction > 0 else "altista para energia / inflacionario"
+    return "favoravel ao risco" if score > 0 else "desfavoravel ao risco"
+
+
+def _asset_impacts(score: int, macro_shock: str) -> dict[str, str]:
+    if score >= 70:
+        equities = "comprador forte"
+    elif score > 20:
+        equities = "comprador"
+    elif score <= -70:
+        equities = "vendedor forte"
+    elif score < -20:
+        equities = "vendedor"
+    else:
+        equities = "neutro"
+
+    risk_on = score > 20
+    risk_off = score < -20
+    return {
+        "WIN": equities if equities != "comprador forte" else "comprador",
+        "S&P 500": equities,
+        "Nasdaq": "comprador forte" if score >= 70 else ("vendedor forte" if score <= -70 else equities),
+        "Dow Jones": equities,
+        "DXY": "vendedor" if risk_on else ("comprador" if risk_off else "neutro"),
+        "US10Y": "queda" if risk_on else ("alta" if risk_off and "inflacionario" in macro_shock else "misto" if risk_off else "neutro"),
+        "VIX": "queda" if risk_on else ("alta" if risk_off else "neutro"),
+        "Ouro": "alta" if risk_on and "dovish" in macro_shock else ("misto" if risk_off else "neutro"),
+        "PetrÃ³leo": "alta" if risk_on else ("queda" if risk_off else "neutro"),
+        "Bitcoin": equities,
+        "EWZ": equities if equities != "comprador forte" else "comprador",
+        "USD/BRL": "queda" if risk_on else ("alta" if risk_off else "neutro"),
+        "DI futuro": "queda" if risk_on else ("alta" if risk_off else "neutro"),
+    }
+
+
+def _interpret_event_legacy(raw_event: dict, global_data: Optional[dict] = None) -> dict:
     event = normalize_event(raw_event)
     surprise_value, surprise_pct, surprise_label = calculate_surprise(event)
 
@@ -347,4 +586,79 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
             "USD/BRL": "queda" if score > 20 else ("alta" if score < -20 else "neutro"),
         },
         "confirmations": confirmations,
+    }
+
+
+def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict:
+    event = normalize_event(raw_event)
+    surprise_value, surprise_pct, surprise_label = calculate_surprise(event)
+
+    released = event.actual is not None
+    if not released:
+        return {
+            "status": "Aguardando divulgacao",
+            "event": event.event,
+            "category": event.category,
+            "surprise_label": "aguardando",
+            "macro_shock": "Aguardando dado realizado",
+            "dominant_regime": "Neutro",
+            "risk_score": 0,
+            "risk_classification": "Neutro",
+            "confidence": "Baixa",
+            "operational_summary": "Aguardando o campo Atual do calendario Investing. Assim que o dado for divulgado, a IA calcula surpresa, choque macro e vies operacional.",
+            "asset_impacts": {},
+            "surprise_value": None,
+            "surprise_pct": None,
+        }
+
+    market_map = _build_market_map(global_data)
+    dominant_regime = _detect_dominant_regime(market_map)
+    data_score = int(_surprise_score(event, surprise_label, dominant_regime) * _importance_weight(event.importance))
+    regime_score = _regime_points(dominant_regime)
+    market_score, confirmations, alignment_ratio = _market_confirmation(market_map)
+    score = max(-100, min(100, int(data_score + regime_score + market_score)))
+    macro_shock = _macro_shock(event, surprise_label, dominant_regime, score)
+    risk_classification = _risk_classification(score)
+    confidence = _confidence(event, surprise_label, score, confirmations, alignment_ratio)
+    asset_impacts = _asset_impacts(score, macro_shock)
+
+    if score > 20:
+        win_bias = asset_impacts["WIN"]
+        conduct = "priorizar compras em pullbacks enquanto EWZ/indices confirmarem, DXY/VIX nao pressionarem e USD/BRL nao virar contra."
+    elif score < -20:
+        win_bias = asset_impacts["WIN"]
+        conduct = "priorizar vendas em repiques enquanto indices/EWZ seguirem fracos e DXY, VIX ou USD/BRL confirmarem pressao."
+    else:
+        win_bias = asset_impacts["WIN"]
+        conduct = "reduzir lote, aguardar confirmacao tecnica e evitar antecipar direcao apenas pelo calendario."
+
+    benchmark_text = f"consenso {event.forecast_raw}" if event.forecast is not None else f"anterior {event.previous_raw}"
+    summary = (
+        f"{risk_classification}. Evento {event.event} com surpresa {surprise_label} "
+        f"({event.actual_raw} vs {benchmark_text}), choque {macro_shock}, regime {dominant_regime}. "
+        f"Score: dado {data_score:+d}, regime {regime_score:+d}, intermercado {market_score:+d}. "
+        f"Para WIN, vies {win_bias}: {conduct}"
+    )
+
+    return {
+        "status": "Interpretado",
+        "event": event.event,
+        "category": event.category,
+        "surprise_value": surprise_value,
+        "surprise_pct": surprise_pct,
+        "surprise_label": surprise_label,
+        "macro_shock": macro_shock,
+        "dominant_regime": dominant_regime,
+        "risk_score": score,
+        "risk_classification": risk_classification,
+        "confidence": confidence,
+        "operational_summary": summary,
+        "asset_impacts": asset_impacts,
+        "confirmations": confirmations,
+        "score_components": {
+            "surpresa": data_score,
+            "regime": regime_score,
+            "intermercado": market_score,
+            "alinhamento": alignment_ratio,
+        },
     }
