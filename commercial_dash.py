@@ -195,11 +195,13 @@ def render_bloomberg_news_feed_fragment():
         for reason in reasons:
             if reason not in unique_reasons:
                 unique_reasons.append(reason)
+        if score >= 12:
+            return "critical", "URGENTE", unique_reasons[:4]
         if score >= 8:
             return "high", "ALTO IMPACTO", unique_reasons[:3]
         if score >= 4:
-            return "medium", "IMPACTO", unique_reasons[:3]
-        return "low", "", unique_reasons[:2]
+            return "medium", "IMPACTO MEDIO", unique_reasons[:3]
+        return "low", "BAIXO IMPACTO", unique_reasons[:2]
 
     st.caption("Somente este feed atualiza a cada 5s. O restante do terminal permanece estavel.")
     if st.button("Atualizar feed agora", use_container_width=True, key="bb_refresh_news_fast"):
@@ -231,6 +233,15 @@ def render_bloomberg_news_feed_fragment():
     else:
         filtered_news = news_list
 
+    impact_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    filtered_news = sorted(
+        filtered_news,
+        key=lambda item: (
+            impact_order.get(market_impact(item)[0], 9),
+            -(item.get("timestamp") or 0),
+        ),
+    )
+
     if "selected_news_id" not in st.session_state:
         st.session_state.selected_news_id = None
     if not st.session_state.selected_news_id and filtered_news:
@@ -259,7 +270,7 @@ def render_bloomberg_news_feed_fragment():
         )
         reason_tags = "".join(f'<span class="bb-news-tag">{esc(reason)}</span>' for reason in impact_reasons)
         featured_class = " bb-featured" if is_featured else ""
-        impact_class = f" bb-impact-{impact_level}" if impact_level in ["high", "medium"] else ""
+        impact_class = f" bb-impact-{impact_level}" if impact_level in ["critical", "high", "medium"] else ""
         close_html = '<span class="bb-news-close">x</span>' if is_featured else ""
         summary_html = (
             f'<div class="bb-news-summary">{summary}</div>'
@@ -1026,11 +1037,13 @@ def pagina_terminal_bloomberg():
             if reason not in unique_reasons:
                 unique_reasons.append(reason)
 
+        if score >= 12:
+            return "critical", "URGENTE", unique_reasons[:4]
         if score >= 8:
             return "high", "ALTO IMPACTO", unique_reasons[:3]
         if score >= 4:
-            return "medium", "IMPACTO", unique_reasons[:3]
-        return "low", "", unique_reasons[:2]
+            return "medium", "IMPACTO MEDIO", unique_reasons[:3]
+        return "low", "BAIXO IMPACTO", unique_reasons[:2]
     
     # CSS Customizado Exclusivo para o Terminal Bloomberg
     st.markdown("""
@@ -1216,9 +1229,18 @@ def pagina_terminal_bloomberg():
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 0 0 1px rgba(255,59,48,0.18);
         }
 
+        .bb-news-card.bb-impact-critical {
+            background: linear-gradient(90deg, #3a090b 0%, #211216 100%);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px rgba(255,59,48,0.45), 0 0 18px rgba(255,59,48,0.12);
+        }
+
         .bb-news-card.bb-impact-medium {
             background: #261f12;
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 0 0 1px rgba(255,153,0,0.14);
+        }
+
+        .bb-news-card.bb-impact-critical .bb-news-rail {
+            background: #ff1f1f;
         }
 
         .bb-news-card.bb-impact-high .bb-news-rail {
@@ -1227,6 +1249,12 @@ def pagina_terminal_bloomberg():
 
         .bb-news-card.bb-impact-medium .bb-news-rail {
             background: #ff9900;
+        }
+
+        .bb-news-card.bb-impact-critical .bb-news-title {
+            color: #ffeded;
+            font-weight: 950;
+            text-shadow: 0 0 10px rgba(255,59,48,0.25);
         }
 
         .bb-news-card.bb-impact-high .bb-news-title {
@@ -1319,10 +1347,23 @@ def pagina_terminal_bloomberg():
             border: 1px solid rgba(255,59,48,0.35);
         }
 
+        .bb-impact-badge.critical {
+            background: #ff2d20;
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.28);
+            box-shadow: 0 0 14px rgba(255,59,48,0.22);
+        }
+
         .bb-impact-badge.medium {
             background: #3d2804;
             color: #ffb24a;
             border: 1px solid rgba(255,153,0,0.35);
+        }
+
+        .bb-impact-badge.low {
+            background: #1f2937;
+            color: #94a3b8;
+            border: 1px solid rgba(148,163,184,0.18);
         }
 
         .bb-news-link {
@@ -1495,12 +1536,23 @@ def pagina_terminal_bloomberg():
     else:
         filtered_news = news_list
 
+    impact_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    filtered_news = sorted(
+        filtered_news,
+        key=lambda item: (
+            impact_order.get(market_impact(item)[0], 9),
+            -(item.get("timestamp") or 0),
+        ),
+    )
+
+    critical_count = sum(1 for item in filtered_news if market_impact(item)[0] == "critical")
     high_count = sum(1 for item in filtered_news if market_impact(item)[0] == "high")
     medium_count = sum(1 for item in filtered_news if market_impact(item)[0] == "medium")
     latest_time = esc(filtered_news[0].get("published_str", "--:--")) if filtered_news else "--:--"
     st.markdown(
         f'<div class="bb-news-toolbar">'
         f'<div class="bb-news-stat"><span>Noticias</span><strong>{len(filtered_news)}</strong></div>'
+        f'<div class="bb-news-stat"><span>Urgente</span><strong style="color:#ff2d20;">{critical_count}</strong></div>'
         f'<div class="bb-news-stat"><span>Alto impacto</span><strong style="color:#ff6b5f;">{high_count}</strong></div>'
         f'<div class="bb-news-stat"><span>Impacto medio</span><strong style="color:#ffb24a;">{medium_count}</strong></div>'
         f'<div class="bb-news-stat"><span>Mais recente</span><strong>{latest_time}</strong></div>'
@@ -1535,7 +1587,7 @@ def pagina_terminal_bloomberg():
             )
             reason_tags = "".join(f'<span class="bb-news-tag">{esc(reason)}</span>' for reason in impact_reasons)
             featured_class = " bb-featured" if is_featured else ""
-            impact_class = f" bb-impact-{impact_level}" if impact_level in ["high", "medium"] else ""
+            impact_class = f" bb-impact-{impact_level}" if impact_level in ["critical", "high", "medium"] else ""
             close_html = '<span class="bb-news-close">×</span>' if is_featured else ""
             summary_html = (
                 f'<div class="bb-news-summary">{summary}</div>'
