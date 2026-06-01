@@ -1869,7 +1869,14 @@ def secao_calendario_global_fragment():
         event for event in investing_events
         if str(event.get("actual", "---")).strip() not in ["", "---", "-"]
     ]
-    analysis_event = released_investing_events[-1] if released_investing_events else next_event
+    next_has_projection = (
+        next_event
+        and next_event.get("source") == "Investing.com"
+        and str(next_event.get("actual", "---")).strip() in ["", "---", "-"]
+        and str(next_event.get("forecast", "---")).strip() not in ["", "---", "-"]
+        and str(next_event.get("previous", "---")).strip() not in ["", "---", "-"]
+    )
+    analysis_event = next_event if next_has_projection else (released_investing_events[-1] if released_investing_events else next_event)
 
     next_event_key = None
     if next_event or analysis_event:
@@ -1912,7 +1919,10 @@ def secao_calendario_global_fragment():
                 f"<span style='display:inline-block; border:1px solid #334155; background:#111827; border-radius:6px; padding:5px 9px; margin:4px 6px 0 0; color:#CBD5E1; font-size:0.78rem;'>{asset}: <b style='color:#FFF;'>{bias}</b></span>"
                 for asset, bias in impacts.items()
             )
-            panel_label = "Ultimo dado divulgado analisado" if analysis_event in released_investing_events else "Proximo evento aguardando divulgacao"
+            if macro_ai.get("status") == "Projecao analisada":
+                panel_label = "Projecao do proximo evento"
+            else:
+                panel_label = "Ultimo dado divulgado analisado" if analysis_event in released_investing_events else "Proximo evento aguardando divulgacao"
             actual = analysis_event.get("actual", "---") or "---"
             forecast = analysis_event.get("forecast", "---") or "---"
             previous = analysis_event.get("previous", "---") or "---"

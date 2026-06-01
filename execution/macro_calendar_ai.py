@@ -202,6 +202,52 @@ def calculate_surprise(event: EconomicEvent) -> tuple[Optional[float], Optional[
     return surprise_value, surprise_pct, f"{label}{benchmark_label}"
 
 
+def calculate_projection(event: EconomicEvent) -> tuple[Optional[float], Optional[float], str]:
+    if event.forecast is None or event.previous is None:
+        return None, None, "projecao indisponivel"
+
+    projected_value = event.forecast - event.previous
+    projected_pct = None if event.previous == 0 else projected_value / abs(event.previous)
+    event_name = _plain_text(event.event)
+
+    if event.category in ["inflation", "central_bank"] or event.unit == "%":
+        abs_value = abs(projected_value)
+        if abs_value < 0.05:
+            label = "projecao em linha"
+        elif projected_value >= 0.15:
+            label = "projecao muito acima"
+        elif projected_value > 0.05:
+            label = "projecao acima"
+        elif projected_value <= -0.15:
+            label = "projecao muito abaixo"
+        else:
+            label = "projecao abaixo"
+    elif "pmi" in event_name or "ism" in event_name or "confidence" in event_name:
+        abs_value = abs(projected_value)
+        if abs_value < 0.3:
+            label = "projecao em linha"
+        elif projected_value >= 1.0:
+            label = "projecao muito acima"
+        elif projected_value > 0.3:
+            label = "projecao acima"
+        elif projected_value <= -1.0:
+            label = "projecao muito abaixo"
+        else:
+            label = "projecao abaixo"
+    else:
+        if projected_pct is None or abs(projected_pct) < 0.05:
+            label = "projecao em linha"
+        elif projected_pct >= 0.20:
+            label = "projecao muito acima"
+        elif projected_pct > 0.05:
+            label = "projecao acima"
+        elif projected_pct <= -0.20:
+            label = "projecao muito abaixo"
+        else:
+            label = "projecao abaixo"
+    return projected_value, projected_pct, f"{label} vs anterior"
+
+
 def _market_change(global_data: dict, target_names: list[str]) -> Optional[float]:
     categories = (global_data or {}).get("categories", global_data or {})
     for assets in categories.values():
@@ -229,7 +275,7 @@ def _risk_classification(score: int) -> str:
 
 
 def _label_base(surprise_label: str) -> str:
-    return (surprise_label or "").replace(" vs anterior", "")
+    return (surprise_label or "").replace("projecao ", "").replace(" vs anterior", "")
 
 
 def _importance_weight(importance: str) -> float:
@@ -473,6 +519,51 @@ def _interpret_event_legacy(raw_event: dict, global_data: Optional[dict] = None)
 
     released = event.actual is not None
     if not released:
+        projection_value, projection_pct, projection_label = calculate_projection(event)
+        if projection_value is not None:
+            dominant_regime = "Calendario Investing"
+            data_score = int(_surprise_score(event, projection_label, dominant_regime) * _importance_weight(event.importance) * 0.65)
+            score = max(-100, min(100, data_score))
+            macro_shock = _macro_shock(event, projection_label, dominant_regime, score)
+            risk_classification = _risk_classification(score)
+            confidence = "Media" if abs(score) >= 15 else "Baixa"
+            asset_impacts = _asset_impacts(score, macro_shock)
+            if score > 20:
+                win_bias = asset_impacts["WIN"]
+                conduct = "a projeção cria viés pré-evento favorável ao risco, mas a entrada depende da confirmação do Atual no horário da divulgação."
+            elif score < -20:
+                win_bias = asset_impacts["WIN"]
+                conduct = "a projeção cria viés pré-evento defensivo, mas a entrada depende da confirmação do Atual no horário da divulgação."
+            else:
+                win_bias = asset_impacts["WIN"]
+                conduct = "projeção sem assimetria forte; aguardar o Atual antes de tomar direção."
+            summary = (
+                f"{risk_classification}. Projecao do evento {event.event}: consenso {event.forecast_raw} vs anterior {event.previous_raw}, "
+                f"leitura {projection_label}, choque esperado {macro_shock}. "
+                f"Score Investing projetado: {score:+d}; sem uso de cotacoes ou fontes externas. "
+                f"Para WIN, vies {win_bias}: {conduct}"
+            )
+            return {
+                "status": "Projecao analisada",
+                "event": event.event,
+                "category": event.category,
+                "surprise_label": projection_label,
+                "macro_shock": macro_shock,
+                "dominant_regime": dominant_regime,
+                "risk_score": score,
+                "risk_classification": risk_classification,
+                "confidence": confidence,
+                "operational_summary": summary,
+                "asset_impacts": asset_impacts,
+                "surprise_value": projection_value,
+                "surprise_pct": projection_pct,
+                "score_components": {
+                    "projecao": data_score,
+                    "regime": 0,
+                    "intermercado": 0,
+                    "alinhamento": 0.0,
+                },
+            }
         return {
             "status": "Aguardando divulgacao",
             "event": event.event,
@@ -595,6 +686,52 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
 
     released = event.actual is not None
     if not released:
+        projection_value, projection_pct, projection_label = calculate_projection(event)
+        if projection_value is not None:
+            dominant_regime = "Calendario Investing"
+            data_score = int(_surprise_score(event, projection_label, dominant_regime) * _importance_weight(event.importance) * 0.65)
+            score = max(-100, min(100, data_score))
+            macro_shock = _macro_shock(event, projection_label, dominant_regime, score)
+            risk_classification = _risk_classification(score)
+            confidence = "Media" if abs(score) >= 15 else "Baixa"
+            asset_impacts = _asset_impacts(score, macro_shock)
+            if score > 20:
+                win_bias = asset_impacts["WIN"]
+                conduct = "a projecao cria vies pre-evento favoravel ao risco, mas a entrada depende da confirmacao do Atual no horario da divulgacao."
+            elif score < -20:
+                win_bias = asset_impacts["WIN"]
+                conduct = "a projecao cria vies pre-evento defensivo, mas a entrada depende da confirmacao do Atual no horario da divulgacao."
+            else:
+                win_bias = asset_impacts["WIN"]
+                conduct = "projecao sem assimetria forte; aguardar o Atual antes de tomar direcao."
+            summary = (
+                f"{risk_classification}. Projecao do evento {event.event}: consenso {event.forecast_raw} vs anterior {event.previous_raw}, "
+                f"leitura {projection_label}, choque esperado {macro_shock}. "
+                f"Score Investing projetado: {score:+d}; sem uso de cotacoes ou fontes externas. "
+                f"Para WIN, vies {win_bias}: {conduct}"
+            )
+            return {
+                "status": "Projecao analisada",
+                "event": event.event,
+                "category": event.category,
+                "surprise_value": projection_value,
+                "surprise_pct": projection_pct,
+                "surprise_label": projection_label,
+                "macro_shock": macro_shock,
+                "dominant_regime": dominant_regime,
+                "risk_score": score,
+                "risk_classification": risk_classification,
+                "confidence": confidence,
+                "operational_summary": summary,
+                "asset_impacts": asset_impacts,
+                "confirmations": [],
+                "score_components": {
+                    "projecao": data_score,
+                    "regime": 0,
+                    "intermercado": 0,
+                    "alinhamento": 0.0,
+                },
+            }
         return {
             "status": "Aguardando divulgacao",
             "event": event.event,
