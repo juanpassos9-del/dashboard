@@ -1920,18 +1920,28 @@ def secao_calendario_global_fragment():
         next_event = upcoming_events[0]
 
     investing_events = [event for event in events if event.get("source") == "Investing.com"]
-    released_investing_events = [
-        event for event in investing_events
-        if str(event.get("actual", "---")).strip() not in ["", "---", "-"]
+    analysis_pool = investing_events if investing_events else events
+
+    def has_actual(event):
+        return str(event.get("actual", "---")).strip() not in ["", "---", "-"]
+
+    def has_projection(event):
+        return (
+            str(event.get("actual", "---")).strip() in ["", "---", "-"]
+            and str(event.get("forecast", "---")).strip() not in ["", "---", "-"]
+            and str(event.get("previous", "---")).strip() not in ["", "---", "-"]
+        )
+
+    released_investing_events = [event for event in analysis_pool if has_actual(event)]
+    upcoming_analyzable_events = [
+        event for event in upcoming_events
+        if event in analysis_pool and (has_projection(event) or has_actual(event))
     ]
-    next_has_projection = (
-        next_event
-        and next_event.get("source") == "Investing.com"
-        and str(next_event.get("actual", "---")).strip() in ["", "---", "-"]
-        and str(next_event.get("forecast", "---")).strip() not in ["", "---", "-"]
-        and str(next_event.get("previous", "---")).strip() not in ["", "---", "-"]
+    analysis_event = (
+        upcoming_analyzable_events[0]
+        if upcoming_analyzable_events
+        else (released_investing_events[-1] if released_investing_events else next_event)
     )
-    analysis_event = next_event if next_has_projection else (released_investing_events[-1] if released_investing_events else next_event)
 
     next_event_key = None
     if next_event or analysis_event:
@@ -1966,8 +1976,8 @@ def secao_calendario_global_fragment():
 
         try:
             from execution.macro_calendar_ai import interpret_event
-            if not analysis_event or analysis_event.get("source") != "Investing.com":
-                st.info("IA Macro TTS aguardando dados ao vivo do Investing.com para analisar.")
+            if not analysis_event:
+                st.info("IA Macro TTS aguardando evento com Atual, Projecao ou Anterior para analisar.")
                 macro_ai = None
             else:
                 macro_ai = interpret_event(analysis_event, None)
