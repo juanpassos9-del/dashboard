@@ -106,7 +106,7 @@ def _investing_request(base_url, language="pt-BR"):
     payload = {
         "country[]": ["5", "4", "17", "72", "35", "25", "6", "12", "37", "26", "10", "14", "48"],
         "importance[]": ["1", "2", "3"],
-        "timeZone": "8",
+        "timeZone": "12",
         "timeFilter": "timeOnly",
         "currentTab": "today",
         "limit_from": "0",

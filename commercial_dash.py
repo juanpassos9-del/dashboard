@@ -2077,7 +2077,7 @@ def secao_calendario_global_fragment():
         "features=datepicker,timezone,timeselector,filters&"
         "countries=25,6,37,72,22,17,35,43,11,12,4,5&"
         "calType=day&"
-        "timeZone=8&"
+        "timeZone=12&"
         "lang=12"
     )
     st.markdown("##### Calendario em tempo real")
