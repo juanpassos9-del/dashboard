@@ -1909,12 +1909,15 @@ def secao_calendario_global_fragment():
         except Exception:
             return None
 
+    upcoming_events = []
     next_event = None
     for event in events:
         event_dt = event_datetime(event)
         if event_dt and event_dt >= now_br:
-            next_event = event
-            break
+            upcoming_events.append(event)
+
+    if upcoming_events:
+        next_event = upcoming_events[0]
 
     investing_events = [event for event in events if event.get("source") == "Investing.com"]
     released_investing_events = [
@@ -1932,24 +1935,36 @@ def secao_calendario_global_fragment():
 
     next_event_key = None
     if next_event or analysis_event:
-        if next_event:
+        if upcoming_events:
             next_event_key = (
                 next_event.get("date"),
                 next_event.get("time"),
                 next_event.get("currency"),
                 next_event.get("event"),
             )
-            impact = next_event.get("impact", "")
-            impact_color = "#FF4B4B" if impact == "HIGH" else ("#FF9800" if impact == "MEDIUM" else "#888")
+            top_impact = next_event.get("impact", "")
+            top_impact_color = "#FF4B4B" if top_impact == "HIGH" else ("#FF9800" if top_impact == "MEDIUM" else "#888")
+            upcoming_rows = []
+            for idx, event in enumerate(upcoming_events[:3], start=1):
+                impact = event.get("impact", "")
+                impact_color = "#FF4B4B" if impact == "HIGH" else ("#FF9800" if impact == "MEDIUM" else "#888")
+                border_top = "border-top:1px solid #242b36;" if idx > 1 else ""
+                upcoming_rows.append(
+                    f"""
+                    <div style="{border_top} padding:{'10px' if idx > 1 else '0'} 0 0 0; margin-top:{'10px' if idx > 1 else '0'};">
+                        <div style="display:flex; justify-content:space-between; gap:18px; align-items:center; flex-wrap:wrap;">
+                            <div style="font-size:0.72rem; color:#888; font-weight:800; text-transform:uppercase;">Proximo evento #{idx}</div>
+                            <div style="color:{impact_color}; font-weight:900; font-size:0.84rem;">{impact or '---'} | {event.get('bull_count', 1)} touro(s)</div>
+                        </div>
+                        <div style="font-size:1rem; font-weight:800; color:#FFF; margin-top:4px;">{event.get('time', '---')} | {event.get('currency', '---')} | {event.get('event', '---')}</div>
+                        <div style="font-size:0.78rem; color:#AAA; margin-top:6px;">Atual: <b style="color:#FFF;">{event.get('actual', '---') or '---'}</b> &nbsp;|&nbsp; Projecao: <b>{event.get('forecast', '---') or '---'}</b> &nbsp;|&nbsp; Anterior: <b>{event.get('previous', '---') or '---'}</b></div>
+                    </div>
+                    """
+                )
             st.markdown(
                 f"""
-                <div style="border:1px solid {impact_color}; border-left:5px solid {impact_color}; border-radius:8px; padding:12px 14px; margin:10px 0 14px 0; background:#111;">
-                    <div style="font-size:0.72rem; color:#888; font-weight:700; text-transform:uppercase;">Proximo evento</div>
-                    <div style="display:flex; justify-content:space-between; gap:18px; align-items:center; flex-wrap:wrap;">
-                        <div style="font-size:1rem; font-weight:700; color:#FFF;">{next_event.get('time', '---')} | {next_event.get('currency', '---')} | {next_event.get('event', '---')}</div>
-                        <div style="color:{impact_color}; font-weight:800;">{impact or '---'} | {next_event.get('bull_count', 1)} touro(s)</div>
-                    </div>
-                    <div style="font-size:0.78rem; color:#AAA; margin-top:6px;">Atual: <b style="color:#FFF;">{next_event.get('actual', '---') or '---'}</b> &nbsp;|&nbsp; Projecao: <b>{next_event.get('forecast', '---') or '---'}</b> &nbsp;|&nbsp; Anterior: <b>{next_event.get('previous', '---') or '---'}</b></div>
+                <div style="border:1px solid {top_impact_color}; border-left:5px solid {top_impact_color}; border-radius:8px; padding:12px 14px; margin:10px 0 14px 0; background:#111;">
+                    {''.join(upcoming_rows)}
                 </div>
                 """,
                 unsafe_allow_html=True,
