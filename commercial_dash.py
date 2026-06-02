@@ -1950,23 +1950,17 @@ def secao_calendario_global_fragment():
                 impact_color = "#FF4B4B" if impact == "HIGH" else ("#FF9800" if impact == "MEDIUM" else "#888")
                 border_top = "border-top:1px solid #242b36;" if idx > 1 else ""
                 upcoming_rows.append(
-                    f"""
-                    <div style="{border_top} padding:{'10px' if idx > 1 else '0'} 0 0 0; margin-top:{'10px' if idx > 1 else '0'};">
-                        <div style="display:flex; justify-content:space-between; gap:18px; align-items:center; flex-wrap:wrap;">
-                            <div style="font-size:0.72rem; color:#888; font-weight:800; text-transform:uppercase;">Proximo evento #{idx}</div>
-                            <div style="color:{impact_color}; font-weight:900; font-size:0.84rem;">{impact or '---'} | {event.get('bull_count', 1)} touro(s)</div>
-                        </div>
-                        <div style="font-size:1rem; font-weight:800; color:#FFF; margin-top:4px;">{event.get('time', '---')} | {event.get('currency', '---')} | {event.get('event', '---')}</div>
-                        <div style="font-size:0.78rem; color:#AAA; margin-top:6px;">Atual: <b style="color:#FFF;">{event.get('actual', '---') or '---'}</b> &nbsp;|&nbsp; Projecao: <b>{event.get('forecast', '---') or '---'}</b> &nbsp;|&nbsp; Anterior: <b>{event.get('previous', '---') or '---'}</b></div>
-                    </div>
-                    """
+                    f"<div style='{border_top} padding:{'10px' if idx > 1 else '0'} 0 0 0; margin-top:{'10px' if idx > 1 else '0'};'>"
+                    f"<div style='display:flex; justify-content:space-between; gap:18px; align-items:center; flex-wrap:wrap;'>"
+                    f"<div style='font-size:0.72rem; color:#888; font-weight:800; text-transform:uppercase;'>Proximo evento #{idx}</div>"
+                    f"<div style='color:{impact_color}; font-weight:900; font-size:0.84rem;'>{impact or '---'} | {event.get('bull_count', 1)} touro(s)</div>"
+                    f"</div>"
+                    f"<div style='font-size:1rem; font-weight:800; color:#FFF; margin-top:4px;'>{event.get('time', '---')} | {event.get('currency', '---')} | {event.get('event', '---')}</div>"
+                    f"<div style='font-size:0.78rem; color:#AAA; margin-top:6px;'>Atual: <b style='color:#FFF;'>{event.get('actual', '---') or '---'}</b> &nbsp;|&nbsp; Projecao: <b>{event.get('forecast', '---') or '---'}</b> &nbsp;|&nbsp; Anterior: <b>{event.get('previous', '---') or '---'}</b></div>"
+                    f"</div>"
                 )
             st.markdown(
-                f"""
-                <div style="border:1px solid {top_impact_color}; border-left:5px solid {top_impact_color}; border-radius:8px; padding:12px 14px; margin:10px 0 14px 0; background:#111;">
-                    {''.join(upcoming_rows)}
-                </div>
-                """,
+                f"<div style='border:1px solid {top_impact_color}; border-left:5px solid {top_impact_color}; border-radius:8px; padding:12px 14px; margin:10px 0 14px 0; background:#111;'>{''.join(upcoming_rows)}</div>",
                 unsafe_allow_html=True,
             )
 
