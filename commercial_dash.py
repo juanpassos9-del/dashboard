@@ -62,11 +62,14 @@ def fetch_live_global_markets():
         return None
 
 def get_global_markets_data():
-    """Usa dados ao vivo quando possivel e Supabase como fallback."""
+    """Usa Supabase/cache primeiro para nao travar o boot do Streamlit Cloud."""
+    cached_data = fetch_app_state_cached("mercados_globais")
+    if cached_data:
+        return cached_data
     live_data = fetch_live_global_markets()
     if live_data:
         return live_data
-    return fetch_app_state_cached("mercados_globais")
+    return None
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_investing_calendar_live():
@@ -78,11 +81,14 @@ def fetch_investing_calendar_live():
         return None
 
 def get_calendar_data():
-    """Usa Investing.com ao vivo quando possivel e Supabase como fallback."""
+    """Usa Supabase/cache primeiro para evitar spinner longo no boot."""
+    cached_data = fetch_app_state_cached("calendario_economico")
+    if cached_data:
+        return cached_data
     live_events = fetch_investing_calendar_live()
     if live_events:
         return live_events
-    return fetch_app_state_cached("calendario_economico")
+    return None
 
 @st.cache_data(ttl=30, show_spinner=False)
 def load_bloomberg_news_feed(refresh_nonce: int = 0):
