@@ -154,18 +154,47 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
 @st.fragment(run_every=30)
 def render_bloomberg_news_feed_fragment():
     """Atualiza somente o feed de noticias, sem redesenhar o terminal inteiro."""
+    if "bb_translate_news_fast" not in st.session_state:
+        st.session_state.bb_translate_news_fast = False
+
     def esc(value) -> str:
         return html.escape(str(value or ""), quote=True)
 
-    def news_title(item) -> str:
+    def translate_news_item(item: dict) -> dict:
+        translated_item = dict(item)
+        try:
+            from execution.fetch_financial_juice import ensure_portuguese_fields
+            ensure_portuguese_fields(translated_item)
+        except Exception:
+            pass
+        return translated_item
+
+    def news_title(item, translated: bool | None = None) -> str:
+        if translated is None:
+            translated = bool(st.session_state.get("bb_translate_news_fast", False))
+        if translated:
+            return item.get("title_pt") or item.get("title_en") or item.get("title") or "---"
         return item.get("title_en") or item.get("title") or item.get("title_pt") or "---"
 
-    def news_summary(item) -> str:
+    def news_summary(item, translated: bool | None = None) -> str:
+        if translated is None:
+            translated = bool(st.session_state.get("bb_translate_news_fast", False))
+        if translated:
+            summary = item.get("summary_pt") or item.get("summary") or item.get("description") or ""
+        else:
+            summary = item.get("summary") or item.get("description") or ""
+        title = news_title(item, translated=translated)
+        if summary == title:
+            return ""
+        return summary
+
+    def news_original_text(item) -> str:
         summary = item.get("summary") or item.get("description") or ""
-        return "" if summary == news_title(item) else summary
+        title = item.get("title_en") or item.get("title") or item.get("title_pt") or ""
+        return f"{title} {summary}".lower()
 
     def infer_tags(item) -> list[str]:
-        text = f"{news_title(item)} {news_summary(item)}".lower()
+        text = news_original_text(item)
         rules = [
             ("Fed", ["fed", "fomc", "powell"]),
             ("Inflacao", ["inflacao", "inflação", "inflation", "cpi", "pce"]),
@@ -180,7 +209,7 @@ def render_bloomberg_news_feed_fragment():
         return tags[:4] or ["Macro"]
 
     def market_impact(item):
-        text = f"{news_title(item)} {news_summary(item)}".lower()
+        text = news_original_text(item)
         source = str(item.get("source", "")).lower()
         score = 0
         reasons = []
@@ -218,8 +247,14 @@ def render_bloomberg_news_feed_fragment():
         return "low", "BAIXO IMPACTO", unique_reasons[:2]
 
     st.caption("Somente este feed atualiza a cada 30s. O restante do terminal permanece estavel.")
-    if st.button("Atualizar feed agora", use_container_width=True, key="bb_refresh_news_fast"):
-        load_bloomberg_news_feed.clear()
+    refresh_col, translate_col = st.columns([1, 1])
+    with refresh_col:
+        if st.button("Atualizar feed agora", use_container_width=True, key="bb_refresh_news_fast"):
+            load_bloomberg_news_feed.clear()
+    with translate_col:
+        translate_label = "Ver em ingles" if st.session_state.bb_translate_news_fast else "Traduzir noticias"
+        if st.button(translate_label, use_container_width=True, key="bb_translate_news_button_fast"):
+            st.session_state.bb_translate_news_fast = not st.session_state.bb_translate_news_fast
 
     filter_term = st.text_input(
         "Filtrar noticias",
@@ -263,8 +298,13 @@ def render_bloomberg_news_feed_fragment():
         st.info("Nenhuma manchete correspondente encontrada.")
         return
 
+    translate_enabled = bool(st.session_state.get("bb_translate_news_fast", False))
+    visible_news = filtered_news[:45]
+    if translate_enabled:
+        visible_news = [translate_news_item(item) for item in visible_news]
+
     cards = []
-    for idx, item in enumerate(filtered_news[:45]):
+    for idx, item in enumerate(visible_news):
         is_featured = item.get("id") == st.session_state.selected_news_id or idx == 0
         impact_level, impact_label, impact_reasons = market_impact(item)
         title = esc(news_title(item))
@@ -308,7 +348,7 @@ def render_bloomberg_news_feed_fragment():
     feed_header = (
         f'<div class="bb-feed-header">'
         f'<span>Feed de Noticias em Tempo Real</span>'
-        f'<span class="bb-live-pill"><span class="bb-status-led"></span>LIVE 30s - {esc(" + ".join(news_sources) or "Fontes")} - {len(filtered_news)} noticias</span>'
+        f'<span class="bb-live-pill"><span class="bb-status-led"></span>LIVE 30s - {esc(" + ".join(news_sources) or "Fontes")} - {len(filtered_news)} noticias - {"PT-BR" if translate_enabled else "EN"}</span>'
         f'</div>'
     )
     st.markdown(f'<div class="bb-news-feed">{feed_header}{"".join(cards)}</div>', unsafe_allow_html=True)
@@ -317,7 +357,7 @@ def render_bloomberg_news_feed_fragment():
         <div>
             <span class="bb-status-led"></span>
             <span style="color: #00FFA3; font-weight: bold;">LIVE FEED</span>
-            &nbsp;|&nbsp; Feed em ingles, sem traducao, atualiza a cada 30s
+            &nbsp;|&nbsp; {'Traducao manual ativada nos cards visiveis' if translate_enabled else 'Feed em ingles, sem traducao, atualiza a cada 30s'}
             &nbsp;|&nbsp; Origem: {esc(" + ".join(news_sources) or "Fontes")}
         </div>
         <div>
