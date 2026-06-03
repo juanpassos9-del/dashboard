@@ -169,6 +169,17 @@ def save_cache(cache_data):
         logger.error(f"Erro ao salvar cache: {e}")
 
 
+def cached_financial_juice_news(limit=10):
+    """Retorna as ultimas noticias validas do cache local, sem traduzir."""
+    cache = load_cache()
+    news_list = [v for k, v in cache.items() if k != "last_network_fetch"]
+    news_list = [n for n in news_list if isinstance(n, dict) and "timestamp" in n]
+    for item in news_list:
+        ensure_brazil_time(item)
+    news_list.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+    return news_list[:limit]
+
+
 def translate_headline_heuristic(text):
     """Traduz a manchete de forma heurística substituindo termos financeiros chaves."""
     translated = text
@@ -480,6 +491,9 @@ def fetch_financial_juice_news(limit=50, min_network_interval=60, fast_mode=Fals
         if not translate:
             for item in news_list:
                 ensure_brazil_time(item)
+                cache[item["id"]] = item
+            cache["last_network_fetch"] = now
+            save_cache(cache)
             news_list.sort(key=lambda x: x["timestamp"], reverse=True)
             return news_list
                 

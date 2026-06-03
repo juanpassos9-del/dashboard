@@ -98,7 +98,16 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
     warnings = []
     news_list = fetch_app_state_cached("financial_juice_news") or []
     if news_list:
-        news_sources.append("Financial Juice")
+        news_sources.append("Historico Supabase")
+
+    try:
+        from execution.fetch_financial_juice import cached_financial_juice_news
+        cached_news = cached_financial_juice_news(limit=10)
+        if cached_news:
+            news_list.extend(cached_news)
+            news_sources.append("Historico local")
+    except Exception as e:
+        warnings.append(f"Historico local indisponivel: {e}")
 
     try:
         from execution.fetch_financial_juice import fetch_financial_juice_news
@@ -111,8 +120,13 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
         if live_news:
             news_list.extend(live_news)
             news_sources.append("Financial Juice RSS direto")
+        elif news_list:
+            warnings.append("Buscando noticias novas; exibindo historico recente.")
     except Exception as e:
-        warnings.append(f"Financial Juice direto indisponivel: {e}")
+        if news_list:
+            warnings.append("Fonte ao vivo indisponivel; exibindo historico recente.")
+        else:
+            warnings.append(f"Financial Juice direto indisponivel: {e}")
 
     seen_news = set()
     unique_news = []
@@ -130,6 +144,15 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
             return 0
 
     unique_news = sorted(unique_news, key=news_sort_key, reverse=True)
+    if not unique_news:
+        try:
+            from execution.fetch_financial_juice import cached_financial_juice_news
+            unique_news = cached_financial_juice_news(limit=10)
+            if unique_news:
+                news_sources.append("Historico local")
+                warnings.append("Aguardando noticias novas; exibindo ultimas 10 do historico.")
+        except Exception as e:
+            warnings.append(f"Historico de noticias indisponivel: {e}")
     try:
         from execution.fetch_financial_juice import ensure_brazil_time
         for item in unique_news:
@@ -254,8 +277,14 @@ def render_bloomberg_news_feed_fragment():
     news_list, news_sources, news_warnings, feed_loaded_at = load_bloomberg_news_feed(0)
     for warning in news_warnings[:2]:
         st.warning(warning)
+    if news_list:
+        st.session_state.bb_last_news_history = news_list[:10]
+    elif st.session_state.get("bb_last_news_history"):
+        news_list = st.session_state.bb_last_news_history
+        news_sources = ["Historico da sessao"]
+        feed_loaded_at = "historico"
     if not news_list:
-        st.info("Aguardando noticias em tempo real.")
+        st.info("Carregando noticias novas. Assim que houver historico, as ultimas 10 permanecem visiveis aqui.")
         return
 
     if filter_term:
@@ -1567,7 +1596,7 @@ def pagina_terminal_bloomberg():
         st.warning(warning)
 
     if not news_list:
-        st.info("Aguardando noticias em tempo real.")
+        st.info("Carregando noticias novas. Assim que houver historico, as ultimas 10 permanecem visiveis aqui.")
         return
 
     # Filtra notícias se houver termo ativo
