@@ -167,17 +167,37 @@ def render_bloomberg_news_feed_fragment():
     """Atualiza somente o feed de noticias, sem redesenhar o terminal inteiro."""
     if "bb_translate_news_fast" not in st.session_state:
         st.session_state.bb_translate_news_fast = False
+    if "bb_translation_cache" not in st.session_state:
+        st.session_state.bb_translation_cache = {}
 
     def esc(value) -> str:
         return html.escape(str(value or ""), quote=True)
 
     def translate_news_item(item: dict) -> dict:
         translated_item = dict(item)
+        title_original = item.get("title_en") or item.get("title") or item.get("title_pt") or ""
+        summary_original = item.get("summary") or item.get("description") or ""
         try:
-            from execution.fetch_financial_juice import ensure_portuguese_fields
-            ensure_portuguese_fields(translated_item)
+            from execution.fetch_financial_juice import translate_text_google
+            cache = st.session_state.bb_translation_cache
+            if title_original:
+                title_key = f"title::{title_original}"
+                if title_key not in cache:
+                    cache[title_key] = translate_text_google(title_original)
+                translated_item["title_pt"] = cache[title_key]
+            if summary_original and summary_original != title_original:
+                summary_key = f"summary::{summary_original}"
+                if summary_key not in cache:
+                    cache[summary_key] = translate_text_google(summary_original)
+                translated_item["summary_pt"] = cache[summary_key]
+            elif title_original:
+                translated_item["summary_pt"] = translated_item.get("title_pt", "")
         except Exception:
-            pass
+            try:
+                from execution.fetch_financial_juice import ensure_portuguese_fields
+                ensure_portuguese_fields(translated_item)
+            except Exception:
+                pass
         return translated_item
 
     def news_title(item, translated: bool | None = None) -> str:
@@ -318,7 +338,9 @@ def render_bloomberg_news_feed_fragment():
     translate_enabled = bool(st.session_state.get("bb_translate_news_fast", False))
     visible_news = filtered_news[:45]
     if translate_enabled:
-        visible_news = [translate_news_item(item) for item in visible_news]
+        with st.spinner("Traduzindo feed para portugues do Brasil..."):
+            translated_feed = [translate_news_item(item) for item in filtered_news]
+        visible_news = translated_feed[:45]
 
     cards = []
     for idx, item in enumerate(visible_news):
