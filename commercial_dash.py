@@ -1828,6 +1828,84 @@ def pagina_terminal_global():
         """
         components.html(tv_html_2, height=500)
 
+    chart_col_3, chart_col_4 = st.columns(2)
+
+    with chart_col_3:
+        st.markdown("#### Grafico Global 3")
+        col_sel_3, col_int_3 = st.columns([2, 1])
+        with col_sel_3:
+            sym_3 = st.selectbox("Ativo", list(global_chart_assets.keys()), index=2, key="global_sym_3")
+        with col_int_3:
+            interval_3 = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=4, key="global_int_3")
+
+        tv_html_3 = f"""
+        <div class="tradingview-widget-container" style="height: 480px; width: 100%;">
+          <div id="tv_global_3" style="height: 100%; width: 100%;"></div>
+          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+          <script type="text/javascript">
+          new TradingView.widget({{
+            "autosize": true,
+            "symbol": "{global_chart_assets[sym_3]['tv']}",
+            "interval": "{interval_3}",
+            "timezone": "America/Sao_Paulo",
+            "theme": "dark",
+            "style": "1",
+            "locale": "br",
+            "toolbar_bg": "#f1f3f6",
+            "enable_publishing": false,
+            "hide_top_toolbar": false,
+            "save_image": true,
+            "hide_volume": true,
+            "container_id": "tv_global_3",
+            "studies": [
+              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Session" }}, "plots": {{ "VWAP": {{ "color": "#FFD166" }} }} }},
+              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Week" }}, "plots": {{ "VWAP": {{ "color": "#06D6A0" }} }} }},
+              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Month" }}, "plots": {{ "VWAP": {{ "color": "#118AB2" }} }} }}
+            ]
+          }});
+          </script>
+        </div>
+        """
+        components.html(tv_html_3, height=500)
+
+    with chart_col_4:
+        st.markdown("#### Grafico Global 4")
+        col_sel_4, col_int_4 = st.columns([2, 1])
+        with col_sel_4:
+            sym_4 = st.selectbox("Ativo", list(global_chart_assets.keys()), index=3, key="global_sym_4")
+        with col_int_4:
+            interval_4 = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=4, key="global_int_4")
+
+        tv_html_4 = f"""
+        <div class="tradingview-widget-container" style="height: 480px; width: 100%;">
+          <div id="tv_global_4" style="height: 100%; width: 100%;"></div>
+          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+          <script type="text/javascript">
+          new TradingView.widget({{
+            "autosize": true,
+            "symbol": "{global_chart_assets[sym_4]['tv']}",
+            "interval": "{interval_4}",
+            "timezone": "America/Sao_Paulo",
+            "theme": "dark",
+            "style": "1",
+            "locale": "br",
+            "toolbar_bg": "#f1f3f6",
+            "enable_publishing": false,
+            "hide_top_toolbar": false,
+            "save_image": true,
+            "hide_volume": true,
+            "container_id": "tv_global_4",
+            "studies": [
+              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Session" }}, "plots": {{ "VWAP": {{ "color": "#FFD166" }} }} }},
+              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Week" }}, "plots": {{ "VWAP": {{ "color": "#06D6A0" }} }} }},
+              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Month" }}, "plots": {{ "VWAP": {{ "color": "#118AB2" }} }} }}
+            ]
+          }});
+          </script>
+        </div>
+        """
+        components.html(tv_html_4, height=500)
+
     secao_calendario_global_fragment()
 
     with st.container():
