@@ -1740,12 +1740,15 @@ def pagina_terminal_global():
     global_chart_assets = {
         "S&P 500": {"tv": "USA500", "yf": "^GSPC"},
         "NASDAQ": {"tv": "ACTIVTRADES:USATEC", "yf": "^IXIC"},
+        "USATEC": {"tv": "ACTIVTRADES:USATEC", "yf": "^IXIC"},
         "BRENT OIL": {"tv": "TVC:UKOIL", "yf": "BZ=F"},
         "WTI OIL": {"tv": "TVC:USOIL", "yf": "CL=F"},
         "GOLD": {"tv": "TVC:GOLD", "yf": "GC=F"},
         "BITCOIN": {"tv": "BINANCE:BTCUSDT", "yf": "BTC-USD"},
+        "ETHUSDT": {"tv": "BINANCE:ETHUSDT", "yf": "ETH-USD"},
         "DXY (Dólar Index)": {"tv": "CAPITALCOM:DXY", "yf": "DX-Y.NYB"},
-        "US 10Y (Yield)": {"tv": "TVC:US10Y", "yf": "^TNX"},
+        "US10Y OTCB": {"tv": "OTCB:US10Y", "yf": "^TNX"},
+        "US30Y OTCB": {"tv": "OTCB:US30Y", "yf": "^TYX"},
         "EWZ (Brazil ETF)": {"tv": "AMEX:EWZ", "yf": "EWZ"},
         "EEM (Emerging Markets)": {"tv": "AMEX:EEM", "yf": "EEM"},
     }
