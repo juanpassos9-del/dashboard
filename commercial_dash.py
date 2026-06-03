@@ -100,6 +100,7 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
             limit=35,
             min_network_interval=30,
             fast_mode=True,
+            translate=False,
         )
         if live_news:
             news_list.extend(live_news)
@@ -142,9 +143,8 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
 
     unique_news = sorted(unique_news, key=news_sort_key, reverse=True)
     try:
-        from execution.fetch_financial_juice import ensure_brazil_time, ensure_portuguese_fields
+        from execution.fetch_financial_juice import ensure_brazil_time
         for item in unique_news:
-            ensure_portuguese_fields(item)
             ensure_brazil_time(item)
     except Exception as e:
         warnings.append(f"Normalizacao rapida indisponivel: {e}")
@@ -157,8 +157,15 @@ def render_bloomberg_news_feed_fragment():
     def esc(value) -> str:
         return html.escape(str(value or ""), quote=True)
 
+    def news_title(item) -> str:
+        return item.get("title_en") or item.get("title") or item.get("title_pt") or "---"
+
+    def news_summary(item) -> str:
+        summary = item.get("summary") or item.get("description") or ""
+        return "" if summary == news_title(item) else summary
+
     def infer_tags(item) -> list[str]:
-        text = f"{item.get('title_pt', '')} {item.get('title_en', '')} {item.get('summary', '')}".lower()
+        text = f"{news_title(item)} {news_summary(item)}".lower()
         rules = [
             ("Fed", ["fed", "fomc", "powell"]),
             ("Inflacao", ["inflacao", "inflação", "inflation", "cpi", "pce"]),
@@ -173,10 +180,7 @@ def render_bloomberg_news_feed_fragment():
         return tags[:4] or ["Macro"]
 
     def market_impact(item):
-        text = (
-            f"{item.get('title_pt', '')} {item.get('title_en', '')} "
-            f"{item.get('summary_pt', '')} {item.get('summary', '')}"
-        ).lower()
+        text = f"{news_title(item)} {news_summary(item)}".lower()
         source = str(item.get("source", "")).lower()
         score = 0
         reasons = []
@@ -235,10 +239,8 @@ def render_bloomberg_news_feed_fragment():
         term = filter_term.lower()
         filtered_news = [
             item for item in news_list
-            if term in item.get("title_pt", "").lower()
-            or term in item.get("title_en", "").lower()
-            or term in item.get("summary_pt", "").lower()
-            or term in item.get("summary", "").lower()
+            if term in news_title(item).lower()
+            or term in news_summary(item).lower()
         ]
     else:
         filtered_news = news_list
@@ -265,8 +267,8 @@ def render_bloomberg_news_feed_fragment():
     for idx, item in enumerate(filtered_news[:45]):
         is_featured = item.get("id") == st.session_state.selected_news_id or idx == 0
         impact_level, impact_label, impact_reasons = market_impact(item)
-        title_pt = esc(item.get("title_pt") or item.get("title_en") or "---")
-        summary_raw = item.get("summary_pt") or item.get("title_pt") or item.get("summary") or ""
+        title = esc(news_title(item))
+        summary_raw = news_summary(item)
         summary = esc(summary_raw)
         published = esc(item.get("published_str", "00:00"))
         source = esc(item.get("source", "Financial Juice"))
@@ -284,7 +286,7 @@ def render_bloomberg_news_feed_fragment():
         close_html = '<span class="bb-news-close">x</span>' if is_featured else ""
         summary_html = (
             f'<div class="bb-news-summary">{summary}</div>'
-            if summary and summary != title_pt
+            if summary and summary != title
             else ""
         )
         cards.append(
@@ -293,7 +295,7 @@ def render_bloomberg_news_feed_fragment():
             f'<div class="bb-news-rail"></div>'
             f'<div class="bb-news-icon">{icon_text}</div>'
             f'<div class="bb-news-content">'
-            f'<div class="bb-news-title">{title_pt}</div>'
+            f'<div class="bb-news-title">{title}</div>'
             f'{summary_html}'
             f'<div class="bb-news-meta">'
             f'<span>{published}</span><span>{source}</span>{impact_badge}{reason_tags}{tags_html}'
@@ -306,7 +308,7 @@ def render_bloomberg_news_feed_fragment():
     feed_header = (
         f'<div class="bb-feed-header">'
         f'<span>Feed de Noticias em Tempo Real</span>'
-        f'<span class="bb-live-pill"><span class="bb-status-led"></span>LIVE 5s - {esc(" + ".join(news_sources) or "Fontes")} - {len(filtered_news)} noticias</span>'
+        f'<span class="bb-live-pill"><span class="bb-status-led"></span>LIVE 30s - {esc(" + ".join(news_sources) or "Fontes")} - {len(filtered_news)} noticias</span>'
         f'</div>'
     )
     st.markdown(f'<div class="bb-news-feed">{feed_header}{"".join(cards)}</div>', unsafe_allow_html=True)
@@ -315,7 +317,7 @@ def render_bloomberg_news_feed_fragment():
         <div>
             <span class="bb-status-led"></span>
             <span style="color: #00FFA3; font-weight: bold;">LIVE FEED</span>
-            &nbsp;|&nbsp; Somente o feed atualiza a cada 5s
+            &nbsp;|&nbsp; Feed em ingles, sem traducao, atualiza a cada 30s
             &nbsp;|&nbsp; Origem: {esc(" + ".join(news_sources) or "Fontes")}
         </div>
         <div>
@@ -992,8 +994,15 @@ def pagina_terminal_bloomberg():
     def esc(value) -> str:
         return html.escape(str(value or ""), quote=True)
 
+    def news_title(item) -> str:
+        return item.get("title_en") or item.get("title") or item.get("title_pt") or "---"
+
+    def news_summary(item) -> str:
+        summary = item.get("summary") or item.get("description") or ""
+        return "" if summary == news_title(item) else summary
+
     def infer_tags(item) -> list[str]:
-        text = f"{item.get('title_pt', '')} {item.get('title_en', '')} {item.get('summary', '')}".lower()
+        text = f"{news_title(item)} {news_summary(item)}".lower()
         rules = [
             ("Fed", ["fed", "fomc", "powell"]),
             ("Inflação", ["inflação", "inflation", "cpi", "pce"]),
@@ -1009,10 +1018,7 @@ def pagina_terminal_bloomberg():
         return tags[:4] or ["Macro"]
 
     def market_impact(item):
-        text = (
-            f"{item.get('title_pt', '')} {item.get('title_en', '')} "
-            f"{item.get('summary_pt', '')} {item.get('summary', '')}"
-        ).lower()
+        text = f"{news_title(item)} {news_summary(item)}".lower()
         source = str(item.get("source", "")).lower()
         score = 0
         reasons = []
@@ -1540,8 +1546,8 @@ def pagina_terminal_bloomberg():
     if filter_term:
         filtered_news = [
             item for item in news_list
-            if filter_term.lower() in item.get("title_pt", "").lower()
-            or filter_term.lower() in item.get("title_en", "").lower()
+            if filter_term.lower() in news_title(item).lower()
+            or filter_term.lower() in news_summary(item).lower()
         ]
     else:
         filtered_news = news_list
@@ -1582,8 +1588,8 @@ def pagina_terminal_bloomberg():
         for idx, item in enumerate(filtered_news[:45]):
             is_featured = item.get("id") == st.session_state.selected_news_id or idx == 0
             impact_level, impact_label, impact_reasons = market_impact(item)
-            title_pt = esc(item.get("title_pt") or item.get("title_en") or "---")
-            summary_raw = item.get("summary_pt") or item.get("title_pt") or item.get("summary") or ""
+            title = esc(news_title(item))
+            summary_raw = news_summary(item)
             summary = esc(summary_raw)
             published = esc(item.get("published_str", "00:00"))
             source = esc(item.get("source", "Financial Juice"))
@@ -1601,7 +1607,7 @@ def pagina_terminal_bloomberg():
             close_html = '<span class="bb-news-close">×</span>' if is_featured else ""
             summary_html = (
                 f'<div class="bb-news-summary">{summary}</div>'
-                if summary and summary != title_pt
+                if summary and summary != title
                 else ""
             )
 
@@ -1611,7 +1617,7 @@ def pagina_terminal_bloomberg():
                 f'<div class="bb-news-rail"></div>'
                 f'<div class="bb-news-icon">{icon_text}</div>'
                 f'<div class="bb-news-content">'
-                f'<div class="bb-news-title">{title_pt}</div>'
+                f'<div class="bb-news-title">{title}</div>'
                 f'{summary_html}'
                 f'<div class="bb-news-meta">'
                 f'<span>{published}</span><span>{source}</span>{impact_badge}{reason_tags}{tags_html}'
@@ -1636,7 +1642,7 @@ def pagina_terminal_bloomberg():
         <div>
             <span class="bb-status-led"></span>
             <span style="color: #00FFA3; font-weight: bold;">LIVE FEED</span>
-            &nbsp;|&nbsp; Atualizacao da tela a cada 60s
+            &nbsp;|&nbsp; Feed em ingles, sem traducao, atualiza a cada 30s
             &nbsp;|&nbsp; Origem: {esc(" + ".join(news_sources) or "Fontes")}
         </div>
         <div>

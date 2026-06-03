@@ -13,7 +13,6 @@ import requests
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
-import google.generativeai as genai
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -113,21 +112,30 @@ HEURISTIC_DICT = {
     r"\bFJElite\b": "Exclusivo FinancialJuice",
 }
 
-# Inicializa a API do Gemini se disponível
-api_key = os.getenv("GOOGLE_API_KEY")
-gemini_available = False
+_genai = None
+_gemini_checked = False
 
-if api_key:
+
+def get_gemini_client():
+    """Inicializa Gemini apenas quando a tradução for solicitada."""
+    global _genai, _gemini_checked
+    if _gemini_checked:
+        return _genai
+    _gemini_checked = True
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        logger.warning("GOOGLE_API_KEY nao encontrada no ambiente. Usando traducao heuristica.")
+        return None
     try:
+        import google.generativeai as genai
         genai.configure(api_key=api_key)
-        # Testa a inicialização do modelo
-        _ = genai.GenerativeModel('gemini-2.0-flash')
-        gemini_available = True
-        logger.info("Integração com Gemini AI configurada com sucesso para tradução.")
+        _ = genai.GenerativeModel("gemini-2.0-flash")
+        _genai = genai
+        logger.info("Integracao com Gemini AI configurada com sucesso para traducao.")
     except Exception as e:
-        logger.warning(f"Erro ao configurar Gemini AI: {e}. Usando tradução heurística como padrão.")
-else:
-    logger.warning("GOOGLE_API_KEY não encontrada no ambiente. Usando tradução heurística.")
+        logger.warning(f"Erro ao configurar Gemini AI: {e}. Usando traducao heuristica como padrao.")
+        _genai = None
+    return _genai
 
 
 def load_cache():
@@ -315,7 +323,8 @@ def normalize_news_translations(news_list, cache=None):
 
 def translate_batch_with_gemini(headlines):
     """Traduz uma lista de manchetes em lote usando a API do Gemini."""
-    if not gemini_available or not headlines:
+    genai = get_gemini_client()
+    if not genai or not headlines:
         return translate_batch_fallback(headlines)
 
     prompt = (
@@ -348,8 +357,8 @@ def translate_batch_with_gemini(headlines):
         return translate_batch_fallback(headlines)
 
 
-def fetch_financial_juice_news(limit=50, min_network_interval=60, fast_mode=False):
-    """Busca as notícias do Financial Juice, traduz os novos registros e os retorna com network throttle."""
+def fetch_financial_juice_news(limit=50, min_network_interval=60, fast_mode=False, translate=True):
+    """Busca noticias do Financial Juice com throttle; traducao e opcional."""
     cache = load_cache()
     now = datetime.now().timestamp()
     last_fetch = cache.get("last_network_fetch", 0)
@@ -360,9 +369,12 @@ def fetch_financial_juice_news(limit=50, min_network_interval=60, fast_mode=Fals
         news_list = [v for k, v in cache.items() if k != "last_network_fetch"]
         # Filtra dicionários válidos (em caso de lixo no cache)
         news_list = [n for n in news_list if isinstance(n, dict) and "timestamp" in n]
-        if fast_mode:
+        if fast_mode and translate:
             for item in news_list:
                 ensure_portuguese_fields(item)
+                ensure_brazil_time(item)
+        elif fast_mode:
+            for item in news_list:
                 ensure_brazil_time(item)
         else:
             news_list = normalize_news_translations(news_list, cache)
@@ -410,9 +422,12 @@ def fetch_financial_juice_news(limit=50, min_network_interval=60, fast_mode=Fals
             # Se falhar o RSS, retornamos o que temos no cache ordenado por tempo
             cached_news = [v for k, v in cache.items() if k != "last_network_fetch"]
             cached_news = [n for n in cached_news if isinstance(n, dict) and "timestamp" in n]
-            if fast_mode:
+            if fast_mode and translate:
                 for item in cached_news:
                     ensure_portuguese_fields(item)
+                    ensure_brazil_time(item)
+            elif fast_mode:
+                for item in cached_news:
                     ensure_brazil_time(item)
             else:
                 cached_news = normalize_news_translations(cached_news, cache)
@@ -461,6 +476,12 @@ def fetch_financial_juice_news(limit=50, min_network_interval=60, fast_mode=Fals
             # Se não está no cache, adiciona para tradução
             if news_id not in cache:
                 untranslated_headlines.append(clean_title)
+
+        if not translate:
+            for item in news_list:
+                ensure_brazil_time(item)
+            news_list.sort(key=lambda x: x["timestamp"], reverse=True)
+            return news_list
                 
         # Traduz as novas manchetes
         if untranslated_headlines:
@@ -524,9 +545,12 @@ def fetch_financial_juice_news(limit=50, min_network_interval=60, fast_mode=Fals
         # Ordena por timestamp de publicação decrescente
             save_cache(cache)
 
-        if fast_mode:
+        if fast_mode and translate:
             for item in news_list:
                 ensure_portuguese_fields(item)
+                ensure_brazil_time(item)
+        elif fast_mode:
+            for item in news_list:
                 ensure_brazil_time(item)
         else:
             news_list = normalize_news_translations(news_list, cache)
@@ -540,9 +564,12 @@ def fetch_financial_juice_news(limit=50, min_network_interval=60, fast_mode=Fals
         # Retorna o cache local como fallback de emergência
         cached_news = [v for k, v in cache.items() if k != "last_network_fetch"]
         cached_news = [n for n in cached_news if isinstance(n, dict) and "timestamp" in n]
-        if fast_mode:
+        if fast_mode and translate:
             for item in cached_news:
                 ensure_portuguese_fields(item)
+                ensure_brazil_time(item)
+        elif fast_mode:
+            for item in cached_news:
                 ensure_brazil_time(item)
         else:
             cached_news = normalize_news_translations(cached_news, cache)
