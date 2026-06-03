@@ -1738,6 +1738,10 @@ def pagina_terminal_global():
     st.markdown("---")
     
     global_chart_assets = {
+        "USA500": {"tv": "USA500", "yf": "^GSPC"},
+        "UKOIL": {"tv": "UKOIL", "yf": "BZ=F"},
+        "BRA50": {"tv": "BRA50", "yf": "^BVSP"},
+        "BTCUSDT": {"tv": "BTCUSDT", "yf": "BTC-USD"},
         "S&P 500": {"tv": "USA500", "yf": "^GSPC"},
         "NASDAQ": {"tv": "ACTIVTRADES:USATEC", "yf": "^IXIC"},
         "USATEC": {"tv": "ACTIVTRADES:USATEC", "yf": "^IXIC"},
@@ -1761,7 +1765,7 @@ def pagina_terminal_global():
         with col_sel:
             sym = st.selectbox("Ativo", list(global_chart_assets.keys()), index=0, key="global_sym")
         with col_int:
-            interval = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=4, key="global_int")
+            interval = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=1, key="global_int")
             
         tv_html = f"""
         <div class="tradingview-widget-container" style="height: 480px; width: 100%;">
@@ -1799,7 +1803,7 @@ def pagina_terminal_global():
         with col_sel_2:
             sym_2 = st.selectbox("Ativo", list(global_chart_assets.keys()), index=1, key="global_sym_2")
         with col_int_2:
-            interval_2 = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=4, key="global_int_2")
+            interval_2 = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=1, key="global_int_2")
 
         tv_html_2 = f"""
         <div class="tradingview-widget-container" style="height: 480px; width: 100%;">
@@ -1839,7 +1843,7 @@ def pagina_terminal_global():
         with col_sel_3:
             sym_3 = st.selectbox("Ativo", list(global_chart_assets.keys()), index=2, key="global_sym_3")
         with col_int_3:
-            interval_3 = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=4, key="global_int_3")
+            interval_3 = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=1, key="global_int_3")
 
         tv_html_3 = f"""
         <div class="tradingview-widget-container" style="height: 480px; width: 100%;">
@@ -1877,7 +1881,7 @@ def pagina_terminal_global():
         with col_sel_4:
             sym_4 = st.selectbox("Ativo", list(global_chart_assets.keys()), index=3, key="global_sym_4")
         with col_int_4:
-            interval_4 = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=4, key="global_int_4")
+            interval_4 = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=1, key="global_int_4")
 
         tv_html_4 = f"""
         <div class="tradingview-widget-container" style="height: 480px; width: 100%;">
