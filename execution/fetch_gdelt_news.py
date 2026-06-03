@@ -71,7 +71,7 @@ def _cached_articles(cache, limit):
     return cached[:limit]
 
 
-def fetch_gdelt_news(limit=30, timespan="3h"):
+def fetch_gdelt_news(limit=30, timespan="3h", translate=True):
     """Retorna noticias normalizadas no mesmo contrato do Financial Juice."""
     cache = _load_cache()
     now_ts = datetime.now(timezone.utc).timestamp()
@@ -126,7 +126,13 @@ def fetch_gdelt_news(limit=30, timespan="3h"):
         }
         news.append(item)
 
-    news = normalize_news_translations(news, cache)
+    if translate:
+        news = normalize_news_translations(news, cache)
+    else:
+        for item in news:
+            item_id = item.get("id")
+            if item_id:
+                cache[item_id] = item
     news.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
     _save_cache(cache)
     return news[:limit]

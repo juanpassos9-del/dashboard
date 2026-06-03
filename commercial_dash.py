@@ -108,24 +108,6 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
     except Exception as e:
         warnings.append(f"Financial Juice direto indisponivel: {e}")
 
-    try:
-        from execution.fetch_gdelt_news import fetch_gdelt_news
-        gdelt_news = fetch_gdelt_news(limit=20, timespan="3h")
-        if gdelt_news:
-            news_list.extend(gdelt_news)
-            news_sources.append("GDELT")
-    except Exception as e:
-        warnings.append(f"GDELT indisponivel: {e}")
-
-    try:
-        from execution.fetch_source_news import fetch_source_news
-        source_news = fetch_source_news(limit=25, timespan="6h")
-        if source_news:
-            news_list.extend(source_news)
-            news_sources.append("Reuters/Bloomberg/CNBC/SCMP")
-    except Exception as e:
-        warnings.append(f"Fontes editoriais indisponiveis: {e}")
-
     seen_news = set()
     unique_news = []
     for item in news_list:
@@ -362,7 +344,7 @@ def render_bloomberg_news_feed_fragment():
         </div>
         <div>
             Ultimo Refresh: {feed_loaded_at}
-            &nbsp;|&nbsp; Fontes: Financial Juice + Reuters + Bloomberg + CNBC + SCMP + GDELT
+            &nbsp;|&nbsp; Fonte critica: Financial Juice RSS + cache Supabase
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -1687,7 +1669,7 @@ def pagina_terminal_bloomberg():
         </div>
         <div>
             Ultimo Refresh: {feed_loaded_at}
-            &nbsp;|&nbsp; Fontes: Financial Juice + Reuters + Bloomberg + CNBC + SCMP + GDELT
+            &nbsp;|&nbsp; Fonte critica: Financial Juice RSS + cache Supabase
         </div>
     </div>
     """, unsafe_allow_html=True)

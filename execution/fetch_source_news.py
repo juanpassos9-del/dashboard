@@ -163,7 +163,7 @@ def _fetch_reuters_gdelt(limit=10, timespan="6h"):
     return items
 
 
-def fetch_source_news(limit=40, timespan="6h"):
+def fetch_source_news(limit=40, timespan="6h", translate=True):
     cache = _load_cache()
     now_ts = datetime.now(timezone.utc).timestamp()
     last_fetch = float(cache.get("last_network_fetch") or 0)
@@ -179,7 +179,13 @@ def fetch_source_news(limit=40, timespan="6h"):
         _save_cache(cache)
         return _cached_items(cache, limit)
 
-    news = normalize_news_translations(news, cache)
+    if translate:
+        news = normalize_news_translations(news, cache)
+    else:
+        for item in news:
+            item_id = item.get("id")
+            if item_id:
+                cache[item_id] = item
     cache["last_network_fetch"] = now_ts
     _save_cache(cache)
     news.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
