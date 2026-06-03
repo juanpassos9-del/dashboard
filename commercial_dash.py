@@ -1977,6 +1977,7 @@ def secao_calendario_global_fragment():
 
     investing_events = [event for event in events if event.get("source") == "Investing.com"]
     analysis_pool = investing_events if investing_events else events
+    macro_global_data = get_global_markets_data()
 
     def has_actual(event):
         return str(event.get("actual", "---")).strip() not in ["", "---", "-"]
@@ -2036,7 +2037,7 @@ def secao_calendario_global_fragment():
                 st.info("IA Macro TTS aguardando evento com Atual, Projecao ou Anterior para analisar.")
                 macro_ai = None
             else:
-                macro_ai = interpret_event(analysis_event, None)
+                macro_ai = interpret_event(analysis_event, macro_global_data)
             if not macro_ai:
                 raise StopIteration
             score = macro_ai.get("risk_score", 0)
@@ -2058,7 +2059,7 @@ def secao_calendario_global_fragment():
                 <div style="border:1px solid #334155; border-left:5px solid {effect_color}; border-radius:8px; padding:18px 20px; margin:0 0 16px 0; background:#0b1220;">
                     <div style="display:flex; justify-content:space-between; gap:16px; align-items:flex-start; flex-wrap:wrap;">
                         <div>
-                            <div style="font-size:0.72rem; color:#94A3B8; font-weight:800; text-transform:uppercase;">IA Macro TTS - somente dados Investing</div>
+                            <div style="font-size:0.72rem; color:#94A3B8; font-weight:800; text-transform:uppercase;">IA Macro TTS - calendario + intermercados</div>
                             <div style="font-size:0.74rem; color:#64748B; margin-top:6px; text-transform:uppercase;">{panel_label}</div>
                             <div style="font-size:1.15rem; color:#FFF; font-weight:900; margin-top:4px;">{analysis_event.get('time', '---')} | {analysis_event.get('currency', '---')} | {analysis_event.get('event', '---')}</div>
                         </div>
@@ -2095,7 +2096,7 @@ def secao_calendario_global_fragment():
         interpreted_history = []
         pending_history = []
         for event in reversed(investing_events):
-            result = interpret_event(event, None)
+            result = interpret_event(event, macro_global_data)
             if result.get("status") == "Interpretado":
                 interpreted_history.append((event, result))
             else:

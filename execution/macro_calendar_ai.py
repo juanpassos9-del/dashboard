@@ -542,6 +542,53 @@ def _macro_effect_text(asset_impacts: dict[str, str], risk_classification: str) 
     )
 
 
+def _monetary_policy_bias(event: EconomicEvent, macro_shock: str, score: int) -> str:
+    shock = _plain_text(macro_shock)
+    if "hawkish" in shock or "inflacionario" in shock:
+        return "hawkish"
+    if "dovish" in shock or "desinflacionario" in shock:
+        return "dovish"
+    if event.category in ["inflation", "central_bank"] and score < -15:
+        return "hawkish"
+    if event.category in ["inflation", "central_bank"] and score > 15:
+        return "dovish"
+    return "neutra"
+
+
+def _intermarket_summary(dominant_regime: str, confirmations: list[dict]) -> str:
+    directional = [item for item in confirmations if item.get("Contrib.")]
+    if not directional:
+        return f"Intermercados: {dominant_regime}."
+    top = sorted(directional, key=lambda item: abs(item.get("Contrib.", 0)), reverse=True)[:3]
+    signals = ", ".join(f"{item.get('Ativo')}: {item.get('Sinal')}" for item in top)
+    return f"Intermercados: {dominant_regime}; {signals}."
+
+
+def _concise_summary(
+    event: EconomicEvent,
+    surprise_label: str,
+    benchmark_text: str,
+    risk_classification: str,
+    macro_shock: str,
+    monetary_policy: str,
+    asset_impacts: dict[str, str],
+    dominant_regime: str,
+    confirmations: list[dict],
+    is_projection: bool = False,
+) -> str:
+    prefix = "Pre-evento" if is_projection else "Dado"
+    value_text = f"projecao {event.forecast_raw} vs anterior {event.previous_raw}" if is_projection else f"{event.actual_raw} vs {benchmark_text}"
+    equities = asset_impacts.get("S&P 500", risk_classification)
+    return (
+        f"{prefix}: {surprise_label} ({value_text}). "
+        f"Vies: {risk_classification}; choque {macro_shock}. "
+        f"Politica monetaria: {monetary_policy}; juros {asset_impacts.get('Juros', 'neutro')}; "
+        f"inflacao {asset_impacts.get('Inflacao', 'neutra')}; DXY {asset_impacts.get('DXY', 'neutro')}; "
+        f"petroleo {asset_impacts.get('Petroleo', 'neutro')}; indices EUA {equities}. "
+        f"{_intermarket_summary(dominant_regime, confirmations)}"
+    )
+
+
 def _impact_text(event: EconomicEvent) -> str:
     if event.bull_count:
         return f"Impacto oficial Investing: {event.bull_count} touro(s)."
@@ -556,19 +603,33 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
     if not released:
         projection_value, projection_pct, projection_label = calculate_projection(event)
         if projection_value is not None:
-            dominant_regime = "Calendario Investing"
+            use_market_data = bool(global_data)
+            market_map = _build_market_map(global_data) if use_market_data else {}
+            dominant_regime = _detect_dominant_regime(market_map) if use_market_data else "Calendario Investing"
             data_score = int(_surprise_score(event, projection_label, dominant_regime) * _event_weight(event) * 0.65)
-            score = max(-100, min(100, data_score))
+            regime_score = _regime_points(dominant_regime) if use_market_data else 0
+            if use_market_data:
+                market_score, confirmations, alignment_ratio = _market_confirmation(market_map)
+                market_score = int(market_score * 0.35)
+            else:
+                market_score, confirmations, alignment_ratio = 0, [], 0.0
+            score = max(-100, min(100, int(data_score + regime_score + market_score)))
             macro_shock = _macro_shock(event, projection_label, dominant_regime, score)
             risk_classification = _risk_classification(score)
-            confidence = "Media" if abs(score) >= 15 else "Baixa"
+            confidence = _confidence(event, projection_label, score, confirmations, alignment_ratio) if use_market_data else ("Media" if abs(score) >= 15 else "Baixa")
             asset_impacts = _asset_impacts(score, macro_shock)
-            macro_effect = _macro_effect_text(asset_impacts, risk_classification)
-            summary = (
-                f"{risk_classification}. Projecao do evento {event.event}: consenso {event.forecast_raw} vs anterior {event.previous_raw}. "
-                f"A leitura indica {projection_label} e choque esperado {macro_shock}. "
-                f"{_impact_text(event)} Efeito esperado: {risk_classification}, usando somente dados do Investing. "
-                f"{macro_effect} Confirmar a surpresa quando o campo Atual for divulgado."
+            monetary_policy = _monetary_policy_bias(event, macro_shock, score)
+            summary = _concise_summary(
+                event,
+                projection_label,
+                f"anterior {event.previous_raw}",
+                risk_classification,
+                macro_shock,
+                monetary_policy,
+                asset_impacts,
+                dominant_regime,
+                confirmations,
+                is_projection=True,
             )
             return {
                 "status": "Projecao analisada",
@@ -583,13 +644,15 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
                 "risk_classification": risk_classification,
                 "confidence": confidence,
                 "operational_summary": summary,
+                "monetary_policy": monetary_policy,
+                "intermarket_summary": _intermarket_summary(dominant_regime, confirmations),
                 "asset_impacts": asset_impacts,
-                "confirmations": [],
+                "confirmations": confirmations,
                 "score_components": {
                     "projecao": data_score,
-                    "regime": 0,
-                    "intermercado": 0,
-                    "alinhamento": 0.0,
+                    "regime": regime_score,
+                    "intermercado": market_score,
+                    "alinhamento": alignment_ratio,
                 },
             }
         return {
@@ -622,14 +685,19 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
     risk_classification = _risk_classification(score)
     confidence = _confidence(event, surprise_label, score, confirmations, alignment_ratio) if use_market_data else ("Media" if abs(score) >= 20 else "Baixa")
     asset_impacts = _asset_impacts(score, macro_shock)
-    macro_effect = _macro_effect_text(asset_impacts, risk_classification)
+    monetary_policy = _monetary_policy_bias(event, macro_shock, score)
 
     benchmark_text = f"consenso {event.forecast_raw}" if event.forecast is not None else f"anterior {event.previous_raw}"
-    summary = (
-        f"{risk_classification}. Evento {event.event} com surpresa {surprise_label} "
-        f"({event.actual_raw} vs {benchmark_text}). Choque {macro_shock}. "
-        f"{_impact_text(event)} Efeito esperado: {risk_classification}, usando somente dados do Investing. "
-        f"{macro_effect}"
+    summary = _concise_summary(
+        event,
+        surprise_label,
+        benchmark_text,
+        risk_classification,
+        macro_shock,
+        monetary_policy,
+        asset_impacts,
+        dominant_regime,
+        confirmations,
     )
 
     return {
@@ -645,6 +713,8 @@ def interpret_event(raw_event: dict, global_data: Optional[dict] = None) -> dict
         "risk_classification": risk_classification,
         "confidence": confidence,
         "operational_summary": summary,
+        "monetary_policy": monetary_policy,
+        "intermarket_summary": _intermarket_summary(dominant_regime, confirmations),
         "asset_impacts": asset_impacts,
         "confirmations": confirmations,
         "score_components": {
