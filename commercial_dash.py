@@ -41,6 +41,16 @@ def fetch_app_state(key: str):
         print(f"[ERROR] Fetch {key}: {e}")
     return None
 
+@st.cache_data(ttl=2, show_spinner=False)
+def fetch_app_state_fast(key: str):
+    """Cache curto para dados RTD usados por mais de um fragmento."""
+    return fetch_app_state(key)
+
+@st.cache_data(ttl=30, show_spinner=False)
+def fetch_app_state_cached(key: str):
+    """Cache de fallback para evitar consultas repetidas ao Supabase."""
+    return fetch_app_state(key)
+
 @st.cache_data(ttl=30, show_spinner=False)
 def fetch_live_global_markets():
     """Busca cotacoes globais direto da fonte com cache curto para o Streamlit Cloud."""
@@ -56,7 +66,7 @@ def get_global_markets_data():
     live_data = fetch_live_global_markets()
     if live_data:
         return live_data
-    return fetch_app_state("mercados_globais")
+    return fetch_app_state_cached("mercados_globais")
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_investing_calendar_live():
@@ -72,23 +82,23 @@ def get_calendar_data():
     live_events = fetch_investing_calendar_live()
     if live_events:
         return live_events
-    return fetch_app_state("calendario_economico")
+    return fetch_app_state_cached("calendario_economico")
 
-@st.cache_data(ttl=5, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def load_bloomberg_news_feed(refresh_nonce: int = 0):
     """Monta o feed pesado com cache para evitar travamentos no rerender."""
     del refresh_nonce
     news_sources = []
     warnings = []
-    news_list = fetch_app_state("financial_juice_news") or []
+    news_list = fetch_app_state_cached("financial_juice_news") or []
     if news_list:
         news_sources.append("Financial Juice")
 
     try:
         from execution.fetch_financial_juice import fetch_financial_juice_news
         live_news = fetch_financial_juice_news(
-            limit=40,
-            min_network_interval=5,
+            limit=35,
+            min_network_interval=30,
             fast_mode=True,
         )
         if live_news:
@@ -141,7 +151,7 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
 
     return unique_news, news_sources, warnings, datetime.now().strftime("%H:%M:%S")
 
-@st.fragment(run_every=5)
+@st.fragment(run_every=30)
 def render_bloomberg_news_feed_fragment():
     """Atualiza somente o feed de noticias, sem redesenhar o terminal inteiro."""
     def esc(value) -> str:
@@ -203,7 +213,7 @@ def render_bloomberg_news_feed_fragment():
             return "medium", "IMPACTO MEDIO", unique_reasons[:3]
         return "low", "BAIXO IMPACTO", unique_reasons[:2]
 
-    st.caption("Somente este feed atualiza a cada 5s. O restante do terminal permanece estavel.")
+    st.caption("Somente este feed atualiza a cada 30s. O restante do terminal permanece estavel.")
     if st.button("Atualizar feed agora", use_container_width=True, key="bb_refresh_news_fast"):
         load_bloomberg_news_feed.clear()
 
@@ -524,10 +534,10 @@ def painel_tickers_topo():
                     </div>
                 """, unsafe_allow_html=True)
 
-@st.fragment(run_every=1)
+@st.fragment(run_every=2)
 def painel_topo_rtd():
-    """Parte superior em tempo real (1s): Preços, Métricas e Semáforo."""
-    dados = fetch_app_state("dados_mercado")
+    """Parte superior em tempo real (2s): Preços, Métricas e Semáforo."""
+    dados = fetch_app_state_fast("dados_mercado")
     if not dados or (isinstance(dados, list) and len(dados) == 0):
         st.info("⏳ Aguardando dados do Terminal Bridge...")
         return
@@ -839,10 +849,10 @@ def secao_market_report_fragment():
             st.markdown(sanitize_text(report.get("report", "")))
 
 
-@st.fragment(run_every=1)
+@st.fragment(run_every=2)
 def painel_inferior_rtd():
-    """Parte inferior em tempo real (1s): Correlações e Escada."""
-    dados = fetch_app_state("dados_mercado")
+    """Parte inferior em tempo real (2s): Correlações e Escada."""
+    dados = fetch_app_state_fast("dados_mercado")
     if not dados or (isinstance(dados, list) and len(dados) == 0):
         return
 
