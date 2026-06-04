@@ -3472,13 +3472,57 @@ def _plot_rentabilidade(resultados: list, acumulado: list):
 
 @st.fragment(run_every=30)
 def sidebar_news():
-    news_list, news_sources, news_warnings, feed_loaded_at = load_bloomberg_news_feed(0)
+    if "sidebar_news_translate" not in st.session_state:
+        st.session_state.sidebar_news_translate = False
+    if "sidebar_news_refresh_nonce" not in st.session_state:
+        st.session_state.sidebar_news_refresh_nonce = 0
+    if "bb_translation_cache" not in st.session_state:
+        st.session_state.bb_translation_cache = {}
+
+    refresh_col, translate_col = st.columns(2)
+    with refresh_col:
+        if st.button("Atualizar", use_container_width=True, key="sidebar_news_refresh"):
+            load_bloomberg_news_feed.clear()
+            st.session_state.sidebar_news_refresh_nonce += 1
+    with translate_col:
+        translate_label = "Ver EN" if st.session_state.sidebar_news_translate else "Traduzir"
+        if st.button(translate_label, use_container_width=True, key="sidebar_news_translate_btn"):
+            st.session_state.sidebar_news_translate = not st.session_state.sidebar_news_translate
+
+    news_list, news_sources, news_warnings, feed_loaded_at = load_bloomberg_news_feed(
+        st.session_state.sidebar_news_refresh_nonce
+    )
     if not news_list:
         st.info("Carregando noticias...")
         return
 
     def esc(value) -> str:
         return html.escape(str(value or ""), quote=True)
+
+    def translate_sidebar_item(item: dict) -> dict:
+        translated_item = dict(item)
+        title_original = item.get("title_en") or item.get("title") or item.get("title_pt") or ""
+        summary_original = item.get("summary") or item.get("description") or ""
+        try:
+            from execution.fetch_financial_juice import translate_text_google
+            cache = st.session_state.bb_translation_cache
+            if title_original:
+                title_key = f"title::{title_original}"
+                if title_key not in cache:
+                    cache[title_key] = translate_text_google(title_original)
+                translated_item["title_pt"] = cache[title_key]
+            if summary_original and summary_original != title_original:
+                summary_key = f"summary::{summary_original}"
+                if summary_key not in cache:
+                    cache[summary_key] = translate_text_google(summary_original)
+                translated_item["summary_pt"] = cache[summary_key]
+        except Exception:
+            try:
+                from execution.fetch_financial_juice import ensure_portuguese_fields
+                ensure_portuguese_fields(translated_item)
+            except Exception:
+                pass
+        return translated_item
 
     def news_text(item) -> str:
         return f"{item.get('title_en', '')} {item.get('title_pt', '')} {item.get('summary', '')}".lower()
@@ -3520,12 +3564,20 @@ def sidebar_news():
         return (impact_rank.get(impact_label, 9), -ts)
 
     filtered = sorted(news_list, key=sort_key)[:10]
+    translate_enabled = bool(st.session_state.get("sidebar_news_translate", False))
+    if translate_enabled:
+        with st.spinner("Traduzindo..."):
+            filtered = [translate_sidebar_item(item) for item in filtered]
     st.markdown(
-        f"<div style='text-align:right; font-size:0.65rem; color:#666; margin-bottom:10px;'>NEWS: {esc(feed_loaded_at)} | {len(news_list)} itens</div>",
+        f"<div style='text-align:right; font-size:0.65rem; color:#666; margin-bottom:10px;'>NEWS: {esc(feed_loaded_at)} | {len(news_list)} itens | {'PT-BR' if translate_enabled else 'EN'}</div>",
         unsafe_allow_html=True,
     )
     for item in filtered:
-        title = esc(item.get("title_en") or item.get("title_pt") or item.get("title") or "---")
+        if translate_enabled:
+            title_raw = item.get("title_pt") or item.get("title_en") or item.get("title") or "---"
+        else:
+            title_raw = item.get("title_en") or item.get("title") or item.get("title_pt") or "---"
+        title = esc(title_raw)
         published = esc(item.get("published_str", "--:--"))
         source = esc(item.get("source", "Financial Juice"))
         link = esc(item.get("link", "#"))
