@@ -1743,7 +1743,7 @@ def render_terminal_global_correlation_panel():
         """
         <div style="border:1px solid #243244; border-radius:8px 8px 0 0; padding:10px 12px; background:#0b1220;">
             <div style="font-size:0.72rem; color:#94A3B8; font-weight:900; text-transform:uppercase;">Correlação Macro</div>
-            <div style="font-size:0.82rem; color:#E5E7EB; font-weight:800; margin-top:2px;">USA500 | UKOIL | US10Y | US30Y | GOLD</div>
+            <div style="font-size:0.82rem; color:#E5E7EB; font-weight:800; margin-top:2px;">USA500 | GOLD | UKOIL | US10Y | US30Y | DXY</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1781,10 +1781,11 @@ def render_terminal_global_correlation_panel():
             "paneProperties.horzGridProperties.color": "#1f2937"
         }},
         "studies": [
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:GOLD" }}, "plots": {{ "Plot": {{ "color": "#FFD166" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:UKOIL" }}, "plots": {{ "Plot": {{ "color": "#2F80ED" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "OTCB:US10Y" }}, "plots": {{ "Plot": {{ "color": "#FF9800" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "OTCB:US30Y" }}, "plots": {{ "Plot": {{ "color": "#00BFFF" }} }} }},
-          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:GOLD" }}, "plots": {{ "Plot": {{ "color": "#FFD166" }} }} }}
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "CAPITALCOM:DXY" }}, "plots": {{ "Plot": {{ "color": "#F8FAFC" }} }} }}
         ]
       }}
       );
