@@ -3574,10 +3574,12 @@ def sidebar_news():
         st.session_state.sidebar_news_translate = False
     if "sidebar_news_refresh_nonce" not in st.session_state:
         st.session_state.sidebar_news_refresh_nonce = 0
+    if "sidebar_news_zoom" not in st.session_state:
+        st.session_state.sidebar_news_zoom = 1.0
     if "bb_translation_cache" not in st.session_state:
         st.session_state.bb_translation_cache = {}
 
-    refresh_col, translate_col = st.columns(2)
+    refresh_col, translate_col, zoom_out_col, zoom_in_col = st.columns([1.35, 1.35, 0.55, 0.55])
     with refresh_col:
         if st.button("Atualizar", use_container_width=True, key="sidebar_news_refresh"):
             load_bloomberg_news_feed.clear()
@@ -3586,6 +3588,12 @@ def sidebar_news():
         translate_label = "Ver EN" if st.session_state.sidebar_news_translate else "Traduzir"
         if st.button(translate_label, use_container_width=True, key="sidebar_news_translate_btn"):
             st.session_state.sidebar_news_translate = not st.session_state.sidebar_news_translate
+    with zoom_out_col:
+        if st.button("-", use_container_width=True, key="sidebar_news_zoom_out", help="Diminuir fonte do feed NEWS"):
+            st.session_state.sidebar_news_zoom = max(0.85, round(st.session_state.sidebar_news_zoom - 0.1, 2))
+    with zoom_in_col:
+        if st.button("+", use_container_width=True, key="sidebar_news_zoom_in", help="Aumentar fonte do feed NEWS"):
+            st.session_state.sidebar_news_zoom = min(1.45, round(st.session_state.sidebar_news_zoom + 0.1, 2))
 
     news_list, news_sources, news_warnings, feed_loaded_at = load_bloomberg_news_feed(
         st.session_state.sidebar_news_refresh_nonce
@@ -3666,8 +3674,13 @@ def sidebar_news():
     if translate_enabled:
         with st.spinner("Traduzindo..."):
             filtered = [translate_sidebar_item(item) for item in filtered]
+    zoom = float(st.session_state.get("sidebar_news_zoom", 1.0))
+    meta_font = 0.68 * zoom
+    badge_font = 0.62 * zoom
+    title_font = 0.78 * zoom
+    line_height = max(1.25, 1.35 * zoom)
     st.markdown(
-        f"<div style='text-align:right; font-size:0.65rem; color:#666; margin-bottom:10px;'>NEWS: {esc(feed_loaded_at)} | {len(news_list)} itens | {'PT-BR' if translate_enabled else 'EN'}</div>",
+        f"<div style='text-align:right; font-size:0.65rem; color:#666; margin-bottom:10px;'>NEWS: {esc(feed_loaded_at)} | {len(news_list)} itens | {'PT-BR' if translate_enabled else 'EN'} | Zoom {zoom:.1f}x</div>",
         unsafe_allow_html=True,
     )
     for item in filtered:
@@ -3684,10 +3697,10 @@ def sidebar_news():
             f'''
             <div style="border-bottom:1px solid #1f2937; padding:9px 0;">
                 <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
-                    <span style="font-size:0.68rem; color:#94A3B8;">{published} | {source}</span>
-                    <span style="font-size:0.62rem; color:{impact_color}; border:1px solid {impact_color}66; border-radius:4px; padding:1px 5px; font-weight:900;">{impact_label}</span>
+                    <span style="font-size:{meta_font:.2f}rem; color:#94A3B8;">{published} | {source}</span>
+                    <span style="font-size:{badge_font:.2f}rem; color:{impact_color}; border:1px solid {impact_color}66; border-radius:4px; padding:1px 5px; font-weight:900;">{impact_label}</span>
                 </div>
-                <a href="{link}" target="_blank" rel="noopener noreferrer" style="display:block; color:#E5E7EB; text-decoration:none; font-size:0.78rem; line-height:1.35; font-weight:700; margin-top:4px;">{title}</a>
+                <a href="{link}" target="_blank" rel="noopener noreferrer" style="display:block; color:#E5E7EB; text-decoration:none; font-size:{title_font:.2f}rem; line-height:{line_height:.2f}; font-weight:700; margin-top:4px;">{title}</a>
             </div>
             ''',
             unsafe_allow_html=True,
