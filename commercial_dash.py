@@ -1749,7 +1749,7 @@ def render_terminal_global_correlation_panel():
         unsafe_allow_html=True,
     )
     tv_html = f"""
-    <div class="tradingview-widget-container" style="height: 720px; width: 100%; background:#0b0f17;">
+    <div class="tradingview-widget-container" style="height: 1085px; width: 100%; background:#0b0f17;">
       <div id="tg_side_correlation_tv" style="height: 100%; width: 100%;"></div>
       <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
       <script type="text/javascript">
@@ -1791,7 +1791,7 @@ def render_terminal_global_correlation_panel():
       </script>
     </div>
     """
-    components.html(tv_html, height=735)
+    components.html(tv_html, height=1100)
 
 
 def render_terminal_global_layout_css():
