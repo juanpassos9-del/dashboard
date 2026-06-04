@@ -1731,82 +1731,84 @@ def pagina_terminal_bloomberg():
     </div>
     """, unsafe_allow_html=True)
 
-def render_terminal_global_right_rail():
+def render_terminal_global_correlation_panel():
+    interval = st.selectbox(
+        "Intervalo",
+        ["5", "15", "60", "D", "W"],
+        index=3,
+        key="tg_side_corr_interval",
+        label_visibility="collapsed",
+    )
+    st.markdown(
+        """
+        <div style="border:1px solid #243244; border-radius:8px 8px 0 0; padding:10px 12px; background:#0b1220;">
+            <div style="font-size:0.72rem; color:#94A3B8; font-weight:900; text-transform:uppercase;">Correlação Macro</div>
+            <div style="font-size:0.82rem; color:#E5E7EB; font-weight:800; margin-top:2px;">USA500 | UKOIL | US10Y | US30Y | GOLD</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    tv_html = f"""
+    <div class="tradingview-widget-container" style="height: 720px; width: 100%; background:#0b0f17;">
+      <div id="tg_side_correlation_tv" style="height: 100%; width: 100%;"></div>
+      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+      <script type="text/javascript">
+      new TradingView.widget(
+      {{
+        "autosize": true,
+        "symbol": "USA500",
+        "interval": "{interval}",
+        "timezone": "America/Sao_Paulo",
+        "theme": "dark",
+        "style": "2",
+        "locale": "br",
+        "toolbar_bg": "#0b0f17",
+        "enable_publishing": false,
+        "hide_top_toolbar": false,
+        "hide_side_toolbar": true,
+        "allow_symbol_change": true,
+        "save_image": false,
+        "details": false,
+        "hotlist": false,
+        "calendar": false,
+        "hide_volume": true,
+        "container_id": "tg_side_correlation_tv",
+        "overrides": {{
+            "mainSeriesProperties.lineStyle.color": "#B026FF",
+            "mainSeriesProperties.lineStyle.linewidth": 3,
+            "paneProperties.background": "#0b0f17",
+            "paneProperties.vertGridProperties.color": "#1f2937",
+            "paneProperties.horzGridProperties.color": "#1f2937"
+        }},
+        "studies": [
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:UKOIL" }}, "plots": {{ "Plot": {{ "color": "#2F80ED" }} }} }},
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "OTCB:US10Y" }}, "plots": {{ "Plot": {{ "color": "#FF9800" }} }} }},
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "OTCB:US30Y" }}, "plots": {{ "Plot": {{ "color": "#00BFFF" }} }} }},
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:GOLD" }}, "plots": {{ "Plot": {{ "color": "#FFD166" }} }} }}
+        ]
+      }}
+      );
+      </script>
+    </div>
+    """
+    components.html(tv_html, height=735)
+
+
+def render_terminal_global_layout_css():
     st.markdown(
         """
         <style>
-        .block-container {
-            padding-right: 5.25rem;
-        }
-        .tg-right-rail {
-            position: fixed;
-            top: 5.25rem;
-            right: 0.65rem;
-            width: 3.55rem;
-            z-index: 999;
-            display: flex;
-            flex-direction: column;
-            align-items: stretch;
-            gap: 0.45rem;
-            padding: 0.55rem 0.4rem;
-            border: 1px solid #243244;
-            border-radius: 8px;
-            background: rgba(8, 13, 22, 0.94);
-            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
-            backdrop-filter: blur(10px);
-        }
-        .tg-right-rail-title {
-            color: #00ffa3;
-            font-size: 0.68rem;
-            font-weight: 900;
-            line-height: 1;
-            text-align: center;
-            letter-spacing: 0;
-            padding-bottom: 0.45rem;
-            border-bottom: 1px solid #1f2937;
-        }
-        .tg-right-rail a,
-        .tg-right-rail span {
-            min-height: 2.1rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border: 1px solid #223044;
-            border-radius: 6px;
-            background: #0f1724;
-            color: #dbeafe;
-            font-size: 0.62rem;
-            font-weight: 900;
-            text-decoration: none;
-            letter-spacing: 0;
-        }
-        .tg-right-rail a:hover {
-            border-color: #00ffa3;
-            color: #00ffa3;
-            background: #111f2e;
-        }
-        .tg-right-rail-live {
-            color: #00ffa3 !important;
-            border-color: rgba(0, 255, 163, 0.35) !important;
+        div[data-testid="column"]:has(#tg-side-correlation-anchor) {
+            position: sticky;
+            top: 0.75rem;
+            align-self: flex-start;
         }
         @media (max-width: 1100px) {
-            .block-container {
-                padding-right: 1rem;
-            }
-            .tg-right-rail {
+            div[data-testid="column"]:has(#tg-side-correlation-anchor) {
                 display: none;
             }
         }
         </style>
-        <nav class="tg-right-rail" aria-label="Terminal Global">
-            <div class="tg-right-rail-title">TG</div>
-            <a href="#tg-top" title="Topo">TOP</a>
-            <a href="#tg-graficos" title="Graficos globais">GRF</a>
-            <a href="#tg-calendario" title="Calendario economico">CAL</a>
-            <a href="#tg-ia-macro" title="IA Macro TTS">IA</a>
-            <a href="#tg-historico" title="Historico IA">HIS</a>
-            <span class="tg-right-rail-live" title="Terminal Global ativo">LIVE</span>
-        </nav>
         """,
         unsafe_allow_html=True,
     )
@@ -1814,223 +1816,230 @@ def render_terminal_global_right_rail():
 
 def pagina_terminal_global():
     """Página de Terminal Global."""
-    render_terminal_global_right_rail()
+    render_terminal_global_layout_css()
     st.markdown("<div id='tg-top'></div>", unsafe_allow_html=True)
     painel_topo_global()
     
-    st.markdown("---")
-    st.markdown("<div id='tg-graficos'></div>", unsafe_allow_html=True)
+    body_col, corr_col = st.columns([0.74, 0.26], gap="medium")
+
+    with body_col:
+        st.markdown("---")
+        st.markdown("<div id='tg-graficos'></div>", unsafe_allow_html=True)
     
-    global_chart_assets = {
-        "USA500": {"tv": "USA500", "yf": "^GSPC"},
-        "UKOIL": {"tv": "UKOIL", "yf": "BZ=F"},
-        "BRA50": {"tv": "BRA50", "yf": "^BVSP"},
-        "BTCUSDT": {"tv": "BTCUSDT", "yf": "BTC-USD"},
-        "S&P 500": {"tv": "USA500", "yf": "^GSPC"},
-        "NASDAQ": {"tv": "ACTIVTRADES:USATEC", "yf": "^IXIC"},
-        "USATEC": {"tv": "ACTIVTRADES:USATEC", "yf": "^IXIC"},
-        "BRENT OIL": {"tv": "TVC:UKOIL", "yf": "BZ=F"},
-        "WTI OIL": {"tv": "TVC:USOIL", "yf": "CL=F"},
-        "GOLD": {"tv": "TVC:GOLD", "yf": "GC=F"},
-        "BITCOIN": {"tv": "BINANCE:BTCUSDT", "yf": "BTC-USD"},
-        "ETHUSDT": {"tv": "BINANCE:ETHUSDT", "yf": "ETH-USD"},
-        "DXY (Dólar Index)": {"tv": "CAPITALCOM:DXY", "yf": "DX-Y.NYB"},
-        "US10Y OTCB": {"tv": "OTCB:US10Y", "yf": "^TNX"},
-        "US30Y OTCB": {"tv": "OTCB:US30Y", "yf": "^TYX"},
-        "EWZ (Brazil ETF)": {"tv": "AMEX:EWZ", "yf": "EWZ"},
-        "EEM (Emerging Markets)": {"tv": "AMEX:EEM", "yf": "EEM"},
-    }
+        global_chart_assets = {
+            "USA500": {"tv": "USA500", "yf": "^GSPC"},
+            "UKOIL": {"tv": "UKOIL", "yf": "BZ=F"},
+            "BRA50": {"tv": "BRA50", "yf": "^BVSP"},
+            "BTCUSDT": {"tv": "BTCUSDT", "yf": "BTC-USD"},
+            "S&P 500": {"tv": "USA500", "yf": "^GSPC"},
+            "NASDAQ": {"tv": "ACTIVTRADES:USATEC", "yf": "^IXIC"},
+            "USATEC": {"tv": "ACTIVTRADES:USATEC", "yf": "^IXIC"},
+            "BRENT OIL": {"tv": "TVC:UKOIL", "yf": "BZ=F"},
+            "WTI OIL": {"tv": "TVC:USOIL", "yf": "CL=F"},
+            "GOLD": {"tv": "TVC:GOLD", "yf": "GC=F"},
+            "BITCOIN": {"tv": "BINANCE:BTCUSDT", "yf": "BTC-USD"},
+            "ETHUSDT": {"tv": "BINANCE:ETHUSDT", "yf": "ETH-USD"},
+            "DXY (Dólar Index)": {"tv": "CAPITALCOM:DXY", "yf": "DX-Y.NYB"},
+            "US10Y OTCB": {"tv": "OTCB:US10Y", "yf": "^TNX"},
+            "US30Y OTCB": {"tv": "OTCB:US30Y", "yf": "^TYX"},
+            "EWZ (Brazil ETF)": {"tv": "AMEX:EWZ", "yf": "EWZ"},
+            "EEM (Emerging Markets)": {"tv": "AMEX:EEM", "yf": "EEM"},
+        }
     
-    chart_col_1, chart_col_2 = st.columns(2)
+        chart_col_1, chart_col_2 = st.columns(2)
     
-    with chart_col_1:
-        st.markdown("#### 📈 Gráfico Global")
-        col_sel, col_int = st.columns([2, 1])
-        with col_sel:
-            sym = st.selectbox("Ativo", list(global_chart_assets.keys()), index=0, key="global_sym")
-        with col_int:
-            interval = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=1, key="global_int")
+        with chart_col_1:
+            st.markdown("#### 📈 Gráfico Global")
+            col_sel, col_int = st.columns([2, 1])
+            with col_sel:
+                sym = st.selectbox("Ativo", list(global_chart_assets.keys()), index=0, key="global_sym")
+            with col_int:
+                interval = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=1, key="global_int")
             
-        tv_html = f"""
-        <div class="tradingview-widget-container" style="height: 480px; width: 100%;">
-          <div id="tv_global" style="height: 100%; width: 100%;"></div>
-          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-          <script type="text/javascript">
-          new TradingView.widget({{
-            "autosize": true,
-            "symbol": "{global_chart_assets[sym]['tv']}",
-            "interval": "{interval}",
-            "timezone": "America/Sao_Paulo",
-            "theme": "dark",
-            "style": "1",
-            "locale": "br",
-            "toolbar_bg": "#f1f3f6",
-            "enable_publishing": false,
-            "hide_top_toolbar": false,
-            "save_image": true,
-            "hide_volume": true,
-            "container_id": "tv_global",
-            "studies": [
-              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Session" }}, "plots": {{ "VWAP": {{ "color": "#FFD166" }} }} }},
-              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Week" }}, "plots": {{ "VWAP": {{ "color": "#06D6A0" }} }} }},
-              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Month" }}, "plots": {{ "VWAP": {{ "color": "#118AB2" }} }} }}
-            ]
-          }});
-          </script>
-        </div>
-        """
-        components.html(tv_html, height=500)
+            tv_html = f"""
+            <div class="tradingview-widget-container" style="height: 480px; width: 100%;">
+              <div id="tv_global" style="height: 100%; width: 100%;"></div>
+              <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+              <script type="text/javascript">
+              new TradingView.widget({{
+                "autosize": true,
+                "symbol": "{global_chart_assets[sym]['tv']}",
+                "interval": "{interval}",
+                "timezone": "America/Sao_Paulo",
+                "theme": "dark",
+                "style": "1",
+                "locale": "br",
+                "toolbar_bg": "#f1f3f6",
+                "enable_publishing": false,
+                "hide_top_toolbar": false,
+                "save_image": true,
+                "hide_volume": true,
+                "container_id": "tv_global",
+                "studies": [
+                  {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Session" }}, "plots": {{ "VWAP": {{ "color": "#FFD166" }} }} }},
+                  {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Week" }}, "plots": {{ "VWAP": {{ "color": "#06D6A0" }} }} }},
+                  {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Month" }}, "plots": {{ "VWAP": {{ "color": "#118AB2" }} }} }}
+                ]
+              }});
+              </script>
+            </div>
+            """
+            components.html(tv_html, height=500)
 
-    with chart_col_2:
-        st.markdown("#### Grafico Global 2")
-        col_sel_2, col_int_2 = st.columns([2, 1])
-        with col_sel_2:
-            sym_2 = st.selectbox("Ativo", list(global_chart_assets.keys()), index=1, key="global_sym_2")
-        with col_int_2:
-            interval_2 = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=1, key="global_int_2")
+        with chart_col_2:
+            st.markdown("#### Grafico Global 2")
+            col_sel_2, col_int_2 = st.columns([2, 1])
+            with col_sel_2:
+                sym_2 = st.selectbox("Ativo", list(global_chart_assets.keys()), index=1, key="global_sym_2")
+            with col_int_2:
+                interval_2 = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=1, key="global_int_2")
 
-        tv_html_2 = f"""
-        <div class="tradingview-widget-container" style="height: 480px; width: 100%;">
-          <div id="tv_global_2" style="height: 100%; width: 100%;"></div>
-          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-          <script type="text/javascript">
-          new TradingView.widget({{
-            "autosize": true,
-            "symbol": "{global_chart_assets[sym_2]['tv']}",
-            "interval": "{interval_2}",
-            "timezone": "America/Sao_Paulo",
-            "theme": "dark",
-            "style": "1",
-            "locale": "br",
-            "toolbar_bg": "#f1f3f6",
-            "enable_publishing": false,
-            "hide_top_toolbar": false,
-            "save_image": true,
-            "hide_volume": true,
-            "container_id": "tv_global_2",
-            "studies": [
-              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Session" }}, "plots": {{ "VWAP": {{ "color": "#FFD166" }} }} }},
-              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Week" }}, "plots": {{ "VWAP": {{ "color": "#06D6A0" }} }} }},
-              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Month" }}, "plots": {{ "VWAP": {{ "color": "#118AB2" }} }} }}
-            ]
-          }});
-          </script>
-        </div>
-        """
-        components.html(tv_html_2, height=500)
+            tv_html_2 = f"""
+            <div class="tradingview-widget-container" style="height: 480px; width: 100%;">
+              <div id="tv_global_2" style="height: 100%; width: 100%;"></div>
+              <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+              <script type="text/javascript">
+              new TradingView.widget({{
+                "autosize": true,
+                "symbol": "{global_chart_assets[sym_2]['tv']}",
+                "interval": "{interval_2}",
+                "timezone": "America/Sao_Paulo",
+                "theme": "dark",
+                "style": "1",
+                "locale": "br",
+                "toolbar_bg": "#f1f3f6",
+                "enable_publishing": false,
+                "hide_top_toolbar": false,
+                "save_image": true,
+                "hide_volume": true,
+                "container_id": "tv_global_2",
+                "studies": [
+                  {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Session" }}, "plots": {{ "VWAP": {{ "color": "#FFD166" }} }} }},
+                  {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Week" }}, "plots": {{ "VWAP": {{ "color": "#06D6A0" }} }} }},
+                  {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Month" }}, "plots": {{ "VWAP": {{ "color": "#118AB2" }} }} }}
+                ]
+              }});
+              </script>
+            </div>
+            """
+            components.html(tv_html_2, height=500)
 
-    chart_col_3, chart_col_4 = st.columns(2)
+        chart_col_3, chart_col_4 = st.columns(2)
 
-    with chart_col_3:
-        st.markdown("#### Grafico Global 3")
-        col_sel_3, col_int_3 = st.columns([2, 1])
-        with col_sel_3:
-            sym_3 = st.selectbox("Ativo", list(global_chart_assets.keys()), index=2, key="global_sym_3")
-        with col_int_3:
-            interval_3 = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=1, key="global_int_3")
+        with chart_col_3:
+            st.markdown("#### Grafico Global 3")
+            col_sel_3, col_int_3 = st.columns([2, 1])
+            with col_sel_3:
+                sym_3 = st.selectbox("Ativo", list(global_chart_assets.keys()), index=2, key="global_sym_3")
+            with col_int_3:
+                interval_3 = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=1, key="global_int_3")
 
-        tv_html_3 = f"""
-        <div class="tradingview-widget-container" style="height: 480px; width: 100%;">
-          <div id="tv_global_3" style="height: 100%; width: 100%;"></div>
-          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-          <script type="text/javascript">
-          new TradingView.widget({{
-            "autosize": true,
-            "symbol": "{global_chart_assets[sym_3]['tv']}",
-            "interval": "{interval_3}",
-            "timezone": "America/Sao_Paulo",
-            "theme": "dark",
-            "style": "1",
-            "locale": "br",
-            "toolbar_bg": "#f1f3f6",
-            "enable_publishing": false,
-            "hide_top_toolbar": false,
-            "save_image": true,
-            "hide_volume": true,
-            "container_id": "tv_global_3",
-            "studies": [
-              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Session" }}, "plots": {{ "VWAP": {{ "color": "#FFD166" }} }} }},
-              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Week" }}, "plots": {{ "VWAP": {{ "color": "#06D6A0" }} }} }},
-              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Month" }}, "plots": {{ "VWAP": {{ "color": "#118AB2" }} }} }}
-            ]
-          }});
-          </script>
-        </div>
-        """
-        components.html(tv_html_3, height=500)
+            tv_html_3 = f"""
+            <div class="tradingview-widget-container" style="height: 480px; width: 100%;">
+              <div id="tv_global_3" style="height: 100%; width: 100%;"></div>
+              <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+              <script type="text/javascript">
+              new TradingView.widget({{
+                "autosize": true,
+                "symbol": "{global_chart_assets[sym_3]['tv']}",
+                "interval": "{interval_3}",
+                "timezone": "America/Sao_Paulo",
+                "theme": "dark",
+                "style": "1",
+                "locale": "br",
+                "toolbar_bg": "#f1f3f6",
+                "enable_publishing": false,
+                "hide_top_toolbar": false,
+                "save_image": true,
+                "hide_volume": true,
+                "container_id": "tv_global_3",
+                "studies": [
+                  {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Session" }}, "plots": {{ "VWAP": {{ "color": "#FFD166" }} }} }},
+                  {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Week" }}, "plots": {{ "VWAP": {{ "color": "#06D6A0" }} }} }},
+                  {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Month" }}, "plots": {{ "VWAP": {{ "color": "#118AB2" }} }} }}
+                ]
+              }});
+              </script>
+            </div>
+            """
+            components.html(tv_html_3, height=500)
 
-    with chart_col_4:
-        st.markdown("#### Grafico Global 4")
-        col_sel_4, col_int_4 = st.columns([2, 1])
-        with col_sel_4:
-            sym_4 = st.selectbox("Ativo", list(global_chart_assets.keys()), index=3, key="global_sym_4")
-        with col_int_4:
-            interval_4 = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=1, key="global_int_4")
+        with chart_col_4:
+            st.markdown("#### Grafico Global 4")
+            col_sel_4, col_int_4 = st.columns([2, 1])
+            with col_sel_4:
+                sym_4 = st.selectbox("Ativo", list(global_chart_assets.keys()), index=3, key="global_sym_4")
+            with col_int_4:
+                interval_4 = st.selectbox("Intervalo", ["1", "5", "15", "60", "D", "W"], index=1, key="global_int_4")
 
-        tv_html_4 = f"""
-        <div class="tradingview-widget-container" style="height: 480px; width: 100%;">
-          <div id="tv_global_4" style="height: 100%; width: 100%;"></div>
-          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-          <script type="text/javascript">
-          new TradingView.widget({{
-            "autosize": true,
-            "symbol": "{global_chart_assets[sym_4]['tv']}",
-            "interval": "{interval_4}",
-            "timezone": "America/Sao_Paulo",
-            "theme": "dark",
-            "style": "1",
-            "locale": "br",
-            "toolbar_bg": "#f1f3f6",
-            "enable_publishing": false,
-            "hide_top_toolbar": false,
-            "save_image": true,
-            "hide_volume": true,
-            "container_id": "tv_global_4",
-            "studies": [
-              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Session" }}, "plots": {{ "VWAP": {{ "color": "#FFD166" }} }} }},
-              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Week" }}, "plots": {{ "VWAP": {{ "color": "#06D6A0" }} }} }},
-              {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Month" }}, "plots": {{ "VWAP": {{ "color": "#118AB2" }} }} }}
-            ]
-          }});
-          </script>
-        </div>
-        """
-        components.html(tv_html_4, height=500)
+            tv_html_4 = f"""
+            <div class="tradingview-widget-container" style="height: 480px; width: 100%;">
+              <div id="tv_global_4" style="height: 100%; width: 100%;"></div>
+              <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+              <script type="text/javascript">
+              new TradingView.widget({{
+                "autosize": true,
+                "symbol": "{global_chart_assets[sym_4]['tv']}",
+                "interval": "{interval_4}",
+                "timezone": "America/Sao_Paulo",
+                "theme": "dark",
+                "style": "1",
+                "locale": "br",
+                "toolbar_bg": "#f1f3f6",
+                "enable_publishing": false,
+                "hide_top_toolbar": false,
+                "save_image": true,
+                "hide_volume": true,
+                "container_id": "tv_global_4",
+                "studies": [
+                  {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Session" }}, "plots": {{ "VWAP": {{ "color": "#FFD166" }} }} }},
+                  {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Week" }}, "plots": {{ "VWAP": {{ "color": "#06D6A0" }} }} }},
+                  {{ "id": "VWAP@tv-basicstudies", "inputs": {{ "Anchor Period": "Month" }}, "plots": {{ "VWAP": {{ "color": "#118AB2" }} }} }}
+                ]
+              }});
+              </script>
+            </div>
+            """
+            components.html(tv_html_4, height=500)
 
-    secao_calendario_global_fragment()
+        secao_calendario_global_fragment()
 
-    with st.container():
-        st.markdown("#### 🤖 Analista Técnico IA")
-        st.info(f"Análise baseada no histórico diário (OHLC) de {sym}.")
-        if st.button("Gerar Análise Técnica (IA)", use_container_width=True):
-            with st.spinner("Lendo o gráfico via IA..."):
-                import sys
-                exec_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'execution'))
-                if exec_path not in sys.path:
-                    sys.path.append(exec_path)
-                from tech_analyst import get_technical_analysis
+        with st.container():
+            st.markdown("#### 🤖 Analista Técnico IA")
+            st.info(f"Análise baseada no histórico diário (OHLC) de {sym}.")
+            if st.button("Gerar Análise Técnica (IA)", use_container_width=True):
+                with st.spinner("Lendo o gráfico via IA..."):
+                    import sys
+                    exec_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'execution'))
+                    if exec_path not in sys.path:
+                        sys.path.append(exec_path)
+                    from tech_analyst import get_technical_analysis
                 
-                yf_ticker = global_chart_assets[sym]['yf']
-                insight = get_technical_analysis(sym, yf_ticker)
+                    yf_ticker = global_chart_assets[sym]['yf']
+                    insight = get_technical_analysis(sym, yf_ticker)
                 
-                st.session_state[f'tech_insight_{sym}'] = insight
+                    st.session_state[f'tech_insight_{sym}'] = insight
                 
-        if f'tech_insight_{sym}' in st.session_state:
-            insight_text = st.session_state[f'tech_insight_{sym}']
-            if "Erro" in insight_text or "429" in insight_text:
-                border_color = "#FF4B4B"
-                if "quota" in insight_text.lower() or "429" in insight_text:
-                    insight_text = "⚠️ Limite de requisições da IA (Quota Exceeded) atingido. Tente novamente em alguns minutos."
-            else:
-                border_color = "#00FFA3"
+            if f'tech_insight_{sym}' in st.session_state:
+                insight_text = st.session_state[f'tech_insight_{sym}']
+                if "Erro" in insight_text or "429" in insight_text:
+                    border_color = "#FF4B4B"
+                    if "quota" in insight_text.lower() or "429" in insight_text:
+                        insight_text = "⚠️ Limite de requisições da IA (Quota Exceeded) atingido. Tente novamente em alguns minutos."
+                else:
+                    border_color = "#00FFA3"
                 
-            st.markdown(f"""
-                <div style="background: #111; border: 1px solid #333; padding: 15px; border-radius: 8px; border-left: 5px solid {border_color}; font-size: 0.85rem; color: #E0E0E0; max-height: 380px; overflow-y: auto;">
-                    {insight_text.replace(chr(10), '<br>')}
-                </div>
-            """, unsafe_allow_html=True)
+                st.markdown(f"""
+                    <div style="background: #111; border: 1px solid #333; padding: 15px; border-radius: 8px; border-left: 5px solid {border_color}; font-size: 0.85rem; color: #E0E0E0; max-height: 380px; overflow-y: auto;">
+                        {insight_text.replace(chr(10), '<br>')}
+                    </div>
+                """, unsafe_allow_html=True)
             
-    painel_corpo_global()
+        painel_corpo_global()
+
+    with corr_col:
+        st.markdown("<div id='tg-side-correlation-anchor'></div>", unsafe_allow_html=True)
+        render_terminal_global_correlation_panel()
 
 @st.fragment(run_every=30)
 def sidebar_mercados():
