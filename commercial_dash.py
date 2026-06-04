@@ -3469,15 +3469,94 @@ def _plot_rentabilidade(resultados: list, acumulado: list):
 
 
 # Navegação na Barra Lateral
+
+@st.fragment(run_every=30)
+def sidebar_news():
+    news_list, news_sources, news_warnings, feed_loaded_at = load_bloomberg_news_feed(0)
+    if not news_list:
+        st.info("Carregando noticias...")
+        return
+
+    def esc(value) -> str:
+        return html.escape(str(value or ""), quote=True)
+
+    def news_text(item) -> str:
+        return f"{item.get('title_en', '')} {item.get('title_pt', '')} {item.get('summary', '')}".lower()
+
+    def compact_impact(item):
+        text = news_text(item)
+        source = str(item.get("source", "")).lower()
+        score = 0
+        rules = [
+            (5, ["fed", "fomc", "powell", "ecb", "boj", "boe", "copom", "bcb", "interest rate", "juros"]),
+            (5, ["cpi", "pce", "ppi", "inflation", "inflacao", "inflação"]),
+            (4, ["treasury", "treasuries", "yield", "yields", "dxy", "dollar", "oil", "crude", "brent", "wti"]),
+            (4, ["payroll", "jobs", "jobless", "gdp", "retail sales", "pmi", "ism"]),
+            (4, ["iran", "israel", "china", "russia", "war", "guerra", "sanctions", "ataque"]),
+            (3, ["s&p", "nasdaq", "dow", "stocks", "futuros", "bitcoin", "crypto"]),
+        ]
+        for weight, keywords in rules:
+            if any(keyword in text for keyword in keywords):
+                score += weight
+        if any(word in text for word in ["breaking", "urgent", "alert", "unexpected", "surprise"]):
+            score += 3
+        if any(name in source for name in ["financial", "reuters", "bloomberg", "cnbc"]):
+            score += 1
+        if score >= 12:
+            return "URGENTE", "#FF2D20"
+        if score >= 8:
+            return "ALTO", "#FF4B4B"
+        if score >= 4:
+            return "MEDIO", "#FF9800"
+        return "BAIXO", "#94A3B8"
+
+    def sort_key(item):
+        impact_label, _ = compact_impact(item)
+        impact_rank = {"URGENTE": 0, "ALTO": 1, "MEDIO": 2, "BAIXO": 3}
+        try:
+            ts = float(item.get("timestamp") or 0)
+        except Exception:
+            ts = 0
+        return (impact_rank.get(impact_label, 9), -ts)
+
+    filtered = sorted(news_list, key=sort_key)[:10]
+    st.markdown(
+        f"<div style='text-align:right; font-size:0.65rem; color:#666; margin-bottom:10px;'>NEWS: {esc(feed_loaded_at)} | {len(news_list)} itens</div>",
+        unsafe_allow_html=True,
+    )
+    for item in filtered:
+        title = esc(item.get("title_en") or item.get("title_pt") or item.get("title") or "---")
+        published = esc(item.get("published_str", "--:--"))
+        source = esc(item.get("source", "Financial Juice"))
+        link = esc(item.get("link", "#"))
+        impact_label, impact_color = compact_impact(item)
+        st.markdown(
+            f'''
+            <div style="border-bottom:1px solid #1f2937; padding:9px 0;">
+                <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
+                    <span style="font-size:0.68rem; color:#94A3B8;">{published} | {source}</span>
+                    <span style="font-size:0.62rem; color:{impact_color}; border:1px solid {impact_color}66; border-radius:4px; padding:1px 5px; font-weight:900;">{impact_label}</span>
+                </div>
+                <a href="{link}" target="_blank" rel="noopener noreferrer" style="display:block; color:#E5E7EB; text-decoration:none; font-size:0.78rem; line-height:1.35; font-weight:700; margin-top:4px;">{title}</a>
+            </div>
+            ''',
+            unsafe_allow_html=True,
+        )
+
+    for warning in news_warnings[:1]:
+        st.caption(warning)
+
+
 with st.sidebar:
     st.markdown("### 🧭 Navegação")
     page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📺 Terminal Bloomberg", "📰 Market Report", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=2, label_visibility="collapsed")
     
     st.markdown("---")
     
-    tab1, tab2 = st.tabs(["🌍 MERCADOS", "📅 CALENDÁRIO"])
+    tab1, tab2, tab3 = st.tabs(["🌍 MERCADOS", "📅 CALENDÁRIO", "NEWS"])
     with tab1: sidebar_mercados()
     with tab2: sidebar_calendario()
+    with tab3: sidebar_news()
 
 # Roteamento de Páginas
 if page == "📉 Terminal de Trading":
