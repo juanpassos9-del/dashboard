@@ -1731,11 +1731,95 @@ def pagina_terminal_bloomberg():
     </div>
     """, unsafe_allow_html=True)
 
+def render_terminal_global_right_rail():
+    st.markdown(
+        """
+        <style>
+        .block-container {
+            padding-right: 5.25rem;
+        }
+        .tg-right-rail {
+            position: fixed;
+            top: 5.25rem;
+            right: 0.65rem;
+            width: 3.55rem;
+            z-index: 999;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0.45rem;
+            padding: 0.55rem 0.4rem;
+            border: 1px solid #243244;
+            border-radius: 8px;
+            background: rgba(8, 13, 22, 0.94);
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+            backdrop-filter: blur(10px);
+        }
+        .tg-right-rail-title {
+            color: #00ffa3;
+            font-size: 0.68rem;
+            font-weight: 900;
+            line-height: 1;
+            text-align: center;
+            letter-spacing: 0;
+            padding-bottom: 0.45rem;
+            border-bottom: 1px solid #1f2937;
+        }
+        .tg-right-rail a,
+        .tg-right-rail span {
+            min-height: 2.1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #223044;
+            border-radius: 6px;
+            background: #0f1724;
+            color: #dbeafe;
+            font-size: 0.62rem;
+            font-weight: 900;
+            text-decoration: none;
+            letter-spacing: 0;
+        }
+        .tg-right-rail a:hover {
+            border-color: #00ffa3;
+            color: #00ffa3;
+            background: #111f2e;
+        }
+        .tg-right-rail-live {
+            color: #00ffa3 !important;
+            border-color: rgba(0, 255, 163, 0.35) !important;
+        }
+        @media (max-width: 1100px) {
+            .block-container {
+                padding-right: 1rem;
+            }
+            .tg-right-rail {
+                display: none;
+            }
+        }
+        </style>
+        <nav class="tg-right-rail" aria-label="Terminal Global">
+            <div class="tg-right-rail-title">TG</div>
+            <a href="#tg-top" title="Topo">TOP</a>
+            <a href="#tg-graficos" title="Graficos globais">GRF</a>
+            <a href="#tg-calendario" title="Calendario economico">CAL</a>
+            <a href="#tg-ia-macro" title="IA Macro TTS">IA</a>
+            <a href="#tg-historico" title="Historico IA">HIS</a>
+            <span class="tg-right-rail-live" title="Terminal Global ativo">LIVE</span>
+        </nav>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def pagina_terminal_global():
     """Página de Terminal Global."""
+    render_terminal_global_right_rail()
+    st.markdown("<div id='tg-top'></div>", unsafe_allow_html=True)
     painel_topo_global()
     
     st.markdown("---")
+    st.markdown("<div id='tg-graficos'></div>", unsafe_allow_html=True)
     
     global_chart_assets = {
         "USA500": {"tv": "USA500", "yf": "^GSPC"},
@@ -2072,6 +2156,7 @@ def secao_calendario_global_fragment():
     events.sort(key=lambda item: (item.get("time", "99:99"), impact_rank.get(item.get("impact", ""), 9)))
 
     st.markdown("---")
+    st.markdown("<div id='tg-calendario'></div>", unsafe_allow_html=True)
     st.markdown("#### Calendario Economico")
     source_label = next((event.get("source") for event in events if event.get("source")), "Supabase")
     st.caption(f"Eventos de hoje ({today_str}) | Horario de Brasilia | Fonte: {source_label}")
@@ -2158,6 +2243,7 @@ def secao_calendario_global_fragment():
                         unsafe_allow_html=True,
                     )
 
+                st.markdown("<div id='tg-ia-macro'></div>", unsafe_allow_html=True)
                 try:
                     from execution.macro_calendar_ai import interpret_event
                     if not analysis_event:
@@ -2258,6 +2344,7 @@ def secao_calendario_global_fragment():
                             f"</div>"
                             f"</div>"
                         )
+                    st.markdown("<div id='tg-historico'></div>", unsafe_allow_html=True)
                     st.markdown(
                         f"<div style='border:1px solid #334155; border-radius:8px; padding:16px; margin:0 0 16px 0; background:#0b1220;'>"
                         f"<div style='font-size:0.78rem; color:#94A3B8; font-weight:800; text-transform:uppercase; margin-bottom:8px;'>Historico IA Macro TTS - ultimos 5 eventos Investing divulgados</div>"
