@@ -46,6 +46,7 @@ def main():
 
     sync_json_file("market_report", ["market_report.json", "execution/market_report.json"])
     sync_json_file("market_report_daily", ["market_report_daily.json", "execution/market_report_daily.json"])
+    sync_json_file("calendario_economico", ["calendario_economico.json", "execution/calendario_economico.json"])
 
 
 if __name__ == "__main__":

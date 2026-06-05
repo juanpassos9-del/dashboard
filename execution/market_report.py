@@ -114,6 +114,24 @@ def _load_json_file(path, default):
         return default
 
 
+def _load_app_state_value(key, default):
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE") or os.getenv("SUPABASE_KEY")
+    if not supabase_url or not supabase_key:
+        return default
+    try:
+        from supabase import create_client
+
+        client = create_client(supabase_url, supabase_key)
+        response = client.table("app_state").select("value").eq("key", key).execute()
+        if response.data:
+            value = response.data[0].get("value")
+            return value if value is not None else default
+    except Exception as e:
+        print(f"[WARN] Supabase indisponivel para {key}: {e}")
+    return default
+
+
 def _extract_ai_text(response):
     text = getattr(response, "text", "") or ""
     text = text.strip()
@@ -397,8 +415,9 @@ def _calendar_scenario_lines(calendar_events, limit=5):
 
 
 def _load_calendar_events_for_report(date_str):
-    """Prioriza Investing ao vivo para Atual/Projecao/Anterior; usa cache apenas como backup."""
+    """Prioriza Investing ao vivo; usa Supabase/arquivo local como backup no Streamlit Cloud."""
     cached_calendar = _load_json_file("calendario_economico.json", [])
+    supabase_calendar = _load_app_state_value("calendario_economico", [])
     live_error = None
 
     try:
@@ -417,6 +436,12 @@ def _load_calendar_events_for_report(date_str):
         live_error = "Investing.com retornou calendario sem eventos relevantes para hoje."
     except Exception as e:
         live_error = str(e)
+
+    supabase_events = _select_calendar_events(supabase_calendar, date_str)
+    if supabase_events:
+        if live_error:
+            print(f"[WARN] Calendario Investing indisponivel; usando Supabase: {live_error}")
+        return supabase_events, "Supabase calendario_economico"
 
     cached_events = _select_calendar_events(cached_calendar, date_str)
     if cached_events:
