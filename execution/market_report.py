@@ -396,7 +396,40 @@ def _calendar_scenario_lines(calendar_events, limit=5):
     ]
 
 
-def _generate_local_report_text(slot_meta, date_str, local_data, global_data, news, previous_reports, calendar_events):
+def _load_calendar_events_for_report(date_str):
+    """Prioriza Investing ao vivo para Atual/Projecao/Anterior; usa cache apenas como backup."""
+    cached_calendar = _load_json_file("calendario_economico.json", [])
+    live_error = None
+
+    try:
+        from execution.fetch_calendar import _fetch_investing_calendar
+
+        print("[*] Coletando calendario economico Investing.com para o Market Report...")
+        live_calendar = _fetch_investing_calendar()
+        live_events = _select_calendar_events(live_calendar, date_str)
+        if live_events:
+            try:
+                with open("calendario_economico.json", "w", encoding="utf-8") as f:
+                    json.dump(live_calendar, f, ensure_ascii=False)
+            except Exception as e:
+                print(f"[WARN] Nao foi possivel atualizar calendario_economico.json: {e}")
+            return live_events, "Investing.com ao vivo"
+        live_error = "Investing.com retornou calendario sem eventos relevantes para hoje."
+    except Exception as e:
+        live_error = str(e)
+
+    cached_events = _select_calendar_events(cached_calendar, date_str)
+    if cached_events:
+        if live_error:
+            print(f"[WARN] Calendario Investing indisponivel; usando cache: {live_error}")
+        return cached_events, "Cache calendario_economico"
+
+    if live_error:
+        print(f"[WARN] Calendario Investing indisponivel e cache vazio: {live_error}")
+    return [], "Indisponivel"
+
+
+def _generate_local_report_text(slot_meta, date_str, local_data, global_data, news, previous_reports, calendar_events, calendar_source):
     spx = _find_asset(global_data, "s&p 500", "^gspc", "spy")
     nasdaq = _find_asset(global_data, "nasdaq", "^ixic")
     dxy = _find_asset(global_data, "dxy", "dx-y")
@@ -440,6 +473,7 @@ def _generate_local_report_text(slot_meta, date_str, local_data, global_data, ne
 
 ### Calendario economico e cenarios
 
+- **Fonte:** {calendar_source}.
 {chr(10).join(_calendar_scenario_lines(calendar_events))}
 
 ### Riscos radar
@@ -476,25 +510,13 @@ def generate_market_report(slot=None, force=False):
     try:
         local_data = _load_json_file("dados_mercado.json", {})
         global_data = _load_json_file("mercados_globais.json", {})
-        calendar_data = _load_json_file("calendario_economico.json", [])
 
         print(f"[*] Coletando noticias para o relatorio {slot}...")
         news = fetch_all_news(max_results=18, max_age_hours=12)
         news_context = "\n".join(
             [f"- [{n['source']}] {n['title']}: {n['summary']}" for n in news]
         )
-        calendar_events = _select_calendar_events(calendar_data, date_str)
-        if not calendar_events:
-            try:
-                from execution.fetch_calendar import _fetch_investing_calendar
-
-                live_calendar = _fetch_investing_calendar()
-                live_events = _select_calendar_events(live_calendar, date_str)
-                if live_events:
-                    calendar_data = live_calendar
-                    calendar_events = live_events
-            except Exception as e:
-                print(f"[WARN] Calendario ao vivo indisponivel para Market Report: {e}")
+        calendar_events, calendar_source = _load_calendar_events_for_report(date_str)
         calendar_context = "\n".join(_calendar_context_lines(calendar_events))
 
         slot_meta = REPORT_SLOTS[slot]
@@ -521,6 +543,7 @@ PRINCIPAIS NOTICIAS DO MOMENTO:
 {news_context}
 
 CALENDARIO ECONOMICO DE HOJE (HORARIO DE BRASILIA):
+Fonte: {calendar_source}
 {calendar_context}
 
 REPORTS JA REGISTRADOS HOJE:
@@ -548,7 +571,7 @@ Use Markdown compacto. Evite texto longo.
             report_text, provider, ai_errors = _generate_ai_report_text(prompt)
         else:
             print("[*] Gerando Market Report local sem chave de IA externa...")
-            report_text = _generate_local_report_text(slot_meta, date_str, local_data, global_data, news, previous_reports, calendar_events)
+            report_text = _generate_local_report_text(slot_meta, date_str, local_data, global_data, news, previous_reports, calendar_events, calendar_source)
             provider = "Local/sem chave IA"
             ai_errors = ["Nenhuma chave GOOGLE_API_KEY/GEMINI_API_KEY/OPENAI_API_KEY encontrada."]
         updated_at = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -559,6 +582,7 @@ Use Markdown compacto. Evite texto longo.
             "slot_window": slot_meta["window"],
             "report": report_text,
             "provider": provider,
+            "calendar_source": calendar_source,
             "fallback_errors": ai_errors,
             "updated_at": updated_at,
         }
