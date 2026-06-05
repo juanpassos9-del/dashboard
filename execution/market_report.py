@@ -3,10 +3,14 @@ import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-import google.generativeai as genai
 from dotenv import load_dotenv
 
 from execution.fetch_news import fetch_all_news
+
+try:
+    import google.generativeai as genai
+except Exception:
+    genai = None
 
 load_dotenv()
 
@@ -109,10 +113,93 @@ def _load_json_file(path, default):
         return default
 
 
-def generate_market_report(slot=None, force=False):
+def _extract_ai_text(response):
+    text = getattr(response, "text", "") or ""
+    text = text.strip()
+    if text:
+        return text
+    try:
+        parts = response.candidates[0].content.parts
+        text = "\n".join(getattr(part, "text", "") for part in parts).strip()
+    except Exception:
+        text = ""
+    return text
+
+
+def _generate_with_gemini(prompt, errors):
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
-        print("[!] Erro: GOOGLE_API_KEY/GEMINI_API_KEY nao encontrada.")
+        errors.append("Gemini sem GOOGLE_API_KEY/GEMINI_API_KEY.")
+        return None, None
+    if genai is None:
+        errors.append("Pacote google-generativeai indisponivel.")
+        return None, None
+
+    genai.configure(api_key=api_key)
+    model_names = [
+        os.getenv("MARKET_REPORT_GEMINI_MODEL", "").strip(),
+        "gemini-flash-latest",
+        "gemini-1.5-flash",
+    ]
+    for model_name in [name for name in model_names if name]:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            text = _extract_ai_text(response)
+            if text:
+                return text, f"Gemini/{model_name}"
+            errors.append(f"{model_name}: resposta vazia.")
+        except Exception as e:
+            errors.append(f"{model_name}: {e}")
+    return None, None
+
+
+def _generate_with_openai(prompt, errors):
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        errors.append("OpenAI sem OPENAI_API_KEY.")
+        return None, None
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key)
+        completion = client.chat.completions.create(
+            model=os.getenv("MARKET_REPORT_OPENAI_MODEL", "gpt-4o-mini"),
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Voce e um estrategista-chefe de mesa institucional. "
+                        "Responda em portugues do Brasil, com leitura macro objetiva."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.25,
+        )
+        text = (completion.choices[0].message.content or "").strip()
+        if text:
+            return text, f"OpenAI/{os.getenv('MARKET_REPORT_OPENAI_MODEL', 'gpt-4o-mini')}"
+        errors.append("OpenAI: resposta vazia.")
+    except Exception as e:
+        errors.append(f"OpenAI: {e}")
+    return None, None
+
+
+def _generate_ai_report_text(prompt):
+    errors = []
+    text, provider = _generate_with_gemini(prompt, errors)
+    if text:
+        return text, provider, errors
+    text, provider = _generate_with_openai(prompt, errors)
+    if text:
+        return text, provider, errors
+    raise RuntimeError("Falha nas IAs do Market Report: " + " | ".join(errors))
+
+
+def generate_market_report(slot=None, force=False):
+    if not (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY")):
+        print("[!] Erro: configure GOOGLE_API_KEY/GEMINI_API_KEY ou OPENAI_API_KEY.")
         return None
 
     now = _now_local()
@@ -136,9 +223,6 @@ def generate_market_report(slot=None, force=False):
             with open(LATEST_REPORT_FILE, "w", encoding="utf-8") as f:
                 json.dump(existing, f, ensure_ascii=False, indent=2)
             return existing
-
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-flash-latest")
 
     try:
         local_data = _load_json_file("dados_mercado.json", {})
@@ -190,14 +274,16 @@ Use Markdown compacto. Evite texto longo.
 """
 
         print("[*] Gerando Market Report via IA...")
-        response = model.generate_content(prompt)
+        report_text, provider, ai_errors = _generate_ai_report_text(prompt)
         updated_at = now.strftime("%Y-%m-%d %H:%M:%S")
         report = {
             "date": date_str,
             "slot": slot,
             "slot_label": slot_meta["label"],
             "slot_window": slot_meta["window"],
-            "report": response.text,
+            "report": report_text,
+            "provider": provider,
+            "fallback_errors": ai_errors,
             "updated_at": updated_at,
         }
 

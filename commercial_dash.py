@@ -858,26 +858,25 @@ def secao_market_report_fragment():
     st.caption("Atualizacao automatica: 07:05, 13:05 e 19:05 (Sao Paulo). Os reports ficam registrados ate virar o dia.")
 
     if st.button("Atualizar analise agora", type="primary", use_container_width=True, key="market_report_refresh_now"):
-        if not supabase:
-            st.error("Supabase indisponivel para salvar a analise.")
-        else:
-            with st.spinner("Gerando nova analise do Market Report..."):
+        with st.spinner("Gerando nova analise do Market Report..."):
+            try:
+                import json as _json
+                from execution.market_report import generate_market_report
+
                 try:
-                    import json as _json
-                    from execution.market_report import generate_market_report
+                    for secret_key in ("GOOGLE_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"):
+                        secret_value = st.secrets.get(secret_key, "")
+                        if secret_value:
+                            os.environ[secret_key] = secret_value
+                except Exception:
+                    pass
 
-                    try:
-                        for secret_key in ("GOOGLE_API_KEY", "GEMINI_API_KEY"):
-                            secret_value = st.secrets.get(secret_key, "")
-                            if secret_value:
-                                os.environ[secret_key] = secret_value
-                    except Exception:
-                        pass
-
-                    generated = generate_market_report(force=True)
-                    if not generated:
-                        st.warning("Nao foi possivel gerar uma nova analise agora.")
-                    else:
+                generated = generate_market_report(force=True)
+                if not generated:
+                    st.warning("Nao foi possivel gerar uma nova analise agora. Verifique as chaves GOOGLE_API_KEY/GEMINI_API_KEY ou OPENAI_API_KEY.")
+                else:
+                    st.session_state["market_report_last_generated"] = generated
+                    if supabase:
                         for key, paths in {
                             "market_report": ["market_report.json", "execution/market_report.json"],
                             "market_report_daily": ["market_report_daily.json", "execution/market_report_daily.json"],
@@ -891,10 +890,17 @@ def secao_market_report_fragment():
                                             "updated_at": "now()",
                                         }).execute()
                                     break
-                        st.success("Analise atualizada.")
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"Erro ao atualizar Market Report: {e}")
+                        st.success("Analise atualizada e salva.")
+                    else:
+                        st.warning("Analise gerada, mas Supabase esta indisponivel para salvar no historico online.")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao atualizar Market Report: {e}")
+
+    if st.session_state.get("market_report_last_generated"):
+        generated = st.session_state["market_report_last_generated"]
+        if isinstance(generated, dict) and generated not in reports:
+            reports.append(generated)
 
     if not reports:
         st.info("Nenhum Market Report registrado para hoje ainda.")
@@ -908,7 +914,7 @@ def secao_market_report_fragment():
         <div style="background: #0A0A0A; border: 1px solid #1a1a1a; border-top: 4px solid #FF9800; padding: 22px; border-radius: 8px; margin: 15px 0;">
             <div style="display: flex; justify-content: space-between; gap: 15px; align-items: center; margin-bottom: 12px;">
                 <h3 style="margin: 0; color: #FF9800; font-family: 'Inter', sans-serif;">ULTIMO REPORT: {sanitize_text(latest.get('slot_label', 'Market Report')).upper()}</h3>
-                <span style="color: #777; font-size: 0.75rem; font-family: 'Roboto Mono', monospace;">{latest.get('updated_at', '---')}</span>
+                <span style="color: #777; font-size: 0.75rem; font-family: 'Roboto Mono', monospace;">{latest.get('updated_at', '---')} | {sanitize_text(latest.get('provider', 'IA'))}</span>
             </div>
             <div style="color: #CCC; font-size: 0.9rem; line-height: 1.6; font-family: 'Inter', sans-serif;">
                 {sanitize_text(latest.get('report', '')).replace(chr(10), '<br>')}
