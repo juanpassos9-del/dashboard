@@ -861,6 +861,7 @@ def secao_market_report_fragment():
         snapshots = {
             "mercados_globais.json": get_global_markets_data(),
             "dados_mercado.json": fetch_app_state_cached("dados_mercado"),
+            "calendario_economico.json": get_calendar_data(),
         }
         for path, value in snapshots.items():
             if value:
