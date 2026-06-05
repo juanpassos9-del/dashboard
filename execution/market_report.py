@@ -197,11 +197,99 @@ def _generate_ai_report_text(prompt):
     raise RuntimeError("Falha nas IAs do Market Report: " + " | ".join(errors))
 
 
-def generate_market_report(slot=None, force=False):
-    if not (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY")):
-        print("[!] Erro: configure GOOGLE_API_KEY/GEMINI_API_KEY ou OPENAI_API_KEY.")
-        return None
+def _flatten_assets(global_data):
+    categories = global_data.get("categories", global_data) if isinstance(global_data, dict) else {}
+    assets = []
+    if isinstance(categories, dict):
+        for items in categories.values():
+            if isinstance(items, list):
+                assets.extend([item for item in items if isinstance(item, dict)])
+    return assets
 
+
+def _find_asset(global_data, *names):
+    names_norm = [name.lower() for name in names]
+    for item in _flatten_assets(global_data):
+        item_name = str(item.get("name", "")).lower()
+        item_symbol = str(item.get("symbol", "")).lower()
+        if any(name in item_name or name in item_symbol for name in names_norm):
+            return item
+    return {}
+
+
+def _fmt_asset(item):
+    if not item:
+        return "---"
+    name = item.get("name", "Ativo")
+    price = item.get("price", "---")
+    change = item.get("change", 0)
+    try:
+        price_txt = f"{float(price):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except Exception:
+        price_txt = str(price)
+    try:
+        change_txt = f"{float(change):+.2f}%"
+    except Exception:
+        change_txt = str(change)
+    return f"{name}: {price_txt} ({change_txt})"
+
+
+def _change(item):
+    try:
+        return float(item.get("change", 0))
+    except Exception:
+        return 0.0
+
+
+def _generate_local_report_text(slot_meta, date_str, local_data, global_data, news, previous_reports):
+    spx = _find_asset(global_data, "s&p 500", "^gspc", "spy")
+    nasdaq = _find_asset(global_data, "nasdaq", "^ixic")
+    dxy = _find_asset(global_data, "dxy", "dx-y")
+    us10y = _find_asset(global_data, "us 10y", "^tnx")
+    brent = _find_asset(global_data, "brent", "bz=f")
+    gold = _find_asset(global_data, "gold", "gc=f")
+    vix = _find_asset(global_data, "vix", "^vix")
+    usbrl = _find_asset(global_data, "usdbrl", "brl=x")
+
+    risk_score = 0
+    risk_score += 1 if _change(spx) > 0 else -1
+    risk_score += 1 if _change(nasdaq) > 0 else -1
+    risk_score += 1 if _change(vix) < 0 else -1
+    risk_score += 1 if _change(dxy) < 0 else -1
+    risk_score += 1 if _change(us10y) < 0 else -1
+    risk_label = "risk-on moderado" if risk_score >= 2 else ("risk-off moderado" if risk_score <= -2 else "neutro/seletivo")
+
+    news_lines = []
+    for item in news[:5]:
+        source = item.get("source", "Fonte")
+        title = item.get("title", "")
+        if title:
+            news_lines.append(f"- [{source}] {title}")
+    if not news_lines:
+        news_lines.append("- Sem manchetes novas relevantes no feed RSS no momento.")
+
+    return f"""### DRIVERS DO MOMENTO
+
+- Leitura local de emergencia porque nenhuma chave de IA externa foi encontrada no ambiente online.
+- Regime de mercado: **{risk_label}**, combinando indices, VIX, DXY e juros americanos.
+- Painel macro: {_fmt_asset(spx)} | {_fmt_asset(nasdaq)} | {_fmt_asset(vix)}
+- Juros/moedas/commodities: {_fmt_asset(us10y)} | {_fmt_asset(dxy)} | {_fmt_asset(usbrl)} | {_fmt_asset(brent)} | {_fmt_asset(gold)}
+
+### GLOBAL VS BRASIL
+
+- Se S&P/Nasdaq sustentam alta com DXY e US10Y cedendo, o pano de fundo favorece ativos de risco e fluxo para emergentes.
+- Se DXY/juros virarem para cima, o risco principal e compressao de multiplos em tecnologia, pressao em commodities e piora de fluxo para Brasil.
+- Para Brasil, observe a combinacao **USDBRL + EWZ/IBOV + commodities** antes de assumir direcao unica.
+
+### RISCOS RADAR
+
+{chr(10).join(news_lines)}
+
+Viés tatico: **{risk_label}**, com confirmacao exigida por DXY, US10Y, petroleo e indices americanos.
+"""
+
+
+def generate_market_report(slot=None, force=False):
     now = _now_local()
     date_str = now.strftime("%Y-%m-%d")
     slot = slot or get_report_slot(now, force=force)
@@ -273,8 +361,16 @@ INSTRUCOES:
 Use Markdown compacto. Evite texto longo.
 """
 
-        print("[*] Gerando Market Report via IA...")
-        report_text, provider, ai_errors = _generate_ai_report_text(prompt)
+        ai_errors = []
+        has_external_ai_key = bool(os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY"))
+        if has_external_ai_key:
+            print("[*] Gerando Market Report via IA...")
+            report_text, provider, ai_errors = _generate_ai_report_text(prompt)
+        else:
+            print("[*] Gerando Market Report local sem chave de IA externa...")
+            report_text = _generate_local_report_text(slot_meta, date_str, local_data, global_data, news, previous_reports)
+            provider = "Local/sem chave IA"
+            ai_errors = ["Nenhuma chave GOOGLE_API_KEY/GEMINI_API_KEY/OPENAI_API_KEY encontrada."]
         updated_at = now.strftime("%Y-%m-%d %H:%M:%S")
         report = {
             "date": date_str,

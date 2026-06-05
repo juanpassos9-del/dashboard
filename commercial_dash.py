@@ -873,7 +873,7 @@ def secao_market_report_fragment():
 
                 generated = generate_market_report(force=True)
                 if not generated:
-                    st.warning("Nao foi possivel gerar uma nova analise agora. Verifique as chaves GOOGLE_API_KEY/GEMINI_API_KEY ou OPENAI_API_KEY.")
+                    st.warning("Nao foi possivel gerar uma nova analise agora. O fallback local tambem falhou; verifique os logs do Streamlit e as fontes de dados.")
                 else:
                     st.session_state["market_report_last_generated"] = generated
                     if supabase:
