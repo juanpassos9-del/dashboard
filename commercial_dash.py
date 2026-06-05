@@ -857,6 +857,19 @@ def secao_market_report_fragment():
     st.markdown("### Market Report")
     st.caption("Atualizacao automatica: 07:05, 13:05 e 19:05 (Sao Paulo). Os reports ficam registrados ate virar o dia.")
 
+    def prime_market_report_files():
+        snapshots = {
+            "mercados_globais.json": get_global_markets_data(),
+            "dados_mercado.json": fetch_app_state_cached("dados_mercado"),
+        }
+        for path, value in snapshots.items():
+            if value:
+                try:
+                    with open(path, "w", encoding="utf-8") as f:
+                        _json.dump(value, f, ensure_ascii=False, indent=2)
+                except Exception as e:
+                    print(f"[WARN] Falha ao preparar {path} para Market Report: {e}")
+
     if st.button("Atualizar analise agora", type="primary", use_container_width=True, key="market_report_refresh_now"):
         with st.spinner("Gerando nova analise do Market Report..."):
             try:
@@ -871,6 +884,7 @@ def secao_market_report_fragment():
                 except Exception:
                     pass
 
+                prime_market_report_files()
                 generated = generate_market_report(force=True)
                 if not generated:
                     st.warning("Nao foi possivel gerar uma nova analise agora. O fallback local tambem falhou; verifique os logs do Streamlit e as fontes de dados.")
@@ -916,11 +930,10 @@ def secao_market_report_fragment():
                 <h3 style="margin: 0; color: #FF9800; font-family: 'Inter', sans-serif;">ULTIMO REPORT: {sanitize_text(latest.get('slot_label', 'Market Report')).upper()}</h3>
                 <span style="color: #777; font-size: 0.75rem; font-family: 'Roboto Mono', monospace;">{latest.get('updated_at', '---')} | {sanitize_text(latest.get('provider', 'IA'))}</span>
             </div>
-            <div style="color: #CCC; font-size: 0.9rem; line-height: 1.6; font-family: 'Inter', sans-serif;">
-                {sanitize_text(latest.get('report', '')).replace(chr(10), '<br>')}
-            </div>
         </div>
     """, unsafe_allow_html=True)
+    with st.container():
+        st.markdown(latest.get("report", ""))
 
     tab_labels = [
         f"{report.get('slot_label', report.get('slot', 'Report'))} - {report.get('updated_at', '---')[-8:-3]}"
@@ -933,7 +946,7 @@ def secao_market_report_fragment():
                 f"**Janela:** `{report.get('slot_window', '---')}`  "
                 f"**Atualizado:** `{report.get('updated_at', '---')}`"
             )
-            st.markdown(sanitize_text(report.get("report", "")))
+            st.markdown(report.get("report", ""))
 
 
 @st.fragment(run_every=2)

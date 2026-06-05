@@ -241,6 +241,44 @@ def _change(item):
         return 0.0
 
 
+def _has_asset(item):
+    return isinstance(item, dict) and bool(item.get("name") or item.get("symbol"))
+
+
+def _asset_line(*items):
+    present = [_fmt_asset(item) for item in items if _has_asset(item)]
+    return " | ".join(present) if present else "Dados de mercado indisponiveis no cache."
+
+
+def _score_from_asset(item, positive_when_up=True):
+    if not _has_asset(item):
+        return 0
+    change = _change(item)
+    if abs(change) < 0.01:
+        return 0
+    if positive_when_up:
+        return 1 if change > 0 else -1
+    return 1 if change < 0 else -1
+
+
+def _dominant_news_theme(news):
+    text = " ".join(f"{item.get('title', '')} {item.get('summary', '')}" for item in news).lower()
+    themes = [
+        ("Payroll/Fed", ["payroll", "jobs", "fed", "fomc", "powell", "juros", "rate"]),
+        ("Inflação", ["inflation", "cpi", "pce", "ppi", "inflação"]),
+        ("Geopolítica", ["israel", "iran", "russia", "china", "war", "sanction", "guerra"]),
+        ("Commodities", ["oil", "brent", "wti", "gold", "commodity", "petróleo", "ouro"]),
+        ("Tecnologia/IA", ["ai", "chips", "nvidia", "technology", "tech", "semiconductor"]),
+    ]
+    hits = []
+    for label, keywords in themes:
+        score = sum(text.count(keyword) for keyword in keywords)
+        if score:
+            hits.append((score, label))
+    hits.sort(reverse=True)
+    return hits[0][1] if hits else "macro global"
+
+
 def _generate_local_report_text(slot_meta, date_str, local_data, global_data, news, previous_reports):
     spx = _find_asset(global_data, "s&p 500", "^gspc", "spy")
     nasdaq = _find_asset(global_data, "nasdaq", "^ixic")
@@ -252,12 +290,13 @@ def _generate_local_report_text(slot_meta, date_str, local_data, global_data, ne
     usbrl = _find_asset(global_data, "usdbrl", "brl=x")
 
     risk_score = 0
-    risk_score += 1 if _change(spx) > 0 else -1
-    risk_score += 1 if _change(nasdaq) > 0 else -1
-    risk_score += 1 if _change(vix) < 0 else -1
-    risk_score += 1 if _change(dxy) < 0 else -1
-    risk_score += 1 if _change(us10y) < 0 else -1
-    risk_label = "risk-on moderado" if risk_score >= 2 else ("risk-off moderado" if risk_score <= -2 else "neutro/seletivo")
+    risk_score += _score_from_asset(spx)
+    risk_score += _score_from_asset(nasdaq)
+    risk_score += _score_from_asset(vix, positive_when_up=False)
+    risk_score += _score_from_asset(dxy, positive_when_up=False)
+    risk_score += _score_from_asset(us10y, positive_when_up=False)
+    risk_label = "Risk-on moderado" if risk_score >= 2 else ("Risk-off moderado" if risk_score <= -2 else "Neutro/seletivo")
+    dominant_theme = _dominant_news_theme(news)
 
     news_lines = []
     for item in news[:5]:
@@ -268,24 +307,25 @@ def _generate_local_report_text(slot_meta, date_str, local_data, global_data, ne
     if not news_lines:
         news_lines.append("- Sem manchetes novas relevantes no feed RSS no momento.")
 
-    return f"""### DRIVERS DO MOMENTO
+    return f"""### Drivers do momento
 
-- Leitura local de emergencia porque nenhuma chave de IA externa foi encontrada no ambiente online.
-- Regime de mercado: **{risk_label}**, combinando indices, VIX, DXY e juros americanos.
-- Painel macro: {_fmt_asset(spx)} | {_fmt_asset(nasdaq)} | {_fmt_asset(vix)}
-- Juros/moedas/commodities: {_fmt_asset(us10y)} | {_fmt_asset(dxy)} | {_fmt_asset(usbrl)} | {_fmt_asset(brent)} | {_fmt_asset(gold)}
+- **Regime:** {risk_label}. A leitura combina indices americanos, volatilidade, DXY e juros longos.
+- **Tema dominante do radar:** {dominant_theme}. O mercado tende a precificar primeiro o impacto em Fed/juros, depois reflexo em DXY, commodities e indices.
+- **Indices/volatilidade:** {_asset_line(spx, nasdaq, vix)}
+- **Juros, moedas e commodities:** {_asset_line(us10y, dxy, usbrl, brent, gold)}
 
-### GLOBAL VS BRASIL
+### Global vs Brasil
 
-- Se S&P/Nasdaq sustentam alta com DXY e US10Y cedendo, o pano de fundo favorece ativos de risco e fluxo para emergentes.
-- Se DXY/juros virarem para cima, o risco principal e compressao de multiplos em tecnologia, pressao em commodities e piora de fluxo para Brasil.
-- Para Brasil, observe a combinacao **USDBRL + EWZ/IBOV + commodities** antes de assumir direcao unica.
+- **Juros EUA:** queda em US10Y favorece duration, Nasdaq e ativos de risco; alta nos yields aumenta risco de compressao de multiplos.
+- **DXY/BRL:** DXY fraco e USDBRL cedendo aliviam emergentes; DXY forte muda o foco para protecao cambial e reduz apetite por Brasil.
+- **Commodities:** petroleo e ouro ajudam a separar choque inflacionario de busca por protecao. Petroleo em alta com yields subindo tende a ser mais risk-off.
+- **Brasil:** viés depende da combinacao EWZ/IBOV, USDBRL e commodities. Sem confirmacao nesses tres eixos, evitar leitura direcional agressiva.
 
-### RISCOS RADAR
+### Riscos radar
 
 {chr(10).join(news_lines)}
 
-Viés tatico: **{risk_label}**, com confirmacao exigida por DXY, US10Y, petroleo e indices americanos.
+**Viés tatico:** {risk_label}. Confirmar pelo comportamento conjunto de DXY, US10Y, petroleo, S&P 500 e Nasdaq.
 """
 
 
