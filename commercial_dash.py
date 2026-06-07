@@ -2801,6 +2801,136 @@ def pagina_correlacao():
     """
     components.html(tv_html_currencies, height=c_height + 20)
 
+    def render_macro_class_chart(title, description, container_id, main_symbol, main_color, overlays):
+        studies = ",\n          ".join(
+            [
+                '{{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "{}" }}, "plots": {{ "Plot": {{ "color": "{}" }} }} }}'.format(symbol, color)
+                for symbol, color, _label in overlays
+            ]
+        )
+        legend_items = "".join(
+            [
+                f"<span style='display:inline-flex; align-items:center; gap:6px; margin-right:14px; margin-bottom:6px; color:#CBD5E1; font-size:0.78rem;'><i style='width:10px; height:10px; border-radius:50%; background:{color}; display:inline-block;'></i>{label}</span>"
+                for symbol, color, label in [(main_symbol, main_color, "Base")] + overlays
+            ]
+        )
+        st.markdown(f"#### {title}")
+        st.markdown(
+            f"<div style='color:#94A3B8; font-size:0.84rem; margin-bottom:8px;'>{description}</div>"
+            f"<div style='margin-bottom:10px;'>{legend_items}</div>",
+            unsafe_allow_html=True,
+        )
+        tv_html_class = f"""
+        <div class="tradingview-widget-container" style="height: {c_height}px; width: 100%;">
+          <div id="{container_id}" style="height: 100%; width: 100%;"></div>
+          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+          <script type="text/javascript">
+          new TradingView.widget(
+          {{
+            "autosize": true,
+            "symbol": "{main_symbol}",
+            "interval": "{interval}",
+            "timezone": "America/Sao_Paulo",
+            "theme": "{theme}",
+            "style": "2",
+            "locale": "br",
+            "toolbar_bg": "#f1f3f6",
+            "enable_publishing": false,
+            "hide_top_toolbar": false,
+            "hide_side_toolbar": true,
+            "allow_symbol_change": true,
+            "save_image": true,
+            "details": false,
+            "hotlist": false,
+            "calendar": false,
+            "hide_volume": true,
+            "container_id": "{container_id}",
+            "overrides": {{
+                "mainSeriesProperties.lineStyle.color": "{main_color}",
+                "mainSeriesProperties.lineStyle.linewidth": 3,
+                "scalesProperties.scaleMode": 2
+            }},
+            "studies": [
+              {studies}
+            ]
+          }}
+          );
+          </script>
+        </div>
+        """
+        components.html(tv_html_class, height=c_height + 20)
+
+    st.markdown("---")
+    st.markdown("### Comparativos por Classe Macro")
+    st.markdown(
+        "<p style='color:#94A3B8; font-size:0.88rem;'>Quatro leituras separadas por classe para comparar energia/metais, moedas, bolsas e juros globais na mesma escala visual.</p>",
+        unsafe_allow_html=True,
+    )
+
+    left_col, right_col = st.columns(2, gap="large")
+    with left_col:
+        render_macro_class_chart(
+            "Commodities",
+            "Energia, metais industriais e metais preciosos.",
+            "tradingview_macro_commodities_v1",
+            "TVC:UKOIL",
+            "#22C55E",
+            [
+                ("TVC:USOIL", "#F97316", "Petroleo WTI"),
+                ("TVC:NATGAS", "#60A5FA", "Gas natural"),
+                ("COMEX:HG1!", "#D97706", "Cobre"),
+                ("SGX:FEF1!", "#94A3B8", "Minerio ferro"),
+                ("COMEX:HRC1!", "#E2E8F0", "Aco HRC"),
+                ("TVC:GOLD", "#FACC15", "Ouro"),
+            ],
+        )
+        render_macro_class_chart(
+            "Equity",
+            "Volatilidade e indices globais: EUA, Brasil, Europa e Japao.",
+            "tradingview_macro_equity_v1",
+            "SP:SPX",
+            "#A855F7",
+            [
+                ("CBOE:VIX", "#EF4444", "VIX"),
+                ("TVC:NI225", "#38BDF8", "Nikkei"),
+                ("BMFBOVESPA:IBOV", "#22C55E", "IBOV"),
+                ("TVC:SX5E", "#F97316", "EuroStoxx"),
+                ("CME_MINI:RTY1!", "#FACC15", "RTY"),
+                ("NASDAQ:NDX", "#60A5FA", "Nasdaq"),
+            ],
+        )
+    with right_col:
+        render_macro_class_chart(
+            "FX",
+            "Moedas de commodities, safe havens/majors, emergentes e carry.",
+            "tradingview_macro_fx_v1",
+            "CAPITALCOM:DXY",
+            "#F8FAFC",
+            [
+                ("OANDA:AUDUSD", "#22C55E", "AUDUSD"),
+                ("OANDA:USDCAD", "#F97316", "USDCAD"),
+                ("OANDA:GBPUSD", "#A855F7", "GBPUSD"),
+                ("OANDA:EURUSD", "#38BDF8", "EURUSD"),
+                ("FX_IDC:USDBRL", "#FACC15", "USDBRL"),
+                ("OANDA:USDJPY", "#EF4444", "USDJPY"),
+            ],
+        )
+        render_macro_class_chart(
+            "Bonds",
+            "Curvas globais: EUA, Brasil, Japao, Italia e Alemanha.",
+            "tradingview_macro_bonds_v1",
+            "OTCB:US10Y",
+            "#FF9800",
+            [
+                ("OTCB:US02Y", "#FACC15", "2Y USA"),
+                ("OTCB:US30Y", "#00BFFF", "30Y USA"),
+                ("TVC:BR02Y", "#22C55E", "2Y BR"),
+                ("TVC:JP20Y", "#A855F7", "20Y JP"),
+                ("TVC:IT10Y", "#EF4444", "10Y Italia"),
+                ("TVC:DE10Y", "#38BDF8", "10Y Alemanha"),
+            ],
+        )
+
 
 def render_tv_corr(container_id, main_sym, comp_sym, interval, height):
     """(Mantido para compatibilidade se necessário futuramente)"""
