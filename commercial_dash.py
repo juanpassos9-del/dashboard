@@ -2871,17 +2871,16 @@ def pagina_correlacao():
     with left_col:
         render_macro_class_chart(
             "Commodities",
-            "Energia, metais industriais e metais preciosos.",
+            "Energia, metais industriais e metais preciosos pela fonte ActivTrades.",
             "tradingview_macro_commodities_v1",
-            "TVC:UKOIL",
+            "ACTIVTRADES:BRENT",
             "#22C55E",
             [
-                ("TVC:USOIL", "#F97316", "Petroleo WTI"),
-                ("TVC:NATGAS", "#60A5FA", "Gas natural"),
-                ("COMEX:HG1!", "#D97706", "Cobre"),
-                ("SGX:FEF1!", "#94A3B8", "Minerio ferro"),
-                ("COMEX:HRC1!", "#E2E8F0", "Aco HRC"),
-                ("TVC:GOLD", "#FACC15", "Ouro"),
+                ("ACTIVTRADES:LCRUDE", "#F97316", "Petroleo WTI"),
+                ("ACTIVTRADES:NGAS", "#60A5FA", "Gas natural"),
+                ("ACTIVTRADES:COPPER", "#D97706", "Cobre"),
+                ("ACTIVTRADES:GOLD", "#FACC15", "Ouro"),
+                ("ACTIVTRADES:SILVER", "#E2E8F0", "Prata"),
             ],
         )
         render_macro_class_chart(
