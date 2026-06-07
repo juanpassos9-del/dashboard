@@ -153,6 +153,8 @@ def fetch_global_data(save_file=True):
                     continue
                 
                 last_price = clean_df['Close'].iloc[-1]
+                high_price = clean_df['High'].max() if 'High' in clean_df.columns else last_price
+                low_price = clean_df['Low'].min() if 'Low' in clean_df.columns else last_price
                 
                 daily_df = ticker_df.resample('D').last().dropna(subset=['Close'])
                 if len(daily_df) >= 2:
@@ -165,8 +167,10 @@ def fetch_global_data(save_file=True):
                 cat_results.append({
                     "name": name,
                     "symbol": ticker_symbol,
-                    "price": round(last_price, 2) if last_price > 10 else round(last_price, 4),
-                    "change": round(change, 2)
+                    "price": float(round(last_price, 2) if last_price > 10 else round(last_price, 4)),
+                    "high": float(round(high_price, 2) if high_price > 10 else round(high_price, 4)),
+                    "low": float(round(low_price, 2) if low_price > 10 else round(low_price, 4)),
+                    "change": float(round(change, 2))
                 })
                 valid_data_count += 1
             except Exception as e:
