@@ -2802,7 +2802,7 @@ def pagina_correlacao():
     components.html(tv_html_currencies, height=c_height + 20)
 
     def render_macro_class_chart(title, description, container_id, main_symbol, main_color, overlays):
-        class_chart_height = min(c_height, 560)
+        class_chart_height = max(760, min(c_height, 980))
         studies = ",\n          ".join(
             [
                 '{{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "{}" }}, "plots": {{ "Plot": {{ "color": "{}" }} }} }}'.format(symbol, color)
