@@ -6,6 +6,39 @@ import time
 from datetime import datetime
 
 
+def _download_market_batches(tickers, batch_size=5):
+    data_parts = []
+    for i in range(0, len(tickers), batch_size):
+        batch = tickers[i:i + batch_size]
+        print(f"[*] Baixando lote {i // batch_size + 1}: {', '.join(batch)}")
+        batch_data = None
+        for attempt in range(3):
+            try:
+                batch_data = yf.download(
+                    batch,
+                    period="5d",
+                    interval="1m",
+                    prepost=True,
+                    group_by="ticker",
+                    progress=False,
+                    timeout=20,
+                    threads=False,
+                )
+                if batch_data is not None and not batch_data.empty:
+                    data_parts.append(batch_data)
+                    break
+            except Exception as e:
+                print(f"[!] Lote {i // batch_size + 1} tentativa {attempt + 1} falhou: {e}")
+                time.sleep(5)
+        if batch_data is None or batch_data.empty:
+            print(f"[!] Lote sem dados: {', '.join(batch)}")
+        time.sleep(3)
+
+    if not data_parts:
+        return None
+    return pd.concat(data_parts, axis=1)
+
+
 def fetch_global_data(save_file=True):
     # Estrutura de categorias e nomes amigáveis
     categories_config = {
@@ -85,16 +118,8 @@ def fetch_global_data(save_file=True):
     
     print(f"[*] Buscando dados para {len(all_tickers)} ativos via yfinance...")
     
-    # 2. Busca em lote (batch) com retentativa
-    data = None
-    for attempt in range(3):
-        try:
-            data = yf.download(all_tickers, period="5d", interval="1m", prepost=True, group_by='ticker', progress=False, timeout=20)
-            if not data.empty:
-                break
-        except Exception as e:
-            print(f"[!] Tentativa {attempt+1} falhou: {e}")
-            time.sleep(2)
+    # 2. Busca em mini-lotes com retentativa para reduzir rate limit no Streamlit Cloud
+    data = _download_market_batches(all_tickers, batch_size=5)
 
     if data is None or data.empty:
         print("[!] Erro crítico: Não foi possível baixar dados do Yahoo Finance.")
@@ -114,10 +139,15 @@ def fetch_global_data(save_file=True):
         cat_results = []
         for name, ticker_symbol in symbols_map.items():
             try:
-                if ticker_symbol not in data.columns.levels[0] if isinstance(data.columns, pd.MultiIndex) else [ticker_symbol]:
+                if isinstance(data.columns, pd.MultiIndex):
+                    if ticker_symbol not in set(data.columns.get_level_values(0)):
+                        continue
+                    ticker_df = data[ticker_symbol]
+                elif ticker_symbol in data.columns:
+                    ticker_df = data
+                else:
                     continue
-                    
-                ticker_df = data[ticker_symbol]
+
                 clean_df = ticker_df.dropna(subset=['Close'])
                 if clean_df.empty:
                     continue
@@ -147,8 +177,8 @@ def fetch_global_data(save_file=True):
     # Só salva se tivermos dados mínimos (ex: pelo menos 5 ativos válidos)
     if valid_data_count > 5:
         if save_file:
-            with open("mercados_globais.json", "w") as f:
-                json.dump(results, f)
+            with open("mercados_globais.json", "w", encoding="utf-8") as f:
+                json.dump(results, f, ensure_ascii=False)
         print(f"[+] Sucesso: {valid_data_count} ativos atualizados.")
         return results
     else:
