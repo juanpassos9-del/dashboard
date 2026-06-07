@@ -2886,17 +2886,17 @@ def pagina_correlacao():
         )
         render_macro_class_chart(
             "Equity",
-            "Volatilidade e indices globais: EUA, Brasil, Europa e Japao.",
+            "Indices globais pela fonte ActivTrades: volatilidade, EUA, Brasil, Europa e Japao.",
             "tradingview_macro_equity_v1",
-            "SP:SPX",
+            "ACTIVTRADES:USA500",
             "#A855F7",
             [
-                ("CBOE:VIX", "#EF4444", "VIX"),
-                ("TVC:NI225", "#38BDF8", "Nikkei"),
-                ("BMFBOVESPA:IBOV", "#22C55E", "IBOV"),
-                ("TVC:SX5E", "#F97316", "EuroStoxx"),
-                ("CME_MINI:RTY1!", "#FACC15", "RTY"),
-                ("NASDAQ:NDX", "#60A5FA", "Nasdaq"),
+                ("ACTIVTRADES:USAVIX1!", "#EF4444", "VIX"),
+                ("ACTIVTRADES:JP225", "#38BDF8", "Nikkei"),
+                ("ACTIVTRADES:BRA50", "#22C55E", "IBOV/BRA50"),
+                ("ACTIVTRADES:EURO50", "#F97316", "EuroStoxx"),
+                ("ACTIVTRADES:USARUS", "#FACC15", "RTY/Russell"),
+                ("ACTIVTRADES:USATEC", "#60A5FA", "Nasdaq"),
             ],
         )
     with right_col:
