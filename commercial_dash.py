@@ -2891,7 +2891,7 @@ def pagina_correlacao():
             "ACTIVTRADES:USA500",
             "#A855F7",
             [
-                ("ACTIVTRADES:USAVIX1!", "#EF4444", "VIX"),
+                ("ACTIVTRADES:VXX.US", "#EF4444", "VIX/VXX"),
                 ("ACTIVTRADES:JP225", "#38BDF8", "Nikkei"),
                 ("ACTIVTRADES:BRA50", "#22C55E", "IBOV/BRA50"),
                 ("ACTIVTRADES:EURO50", "#F97316", "EuroStoxx"),
