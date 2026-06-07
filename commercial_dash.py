@@ -1073,7 +1073,10 @@ def painel_topo_global():
         }
         .tg-heatmap-card.up { background: linear-gradient(180deg, #21c45a 0%, #15803d 100%); }
         .tg-heatmap-card.down { background: linear-gradient(180deg, #ff3138 0%, #b91c1c 100%); }
-        .tg-heatmap-card.flat { background: linear-gradient(180deg, #5f5362 0%, #3f3947 100%); }
+        .tg-heatmap-card.flat {
+            background: linear-gradient(180deg, #ffe600 0%, #d6b600 100%);
+            color: #111827;
+        }
         .tg-heatmap-symbol {
             font-size: 0.72rem;
             line-height: 1;
