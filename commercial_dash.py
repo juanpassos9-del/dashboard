@@ -2925,6 +2925,8 @@ def pagina_correlacao():
                 ("OTCB:US02Y", "#FACC15", "2Y USA"),
                 ("OTCB:US30Y", "#00BFFF", "30Y USA"),
                 ("BMFBOVESPA:DI1F2029", "#22C55E", "DI1F2029 BR"),
+                ("BMFBOVESPA:DI1F2032", "#14B8A6", "DI1F2032 BR"),
+                ("BMFBOVESPA:DI1F2035", "#84CC16", "DI1F2035 BR"),
                 ("OANDA:DE10YBEUR", "#38BDF8", "10Y Alemanha"),
             ],
         )
