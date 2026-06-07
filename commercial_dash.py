@@ -2878,7 +2878,7 @@ def pagina_correlacao():
             [
                 ("ACTIVTRADES:LCRUDE", "#F97316", "Petroleo WTI"),
                 ("ACTIVTRADES:NGAS", "#60A5FA", "Gas natural"),
-                ("ACTIVTRADES:COPPER", "#D97706", "Cobre"),
+                ("ACTIVTRADES:COPPERN2026", "#D97706", "Cobre"),
                 ("ACTIVTRADES:GOLD", "#FACC15", "Ouro"),
                 ("ACTIVTRADES:SILVER", "#E2E8F0", "Prata"),
             ],
