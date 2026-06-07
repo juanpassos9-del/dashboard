@@ -999,44 +999,214 @@ def painel_inferior_rtd():
 
 @st.fragment(run_every=30)
 def painel_topo_global():
-    """Cards de destaque para o mercado global."""
+    """Heatmap de indicadores globais no Terminal Global."""
     global_data = get_global_markets_data()
     if not global_data: return
     
     categories = global_data.get("categories", global_data)
-    
-    # Encontrar ativos específicos para os cards
-    cards_assets = {
-        "S&P 500": None,
-        "DXY (Dólar Index)": None,
-        "US 10Y (Yield)": None,
-        "BRENT OIL": None
-    }
-    
-    for cat in categories.values():
-        for asset in cat:
-            if asset['name'] in cards_assets:
-                cards_assets[asset['name']] = asset
+
+    st.markdown("""
+    <style>
+        .tg-heatmap-tabs {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin: 4px 0 8px;
+            color: #94a3b8;
+            font-family: "Roboto Mono", "Consolas", monospace;
+        }
+        .tg-heatmap-tab {
+            border: 1px solid #334155;
+            border-radius: 5px;
+            padding: 5px 9px;
+            font-size: 0.73rem;
+            font-weight: 800;
+        }
+        .tg-heatmap-tab.active {
+            background: #1e3a5f;
+            color: #f8fafc;
+            border-color: #60a5fa;
+        }
+        .tg-heatmap-tab.muted { border-color: transparent; }
+        .tg-heatmap-grid {
+            display: grid;
+            gap: 4px;
+            margin: 10px 0 18px;
+        }
+        .tg-heatmap-row {
+            display: grid;
+            grid-template-columns: 18px 1fr;
+            gap: 4px;
+            align-items: stretch;
+            min-width: 0;
+        }
+        .tg-heatmap-label {
+            writing-mode: vertical-rl;
+            transform: rotate(180deg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #111827;
+            color: #94a3b8;
+            font-size: 0.72rem;
+            font-weight: 900;
+            border: 1px solid #273142;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+        .tg-heatmap-card-grid {
+            display: grid;
+            grid-template-columns: repeat(8, minmax(112px, 1fr));
+            gap: 4px;
+            min-width: 0;
+        }
+        .tg-heatmap-card {
+            min-height: 86px;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 3px;
+            padding: 6px 6px 5px;
+            color: #fff;
+            font-family: "Roboto Mono", "Consolas", monospace;
+            overflow: hidden;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+        }
+        .tg-heatmap-card.up { background: linear-gradient(180deg, #21c45a 0%, #15803d 100%); }
+        .tg-heatmap-card.down { background: linear-gradient(180deg, #ff3138 0%, #b91c1c 100%); }
+        .tg-heatmap-card.flat { background: linear-gradient(180deg, #5f5362 0%, #3f3947 100%); }
+        .tg-heatmap-symbol {
+            font-size: 0.72rem;
+            line-height: 1;
+            font-weight: 900;
+            text-transform: uppercase;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+        }
+        .tg-heatmap-price {
+            font-size: 1.35rem;
+            line-height: 1.05;
+            font-weight: 950;
+            margin-top: 4px;
+            white-space: nowrap;
+        }
+        .tg-heatmap-range {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 4px;
+            margin-top: 5px;
+            font-size: 0.66rem;
+            line-height: 1.1;
+            font-weight: 800;
+        }
+        .tg-heatmap-low {
+            display: inline-block;
+            background: #ffe600;
+            color: #111827;
+            border: 1px solid rgba(0,0,0,0.22);
+            padding: 0 3px;
+            border-radius: 2px;
+            margin-top: 2px;
+        }
+        .tg-heatmap-change {
+            text-align: right;
+            font-size: 0.72rem;
+            font-weight: 950;
+            white-space: nowrap;
+        }
+        @media (max-width: 900px) {
+            .tg-heatmap-card-grid { grid-template-columns: repeat(3, minmax(98px, 1fr)); }
+        }
+        @media (max-width: 640px) {
+            .tg-heatmap-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .tg-heatmap-tabs { overflow-x: auto; padding-bottom: 4px; }
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+    def find_category(name):
+        if name in categories:
+            return categories.get(name)
+        normalized = name.split(" ", 1)[-1].lower()
+        for key, value in categories.items():
+            if str(key).split(" ", 1)[-1].lower() == normalized:
+                return value
+        return []
+
+    def assets_from(category_name):
+        assets = find_category(category_name)
+        return assets if isinstance(assets, list) else []
+
+    def fmt_num(value):
+        try:
+            value_float = float(value)
+            if abs(value_float) >= 10:
+                return f"{value_float:.2f}"
+            return f"{value_float:.4f}"
+        except Exception:
+            return "---"
+
+    indices_assets = assets_from("📊 ÍNDICES")
+    fx_assets = assets_from("💱 MOEDAS / FOREX")
+    etf_assets = assets_from("🇺🇸 ETFs SETORIAIS")
+    emerg_assets = assets_from("🌏 EMERGENTES & BRASIL")
+    bond_assets = assets_from("🇺🇸 TREASURIES (YIELDS)")
+    commodity_assets = assets_from("🛢️ COMMODITIES & CRIPTO")
+    commodity_names = {str(asset.get("name", "")).upper(): asset for asset in commodity_assets}
+    display_groups = [
+        ("Indices", indices_assets),
+        ("Energy", [commodity_names[name] for name in ["BRENT OIL", "WTI OIL", "NATURAL GAS"] if name in commodity_names]),
+        ("Sectors", etf_assets),
+        ("Bonds", bond_assets),
+        ("Metals", [commodity_names[name] for name in ["GOLD", "SILVER", "COPPER", "PLATINUM", "PALLADIUM"] if name in commodity_names]),
+        ("Crypto", [commodity_names[name] for name in ["BITCOIN", "ETHEREUM", "SOLANA"] if name in commodity_names]),
+        ("Currencies", fx_assets),
+        ("Emerg", emerg_assets),
+    ]
+    tabs = ["All", "Indices", "Energy", "Bonds", "Sectors", "Metals", "Crypto", "Currencies"]
+    tab_html = "".join(
+        f"<span class='tg-heatmap-tab {'active' if tab == 'All' else 'muted'}'>{esc(tab)}</span>"
+        for tab in tabs
+    )
+    rows = []
+    for label, assets in display_groups:
+        if not assets:
+            continue
+        cards = []
+        for asset in assets:
+            name = esc(asset.get("name", "---"))
+            price = fmt_num(asset.get("price"))
+            high = fmt_num(asset.get("high", asset.get("price")))
+            low = fmt_num(asset.get("low", asset.get("price")))
+            try:
+                change_value = float(asset.get("change", 0))
+                change = f"{change_value:+.2f}%"
+                change_class = "up" if change_value > 0 else "down" if change_value < 0 else "flat"
+            except Exception:
+                change = "---"
+                change_class = "flat"
+            cards.append(
+                f"<article class='tg-heatmap-card {change_class}'>"
+                f"<div class='tg-heatmap-symbol'>{name}</div>"
+                f"<div class='tg-heatmap-price'>{price}</div>"
+                f"<div class='tg-heatmap-range'>"
+                f"<div><div>H {high}</div><div class='tg-heatmap-low'>L {low}</div></div>"
+                f"<div class='tg-heatmap-change'>{change}</div>"
+                f"</div>"
+                f"</article>"
+            )
+        rows.append(
+            f"<section class='tg-heatmap-row'>"
+            f"<div class='tg-heatmap-label'>{esc(label)}</div>"
+            f"<div class='tg-heatmap-card-grid'>{''.join(cards)}</div>"
+            f"</section>"
+        )
 
     st.markdown("#### 🌎 INDICADORES GLOBAIS")
-    cols = st.columns(4)
-    for i, (name, asset) in enumerate(cards_assets.items()):
-        with cols[i]:
-            if asset:
-                change = asset.get('change', 0)
-                color = "#00FFA3" if change >= 0 else "#FF4B4B"
-                price = asset.get('price', 0)
-                price_fmt = f"{price:.4f}" if price < 10 else f"{price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-                
-                st.markdown(f"""
-                    <div class="main-card" style="padding: 15px; margin-bottom: 10px; border-left-color: {color};">
-                        <div class="label-small">{name}</div>
-                        <div style="font-size: 1.8rem; font-weight: bold; color: #FFF;">{price_fmt}</div>
-                        <div style="color: {color}; font-size: 0.85rem; font-weight: bold;">{change:+.2f}%</div>
-                    </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"<div class='main-card' style='padding:15px;'>{name}<br>---</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='tg-heatmap-tabs'>{tab_html}</div><div class='tg-heatmap-grid'>{''.join(rows)}</div>",
+        unsafe_allow_html=True,
+    )
 
 @st.fragment(run_every=30)
 def painel_corpo_global():
