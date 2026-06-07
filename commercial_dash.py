@@ -2803,6 +2803,7 @@ def pagina_correlacao():
 
     def render_macro_class_chart(title, description, container_id, main_symbol, main_color, overlays):
         class_chart_height = max(1050, min(c_height + 250, 1400))
+        class_interval = "5"
         studies = ",\n          ".join(
             [
                 '{{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "{}" }}, "plots": {{ "Plot": {{ "color": "{}" }} }} }}'.format(symbol, color)
@@ -2830,7 +2831,7 @@ def pagina_correlacao():
           {{
             "autosize": true,
             "symbol": "{main_symbol}",
-            "interval": "{interval}",
+            "interval": "{class_interval}",
             "timezone": "America/Sao_Paulo",
             "theme": "{theme}",
             "style": "2",
