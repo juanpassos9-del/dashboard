@@ -1004,6 +1004,7 @@ def painel_topo_global():
     if not global_data: return
     
     categories = global_data.get("categories", global_data)
+    esc_html = html.escape
 
     st.markdown("""
     <style>
@@ -1165,7 +1166,7 @@ def painel_topo_global():
     ]
     tabs = ["All", "Indices", "Energy", "Bonds", "Sectors", "Metals", "Crypto", "Currencies"]
     tab_html = "".join(
-        f"<span class='tg-heatmap-tab {'active' if tab == 'All' else 'muted'}'>{esc(tab)}</span>"
+        f"<span class='tg-heatmap-tab {'active' if tab == 'All' else 'muted'}'>{esc_html(tab)}</span>"
         for tab in tabs
     )
     rows = []
@@ -1174,7 +1175,7 @@ def painel_topo_global():
             continue
         cards = []
         for asset in assets:
-            name = esc(asset.get("name", "---"))
+            name = esc_html(str(asset.get("name", "---")))
             price = fmt_num(asset.get("price"))
             high = fmt_num(asset.get("high", asset.get("price")))
             low = fmt_num(asset.get("low", asset.get("price")))
@@ -1197,7 +1198,7 @@ def painel_topo_global():
             )
         rows.append(
             f"<section class='tg-heatmap-row'>"
-            f"<div class='tg-heatmap-label'>{esc(label)}</div>"
+            f"<div class='tg-heatmap-label'>{esc_html(label)}</div>"
             f"<div class='tg-heatmap-card-grid'>{''.join(cards)}</div>"
             f"</section>"
         )
