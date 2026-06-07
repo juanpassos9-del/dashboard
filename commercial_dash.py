@@ -2802,6 +2802,7 @@ def pagina_correlacao():
     components.html(tv_html_currencies, height=c_height + 20)
 
     def render_macro_class_chart(title, description, container_id, main_symbol, main_color, overlays):
+        class_chart_height = min(c_height, 560)
         studies = ",\n          ".join(
             [
                 '{{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "{}" }}, "plots": {{ "Plot": {{ "color": "{}" }} }} }}'.format(symbol, color)
@@ -2821,7 +2822,7 @@ def pagina_correlacao():
             unsafe_allow_html=True,
         )
         tv_html_class = f"""
-        <div class="tradingview-widget-container" style="height: {c_height}px; width: 100%;">
+        <div class="tradingview-widget-container" style="height: {class_chart_height}px; width: 100%;">
           <div id="{container_id}" style="height: 100%; width: 100%;"></div>
           <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
           <script type="text/javascript">
@@ -2858,7 +2859,7 @@ def pagina_correlacao():
           </script>
         </div>
         """
-        components.html(tv_html_class, height=c_height + 20)
+        components.html(tv_html_class, height=class_chart_height + 20)
 
     st.markdown("---")
     st.markdown("### Comparativos por Classe Macro")
@@ -2867,8 +2868,8 @@ def pagina_correlacao():
         unsafe_allow_html=True,
     )
 
-    left_col, right_col = st.columns(2, gap="large")
-    with left_col:
+    commodity_col, fx_col, equity_col, bonds_col = st.columns(4, gap="medium")
+    with commodity_col:
         render_macro_class_chart(
             "Commodities",
             "Energia, metais industriais e metais preciosos pela fonte ActivTrades.",
@@ -2883,22 +2884,7 @@ def pagina_correlacao():
                 ("ACTIVTRADES:SILVER", "#E2E8F0", "Prata"),
             ],
         )
-        render_macro_class_chart(
-            "Equity",
-            "Indices globais pela fonte ActivTrades: volatilidade, EUA, Brasil, Europa e Japao.",
-            "tradingview_macro_equity_v1",
-            "ACTIVTRADES:USA500",
-            "#A855F7",
-            [
-                ("ACTIVTRADES:VXX.US", "#EF4444", "VIX/VXX"),
-                ("ACTIVTRADES:JP225", "#38BDF8", "Nikkei"),
-                ("ACTIVTRADES:BRA50", "#22C55E", "IBOV/BRA50"),
-                ("ACTIVTRADES:EURO50", "#F97316", "EuroStoxx"),
-                ("ACTIVTRADES:USARUS", "#FACC15", "RTY/Russell"),
-                ("ACTIVTRADES:USATEC", "#60A5FA", "Nasdaq"),
-            ],
-        )
-    with right_col:
+    with fx_col:
         render_macro_class_chart(
             "FX",
             "Moedas de commodities, safe havens/majors, emergentes e carry.",
@@ -2914,9 +2900,26 @@ def pagina_correlacao():
                 ("OANDA:USDJPY", "#EF4444", "USDJPY"),
             ],
         )
+    with equity_col:
+        render_macro_class_chart(
+            "Equity",
+            "Indices globais pela fonte ActivTrades: volatilidade, EUA, Brasil, Europa e Japao.",
+            "tradingview_macro_equity_v1",
+            "ACTIVTRADES:USA500",
+            "#A855F7",
+            [
+                ("ACTIVTRADES:VXX.US", "#EF4444", "VIX/VXX"),
+                ("ACTIVTRADES:JP225", "#38BDF8", "Nikkei"),
+                ("ACTIVTRADES:BRA50", "#22C55E", "IBOV/BRA50"),
+                ("ACTIVTRADES:EURO50", "#F97316", "EuroStoxx"),
+                ("ACTIVTRADES:USARUS", "#FACC15", "RTY/Russell"),
+                ("ACTIVTRADES:USATEC", "#60A5FA", "Nasdaq"),
+            ],
+        )
+    with bonds_col:
         render_macro_class_chart(
             "Bonds",
-            "Curvas globais: EUA, Brasil, Japao, Italia e Alemanha.",
+            "Curvas globais: EUA, Brasil e Alemanha.",
             "tradingview_macro_bonds_v1",
             "OTCB:US10Y",
             "#FF9800",
