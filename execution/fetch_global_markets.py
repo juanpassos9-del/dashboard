@@ -13,24 +13,40 @@ def fetch_global_data(save_file=True):
             "IBOV": "^BVSP",
             "S&P 500": "^GSPC",
             "NASDAQ": "^IXIC",
+            "DOW JONES": "^DJI",
+            "RUSSELL 2000": "^RUT",
+            "NIKKEI 225": "^N225",
+            "EURO STOXX 50": "^STOXX50E",
+            "DAX": "^GDAXI",
+            "FTSE 100": "^FTSE",
             "VIX": "^VIX"
         },
         "💱 MOEDAS / FOREX": {
             "DXY (Dólar Index)": "DX-Y.NYB",
             "USDBRL (Comercial)": "BRL=X",
-            "6L (Real CME)": "6L=F"
+            "6L (Real CME)": "6L=F",
+            "EURUSD": "EURUSD=X",
+            "GBPUSD": "GBPUSD=X",
+            "USDJPY": "JPY=X",
+            "AUDUSD": "AUDUSD=X",
+            "USDCAD": "CAD=X",
+            "USDCHF": "CHF=X"
         },
         "🇺🇸 TREASURIES (YIELDS)": {
             "US 10Y (Yield)": "^TNX",
             "US 30Y (Yield)": "^TYX",
-            "US 02Y (Yield)": "^IRX"
+            "US 05Y (Yield)": "^FVX",
+            "US 03M (Yield)": "^IRX"
         },
         "🌏 EMERGENTES & BRASIL": {
             "EEM (Emerging Markets)": "EEM",
+            "EMB (EM Bonds)": "EMB",
             "EWZ (Brazil ETF)": "EWZ",
+            "ILF (Latin America)": "ILF",
             "PETR4 (ADR)": "PBR",
             "VALE (ADR)": "VALE",
-            "ITUB (ADR)": "ITUB"
+            "ITUB (ADR)": "ITUB",
+            "BBD (ADR)": "BBD"
         },
         "🇺🇸 ETFs SETORIAIS": {
             "SPY (S&P 500)": "SPY",
@@ -49,10 +65,15 @@ def fetch_global_data(save_file=True):
         "🛢️ COMMODITIES & CRIPTO": {
             "BRENT OIL": "BZ=F",
             "WTI OIL": "CL=F",
+            "NATURAL GAS": "NG=F",
+            "COPPER": "HG=F",
             "GOLD": "GC=F",
             "SILVER": "SI=F",
+            "PLATINUM": "PL=F",
+            "PALLADIUM": "PA=F",
             "BITCOIN": "BTC-USD",
-            "ETHEREUM": "ETH-USD"
+            "ETHEREUM": "ETH-USD",
+            "SOLANA": "SOL-USD"
         }
     }
     
