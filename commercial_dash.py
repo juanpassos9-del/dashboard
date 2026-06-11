@@ -2842,6 +2842,11 @@ def pagina_market_report():
 def pagina_graficos():
     """Página com integração TradingView Advanced Chart."""
     st.markdown("### 📊 Gráficos Avançados TradingView")
+    from lightweight_chart_component import render_lightweight_chart_html
+
+    st.markdown("#### Gráfico próprio - Lightweight Charts")
+    st.caption("Candles OHLCV, volume, VWAP diária, bandas, médias móveis, oscilador e atualização via Binance WebSocket.")
+    components.html(render_lightweight_chart_html(), height=900, scrolling=False)
     
     assets = {
         "MINI ÍNDICE (WIN)": "BRA50",
