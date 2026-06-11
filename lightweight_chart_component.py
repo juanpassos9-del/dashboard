@@ -141,6 +141,7 @@ def render_lightweight_chart_html():
         .lw-crosshair-grid span { color:#94a3b8; }
         .lw-volume-profile { position:absolute; top:0; right:56px; width:150px; height:620px; z-index:3; pointer-events:none; opacity:.82; }
         .lw-vp-bar { position:absolute; right:0; height:3px; min-width:2px; border-radius:999px 0 0 999px; background:rgba(56,189,248,.32); }
+        .lw-vp-bar.value-area { background:rgba(34,197,94,.38); }
         .lw-vp-bar.poc { height:5px; background:rgba(245,158,11,.9); box-shadow:0 0 8px rgba(245,158,11,.55); }
         .lw-vp-label { position:absolute; right:0; top:6px; color:#94a3b8; font-size:.66rem; font-weight:900; text-transform:uppercase; background:rgba(8,13,20,.72); padding:2px 5px; border:1px solid #334155; border-radius:4px; }
         .lw-skeleton { position:absolute; inset:0; z-index:4; display:none; background:linear-gradient(90deg,#0b1220 0%,#111827 50%,#0b1220 100%); background-size:220% 100%; animation:lwPulse 1.2s ease-in-out infinite; }
@@ -169,7 +170,7 @@ def render_lightweight_chart_html():
           <div class="lw-stat"><span>Dist. VWAP</span><strong id="lw-dist">---</strong></div>
           <div class="lw-stat"><span>Corr preco x volume</span><strong id="lw-corr">---</strong></div>
           <div class="lw-stat"><span>Volume</span><strong id="lw-volume">---</strong><small id="lw-rvol">RVOL ---</small></div>
-          <div class="lw-stat"><span>Volume Profile sessao</span><strong id="lw-vp-poc">POC ---</strong><small id="lw-vp-range">---</small></div>
+          <div class="lw-stat"><span>Volume Profile sessao</span><strong id="lw-vp-poc">POC ---</strong><small id="lw-vp-range">---</small><small id="lw-vp-value-area">VAH --- | VAL ---</small></div>
           <div class="lw-stat"><span>Referencia do candle</span><strong id="lw-hover-title">Passe o mouse</strong><small id="lw-hover-data">OHLC, horario, variacao e distancia da VWAP.</small></div>
           <div class="lw-settings" id="lw-ma-settings">
             <div class="lw-settings-title">Medias moveis</div>
@@ -467,10 +468,10 @@ def render_lightweight_chart_html():
         return { open, high, low, prevClose, current:candles[candles.length - 1]?.close };
       }
       function computeSessionVolumeProfile(candles, bins=36) {
-        if (!candles.length) return { bins:[], poc:null, min:NaN, max:NaN, total:0 };
+        if (!candles.length) return { bins:[], poc:null, vah:null, val:null, min:NaN, max:NaN, total:0 };
         const lastDay = anchorKey(candles[candles.length - 1].time, "day");
         const session = candles.filter((c) => anchorKey(c.time, "day") === lastDay);
-        if (!session.length) return { bins:[], poc:null, min:NaN, max:NaN, total:0 };
+        if (!session.length) return { bins:[], poc:null, vah:null, val:null, min:NaN, max:NaN, total:0 };
         const min = session.reduce((m,c) => Math.min(m, c.low), Infinity);
         const max = session.reduce((m,c) => Math.max(m, c.high), -Infinity);
         const step = (max - min) / bins || 1;
@@ -490,7 +491,27 @@ def render_lightweight_chart_html():
         const maxVolume = profile.reduce((m,b) => Math.max(m, b.volume), 0);
         const poc = profile.reduce((best,b) => b.volume > (best?.volume || 0) ? b : best, null);
         const total = session.reduce((sum,c) => sum + (c.volume || 0), 0);
-        return { bins:profile, poc, min, max, maxVolume, total };
+        const valueAreaTarget = total * 0.7;
+        let lowIndex = poc?.index ?? 0;
+        let highIndex = poc?.index ?? 0;
+        let valueVolume = poc?.volume || 0;
+        while (valueVolume < valueAreaTarget && (lowIndex > 0 || highIndex < bins - 1)) {
+          const lowerVolume = lowIndex > 0 ? profile[lowIndex - 1].volume : -1;
+          const upperVolume = highIndex < bins - 1 ? profile[highIndex + 1].volume : -1;
+          if (upperVolume >= lowerVolume && highIndex < bins - 1) {
+            highIndex += 1;
+            valueVolume += profile[highIndex].volume;
+          } else if (lowIndex > 0) {
+            lowIndex -= 1;
+            valueVolume += profile[lowIndex].volume;
+          } else {
+            break;
+          }
+        }
+        profile.forEach((bin) => { bin.inValueArea = bin.index >= lowIndex && bin.index <= highIndex; });
+        const val = profile[lowIndex] || null;
+        const vah = profile[highIndex] || null;
+        return { bins:profile, poc, vah, val, min, max, maxVolume, total, valueVolume };
       }
       function detectSignals(candles, indicators) {
         const signals = [];
@@ -565,7 +586,7 @@ def render_lightweight_chart_html():
           const y = state.series.candle.priceToCoordinate(bin.mid);
           if (!Number.isFinite(y) || y < 0 || y > chartHeight) return;
           const bar = document.createElement("div");
-          bar.className = `lw-vp-bar ${profile.poc && bin.index === profile.poc.index ? "poc" : ""}`;
+          bar.className = `lw-vp-bar ${bin.inValueArea ? "value-area" : ""} ${profile.poc && bin.index === profile.poc.index ? "poc" : ""}`;
           bar.style.top = `${Math.max(0, y - 2)}px`;
           bar.style.width = `${Math.max(2, (bin.volume / profile.maxVolume) * maxWidth)}px`;
           bar.title = `${fmt(bin.low,2)} - ${fmt(bin.high,2)} | Vol ${fmt(bin.volume,2)}`;
@@ -625,6 +646,10 @@ def render_lightweight_chart_html():
           addPriceLine(candleSeries, "Fech ant", refs.prevClose, "#f59e0b");
           addPriceLine(candleSeries, "Atual", refs.current, "#f8fafc", 0);
         }
+        if (state.toggles.volumeProfile) {
+          addPriceLine(candleSeries, "VAH", state.indicators.volumeProfile?.vah?.high, "#22c55e");
+          addPriceLine(candleSeries, "VAL", state.indicators.volumeProfile?.val?.low, "#ef4444");
+        }
         if (state.toggles.oscillator) {
           const oscSeries = state.oscChart.addSeries(HistogramSeries, { color:"#38bdf8", priceFormat:{ type:"price", precision:2, minMove:0.01 } });
           oscSeries.setData(computeOsc(state.candles, vwap).map((p) => ({ ...p, color:p.value >= 0 ? "rgba(34,197,94,.65)" : "rgba(239,68,68,.65)" })));
@@ -656,6 +681,7 @@ def render_lightweight_chart_html():
         document.getElementById("lw-rvol").textContent = `Media20 ${fmt(lastVol.avg, 2)} | RVOL ${fmt(lastVol.rvol, 2)}x`;
         document.getElementById("lw-vp-poc").textContent = `POC ${fmt(indicators.volumeProfile?.poc?.mid, 2)}`;
         document.getElementById("lw-vp-range").textContent = `Range ${fmt(indicators.volumeProfile?.min, 2)} - ${fmt(indicators.volumeProfile?.max, 2)} | Vol ${fmt(indicators.volumeProfile?.total, 2)}`;
+        document.getElementById("lw-vp-value-area").textContent = `VAH ${fmt(indicators.volumeProfile?.vah?.high, 2)} | VAL ${fmt(indicators.volumeProfile?.val?.low, 2)}`;
         renderAlerts(last, lastVwap, lastVol.rvol, indicators.signals);
       }
       function renderAlerts(last, vwap, rvol, signals) {
