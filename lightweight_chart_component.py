@@ -1,5 +1,82 @@
+import json
+
+import streamlit as st
+import yfinance as yf
+
+
+YAHOO_LIGHTWEIGHT_ASSETS = [
+    {"symbol": "SP500", "label": "S&P 500", "ticker": "^GSPC"},
+    {"symbol": "NASDAQ", "label": "NASDAQ", "ticker": "^IXIC"},
+    {"symbol": "RUSSELL", "label": "RUSSELL", "ticker": "^RUT"},
+    {"symbol": "DXY", "label": "DXY", "ticker": "DX-Y.NYB"},
+    {"symbol": "6L1", "label": "6L1", "ticker": "6L=F"},
+    {"symbol": "BRENT", "label": "BRENT", "ticker": "BZ=F"},
+    {"symbol": "WTI", "label": "WTI", "ticker": "CL=F"},
+    {"symbol": "XAUUSD", "label": "XAUUSD", "ticker": "GC=F"},
+    {"symbol": "EEM", "label": "EEM", "ticker": "EEM"},
+    {"symbol": "EWZ", "label": "EWZ", "ticker": "EWZ"},
+    {"symbol": "IBOV", "label": "IBOV", "ticker": "^BVSP"},
+]
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def load_yahoo_lightweight_payload():
+    tickers = [asset["ticker"] for asset in YAHOO_LIGHTWEIGHT_ASSETS]
+    payload = {}
+    try:
+        data = yf.download(
+            tickers,
+            period="5d",
+            interval="1m",
+            prepost=True,
+            group_by="ticker",
+            progress=False,
+            threads=False,
+            timeout=20,
+        )
+    except Exception as e:
+        return {"assets": YAHOO_LIGHTWEIGHT_ASSETS, "series": {}, "error": str(e)}
+
+    if data is None or data.empty:
+        return {"assets": YAHOO_LIGHTWEIGHT_ASSETS, "series": {}, "error": "Yahoo Finance retornou vazio."}
+
+    for asset in YAHOO_LIGHTWEIGHT_ASSETS:
+        ticker = asset["ticker"]
+        try:
+            if hasattr(data.columns, "levels"):
+                if ticker not in set(data.columns.get_level_values(0)):
+                    continue
+                df = data[ticker]
+            else:
+                df = data
+            df = df.dropna(subset=["Open", "High", "Low", "Close"])
+            candles = []
+            for idx, row in df.tail(650).iterrows():
+                ts = int(idx.timestamp())
+                volume = row.get("Volume", 0)
+                candles.append({
+                    "time": ts,
+                    "open": float(row["Open"]),
+                    "high": float(row["High"]),
+                    "low": float(row["Low"]),
+                    "close": float(row["Close"]),
+                    "volume": float(volume) if volume == volume else 0.0,
+                })
+            if candles:
+                payload[asset["symbol"]] = {
+                    "label": asset["label"],
+                    "ticker": ticker,
+                    "candles": candles,
+                }
+        except Exception:
+            continue
+    return {"assets": YAHOO_LIGHTWEIGHT_ASSETS, "series": payload, "error": None}
+
+
 def render_lightweight_chart_html():
-    return """
+    yahoo_payload = load_yahoo_lightweight_payload()
+    yahoo_json = json.dumps(yahoo_payload, ensure_ascii=False)
+    html = """
     <div id="lw-root">
       <style>
         #lw-root { background:#080d14; border:1px solid #1f2937; border-radius:8px; color:#e5e7eb; font-family:Inter,"Segoe UI",Arial,sans-serif; overflow:hidden; }
@@ -40,7 +117,20 @@ def render_lightweight_chart_html():
     <script>
     (() => {
       const { createChart, CandlestickSeries, HistogramSeries, LineSeries } = LightweightCharts;
-      const assets = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
+      const yahooPayload = __YAHOO_PAYLOAD__;
+      const binanceAssets = [
+        { symbol: "BTCUSDT", label: "BTC", source: "binance" },
+        { symbol: "ETHUSDT", label: "ETH", source: "binance" },
+        { symbol: "SOLUSDT", label: "SOL", source: "binance" },
+      ];
+      const yahooAssets = (yahooPayload.assets || []).map((asset) => ({
+        symbol: asset.symbol,
+        label: asset.label,
+        source: "yahoo",
+        ticker: asset.ticker,
+      }));
+      const assets = [...binanceAssets, ...yahooAssets];
+      const assetRegistry = Object.fromEntries(assets.map((asset) => [asset.symbol, asset]));
       const timeframes = ["15s", "30s", "1m", "5m", "15m"];
       const tfSeconds = { "15s": 15, "30s": 30, "1m": 60, "5m": 300, "15m": 900 };
       const state = { symbol:"BTCUSDT", timeframe:"1m", candles:[], chart:null, oscChart:null, series:{}, socket:null, toggles:{ ma:true, ma200:false, vwap:true, bands:true, volume:true, oscillator:true } };
@@ -64,7 +154,7 @@ def render_lightweight_chart_html():
         assetBox.querySelectorAll("button").forEach((el) => el.remove());
         tfBox.querySelectorAll("button").forEach((el) => el.remove());
         toggleBox.querySelectorAll("button").forEach((el) => el.remove());
-        assets.forEach((asset) => assetBox.appendChild(button(asset.replace("USDT", ""), state.symbol === asset, () => loadSymbol(asset, state.timeframe))));
+        assets.forEach((asset) => assetBox.appendChild(button(asset.label, state.symbol === asset.symbol, () => loadSymbol(asset.symbol, state.timeframe))));
         timeframes.forEach((tf) => tfBox.appendChild(button(tf, state.timeframe === tf, () => loadSymbol(state.symbol, tf))));
         [["ma","Medias"],["ma200","MA200"],["vwap","VWAP"],["bands","Bandas"],["volume","Volume"],["oscillator","Osc"]].forEach(([key,label]) => {
           toggleBox.appendChild(button(label, state.toggles[key], () => { state.toggles[key] = !state.toggles[key]; renderControls(); renderCharts(); }, state.toggles[key] ? "toggle-on" : ""));
@@ -81,6 +171,8 @@ def render_lightweight_chart_html():
         });
       }
       async function fetchHistorical(symbol, timeframe) {
+        const asset = assetRegistry[symbol] || { source: "binance" };
+        if (asset.source === "yahoo") return fetchYahooHistorical(symbol, timeframe);
         if (["1m","5m","15m"].includes(timeframe)) {
           const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${timeframe}&limit=600`);
           if (!res.ok) throw new Error(`Binance klines ${res.status}`);
@@ -91,6 +183,26 @@ def render_lightweight_chart_html():
         if (!res.ok) throw new Error(`Binance trades ${res.status}`);
         const trades = await res.json();
         return aggregateTrades(trades.map((t) => ({ timeMs:t.T, price:+t.p, qty:+t.q })), tfSeconds[timeframe]);
+      }
+      function fetchYahooHistorical(symbol, timeframe) {
+        const base = (yahooPayload.series && yahooPayload.series[symbol] && yahooPayload.series[symbol].candles) || [];
+        if (!base.length) throw new Error(`Sem dados yfinance para ${symbol}`);
+        if (timeframe === "5m") return aggregateCandles(base, 300);
+        if (timeframe === "15m") return aggregateCandles(base, 900);
+        return base;
+      }
+      function aggregateCandles(candles, seconds) {
+        const buckets = new Map();
+        candles.forEach((c) => {
+          const time = Math.floor(c.time / seconds) * seconds;
+          const b = buckets.get(time) || { time, open:c.open, high:c.high, low:c.low, close:c.close, volume:0 };
+          b.high = Math.max(b.high, c.high);
+          b.low = Math.min(b.low, c.low);
+          b.close = c.close;
+          b.volume += Number(c.volume || 0);
+          buckets.set(time, b);
+        });
+        return Array.from(buckets.values()).sort((a,b) => a.time - b.time);
       }
       function aggregateTrades(trades, seconds) {
         const buckets = new Map();
@@ -174,6 +286,12 @@ def render_lightweight_chart_html():
       }
       function startSocket() {
         if (state.socket) state.socket.close();
+        const asset = assetRegistry[state.symbol] || { source: "binance" };
+        if (asset.source !== "binance") {
+          state.socket = null;
+          setStatus(`Dados yfinance carregados: ${asset.label} (${asset.ticker}). Sem WebSocket em tempo real; atualize a pagina para recarregar.`);
+          return;
+        }
         state.socket = new WebSocket(`wss://stream.binance.com:9443/ws/${state.symbol.toLowerCase()}@aggTrade`);
         state.socket.onmessage = (event) => {
           const t = JSON.parse(event.data), price = +t.p, qty = +t.q, seconds = tfSeconds[state.timeframe];
@@ -186,12 +304,19 @@ def render_lightweight_chart_html():
         state.socket.onerror = () => setStatus("WebSocket Binance indisponivel no momento.");
       }
       async function loadSymbol(symbol, timeframe) {
-        state.symbol = symbol; state.timeframe = timeframe; renderControls(); setStatus(`Carregando historico Binance: ${symbol} ${timeframe}...`);
-        try { state.candles = await fetchHistorical(symbol, timeframe); renderCharts(); startSocket(); setStatus("Historico carregado. Atualizacao em tempo real via Binance WebSocket."); }
-        catch (err) { console.error(err); setStatus(`Erro ao carregar dados Binance: ${err.message}`); }
+        state.symbol = symbol; state.timeframe = timeframe; renderControls();
+        const asset = assetRegistry[symbol] || { source: "binance", label: symbol };
+        if (asset.source === "yahoo" && ["15s", "30s"].includes(timeframe)) {
+          setStatus(`${asset.label}: yfinance nao possui 15s/30s; usando candles de 1m.`);
+        } else {
+          setStatus(`Carregando historico ${asset.source === "yahoo" ? "yfinance" : "Binance"}: ${asset.label || symbol} ${timeframe}...`);
+        }
+        try { state.candles = await fetchHistorical(symbol, timeframe); renderCharts(); startSocket(); if (asset.source === "binance") setStatus("Historico carregado. Atualizacao em tempo real via Binance WebSocket."); }
+        catch (err) { console.error(err); setStatus(`Erro ao carregar dados: ${err.message}`); }
       }
       window.addEventListener("resize", () => { if (state.chart) state.chart.applyOptions({ width:chartEl.clientWidth }); if (state.oscChart) state.oscChart.applyOptions({ width:oscEl.clientWidth }); });
       renderControls(); loadSymbol(state.symbol, state.timeframe);
     })();
     </script>
     """
+    return html.replace("__YAHOO_PAYLOAD__", yahoo_json)
