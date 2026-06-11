@@ -23,8 +23,9 @@ YAHOO_LIGHTWEIGHT_ASSETS = [
 def load_yahoo_lightweight_payload():
     tickers = [asset["ticker"] for asset in YAHOO_LIGHTWEIGHT_ASSETS]
     payload = {}
+    errors = []
     try:
-        data = yf.download(
+        intraday_data = yf.download(
             tickers,
             period="5d",
             interval="1m",
@@ -35,42 +36,70 @@ def load_yahoo_lightweight_payload():
             timeout=20,
         )
     except Exception as e:
-        return {"assets": YAHOO_LIGHTWEIGHT_ASSETS, "series": {}, "error": str(e)}
+        intraday_data = None
+        errors.append(f"intraday: {e}")
 
-    if data is None or data.empty:
-        return {"assets": YAHOO_LIGHTWEIGHT_ASSETS, "series": {}, "error": "Yahoo Finance retornou vazio."}
+    try:
+        daily_data = yf.download(
+            tickers,
+            period="2y",
+            interval="1d",
+            prepost=True,
+            group_by="ticker",
+            progress=False,
+            threads=False,
+            timeout=20,
+        )
+    except Exception as e:
+        daily_data = None
+        errors.append(f"daily: {e}")
+
+    if (intraday_data is None or intraday_data.empty) and (daily_data is None or daily_data.empty):
+        return {
+            "assets": YAHOO_LIGHTWEIGHT_ASSETS,
+            "series": {},
+            "error": "; ".join(errors) or "Yahoo Finance retornou vazio.",
+        }
+
+    def extract_candles(data, ticker, limit):
+        if data is None or data.empty:
+            return []
+        if hasattr(data.columns, "levels"):
+            if ticker not in set(data.columns.get_level_values(0)):
+                return []
+            df = data[ticker]
+        else:
+            df = data
+        df = df.dropna(subset=["Open", "High", "Low", "Close"])
+        candles = []
+        for idx, row in df.tail(limit).iterrows():
+            ts = int(idx.timestamp())
+            volume = row.get("Volume", 0)
+            candles.append({
+                "time": ts,
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": float(row["Close"]),
+                "volume": float(volume) if volume == volume else 0.0,
+            })
+        return candles
 
     for asset in YAHOO_LIGHTWEIGHT_ASSETS:
         ticker = asset["ticker"]
         try:
-            if hasattr(data.columns, "levels"):
-                if ticker not in set(data.columns.get_level_values(0)):
-                    continue
-                df = data[ticker]
-            else:
-                df = data
-            df = df.dropna(subset=["Open", "High", "Low", "Close"])
-            candles = []
-            for idx, row in df.tail(650).iterrows():
-                ts = int(idx.timestamp())
-                volume = row.get("Volume", 0)
-                candles.append({
-                    "time": ts,
-                    "open": float(row["Open"]),
-                    "high": float(row["High"]),
-                    "low": float(row["Low"]),
-                    "close": float(row["Close"]),
-                    "volume": float(volume) if volume == volume else 0.0,
-                })
-            if candles:
+            intraday = extract_candles(intraday_data, ticker, 650)
+            daily = extract_candles(daily_data, ticker, 520)
+            if intraday or daily:
                 payload[asset["symbol"]] = {
                     "label": asset["label"],
                     "ticker": ticker,
-                    "candles": candles,
+                    "intraday": intraday,
+                    "daily": daily,
                 }
         except Exception:
             continue
-    return {"assets": YAHOO_LIGHTWEIGHT_ASSETS, "series": payload, "error": None}
+    return {"assets": YAHOO_LIGHTWEIGHT_ASSETS, "series": payload, "error": "; ".join(errors) or None}
 
 
 def render_lightweight_chart_html():
@@ -131,8 +160,9 @@ def render_lightweight_chart_html():
       }));
       const assets = [...binanceAssets, ...yahooAssets];
       const assetRegistry = Object.fromEntries(assets.map((asset) => [asset.symbol, asset]));
-      const timeframes = ["15s", "30s", "1m", "5m", "15m"];
-      const tfSeconds = { "15s": 15, "30s": 30, "1m": 60, "5m": 300, "15m": 900 };
+      const timeframes = ["30s", "1m", "5m", "h1", "1d", "1w", "1month"];
+      const tfSeconds = { "30s": 30, "1m": 60, "5m": 300, "h1": 3600, "1d": 86400, "1w": 604800 };
+      const binanceIntervals = { "1m": "1m", "5m": "5m", "h1": "1h", "1d": "1d", "1w": "1w", "1month": "1M" };
       const state = { symbol:"BTCUSDT", timeframe:"1m", candles:[], chart:null, oscChart:null, series:{}, socket:null, toggles:{ ma:true, ma200:false, vwap:true, bands:true, volume:true, oscillator:true } };
       const chartEl = document.getElementById("lw-chart");
       const oscEl = document.getElementById("lw-osc");
@@ -173,8 +203,8 @@ def render_lightweight_chart_html():
       async function fetchHistorical(symbol, timeframe) {
         const asset = assetRegistry[symbol] || { source: "binance" };
         if (asset.source === "yahoo") return fetchYahooHistorical(symbol, timeframe);
-        if (["1m","5m","15m"].includes(timeframe)) {
-          const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${timeframe}&limit=600`);
+        if (binanceIntervals[timeframe]) {
+          const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${binanceIntervals[timeframe]}&limit=600`);
           if (!res.ok) throw new Error(`Binance klines ${res.status}`);
           const rows = await res.json();
           return rows.map((r) => ({ time:Math.floor(r[0]/1000), open:+r[1], high:+r[2], low:+r[3], close:+r[4], volume:+r[5] }));
@@ -185,16 +215,60 @@ def render_lightweight_chart_html():
         return aggregateTrades(trades.map((t) => ({ timeMs:t.T, price:+t.p, qty:+t.q })), tfSeconds[timeframe]);
       }
       function fetchYahooHistorical(symbol, timeframe) {
-        const base = (yahooPayload.series && yahooPayload.series[symbol] && yahooPayload.series[symbol].candles) || [];
-        if (!base.length) throw new Error(`Sem dados yfinance para ${symbol}`);
-        if (timeframe === "5m") return aggregateCandles(base, 300);
-        if (timeframe === "15m") return aggregateCandles(base, 900);
-        return base;
+        const series = (yahooPayload.series && yahooPayload.series[symbol]) || {};
+        const intraday = series.intraday || [];
+        const daily = series.daily || [];
+        if (timeframe === "30s" || timeframe === "1m") {
+          if (!intraday.length) throw new Error(`Sem dados intraday yfinance para ${symbol}`);
+          return intraday;
+        }
+        if (timeframe === "5m") {
+          if (!intraday.length) throw new Error(`Sem dados intraday yfinance para ${symbol}`);
+          return aggregateCandles(intraday, 300);
+        }
+        if (timeframe === "h1") {
+          if (!intraday.length) throw new Error(`Sem dados intraday yfinance para ${symbol}`);
+          return aggregateCandles(intraday, 3600);
+        }
+        if (timeframe === "1d") {
+          if (!daily.length) throw new Error(`Sem dados diarios yfinance para ${symbol}`);
+          return daily;
+        }
+        if (timeframe === "1w") {
+          if (!daily.length) throw new Error(`Sem dados diarios yfinance para ${symbol}`);
+          return aggregateCalendarCandles(daily, "week");
+        }
+        if (timeframe === "1month") {
+          if (!daily.length) throw new Error(`Sem dados diarios yfinance para ${symbol}`);
+          return aggregateCalendarCandles(daily, "month");
+        }
+        return intraday;
       }
       function aggregateCandles(candles, seconds) {
         const buckets = new Map();
         candles.forEach((c) => {
           const time = Math.floor(c.time / seconds) * seconds;
+          const b = buckets.get(time) || { time, open:c.open, high:c.high, low:c.low, close:c.close, volume:0 };
+          b.high = Math.max(b.high, c.high);
+          b.low = Math.min(b.low, c.low);
+          b.close = c.close;
+          b.volume += Number(c.volume || 0);
+          buckets.set(time, b);
+        });
+        return Array.from(buckets.values()).sort((a,b) => a.time - b.time);
+      }
+      function calendarBucket(time, mode) {
+        const d = new Date(time * 1000);
+        if (mode === "month") return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000;
+        const day = d.getUTCDay() || 7;
+        const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+        monday.setUTCDate(monday.getUTCDate() - day + 1);
+        return Math.floor(monday.getTime() / 1000);
+      }
+      function aggregateCalendarCandles(candles, mode) {
+        const buckets = new Map();
+        candles.forEach((c) => {
+          const time = calendarBucket(c.time, mode);
           const b = buckets.get(time) || { time, open:c.open, high:c.high, low:c.low, close:c.close, volume:0 };
           b.high = Math.max(b.high, c.high);
           b.low = Math.min(b.low, c.low);
@@ -294,8 +368,13 @@ def render_lightweight_chart_html():
         }
         state.socket = new WebSocket(`wss://stream.binance.com:9443/ws/${state.symbol.toLowerCase()}@aggTrade`);
         state.socket.onmessage = (event) => {
-          const t = JSON.parse(event.data), price = +t.p, qty = +t.q, seconds = tfSeconds[state.timeframe];
-          const time = Math.floor(Math.floor(t.T / 1000) / seconds) * seconds;
+          const t = JSON.parse(event.data), price = +t.p, qty = +t.q;
+          const rawTime = Math.floor(t.T / 1000);
+          const time = state.timeframe === "1month"
+            ? calendarBucket(rawTime, "month")
+            : state.timeframe === "1w"
+              ? calendarBucket(rawTime, "week")
+              : Math.floor(rawTime / tfSeconds[state.timeframe]) * tfSeconds[state.timeframe];
           let last = state.candles[state.candles.length - 1];
           if (!last || time > last.time) { last = { time, open:price, high:price, low:price, close:price, volume:qty }; state.candles.push(last); if (state.candles.length > 650) state.candles.shift(); }
           else { last.high = Math.max(last.high, price); last.low = Math.min(last.low, price); last.close = price; last.volume += qty; }
@@ -306,8 +385,8 @@ def render_lightweight_chart_html():
       async function loadSymbol(symbol, timeframe) {
         state.symbol = symbol; state.timeframe = timeframe; renderControls();
         const asset = assetRegistry[symbol] || { source: "binance", label: symbol };
-        if (asset.source === "yahoo" && ["15s", "30s"].includes(timeframe)) {
-          setStatus(`${asset.label}: yfinance nao possui 15s/30s; usando candles de 1m.`);
+        if (asset.source === "yahoo" && timeframe === "30s") {
+          setStatus(`${asset.label}: yfinance nao possui 30s; usando candles de 1m.`);
         } else {
           setStatus(`Carregando historico ${asset.source === "yahoo" ? "yfinance" : "Binance"}: ${asset.label || symbol} ${timeframe}...`);
         }
