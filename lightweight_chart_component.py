@@ -171,6 +171,7 @@ def render_lightweight_chart_html():
           <div class="lw-stat"><span>Corr preco x volume</span><strong id="lw-corr">---</strong></div>
           <div class="lw-stat"><span>Volume</span><strong id="lw-volume">---</strong><small id="lw-rvol">RVOL ---</small></div>
           <div class="lw-stat"><span>Volume Profile sessao</span><strong id="lw-vp-poc">POC ---</strong><small id="lw-vp-range">---</small><small id="lw-vp-value-area">VAH --- | VAL ---</small></div>
+          <div class="lw-stat"><span>Volatilidade historica</span><strong id="lw-hv252">HV252 ---</strong><small id="lw-hv30">HV30 ---</small><small id="lw-hv-levels">---</small></div>
           <div class="lw-stat"><span>Referencia do candle</span><strong id="lw-hover-title">Passe o mouse</strong><small id="lw-hover-data">OHLC, horario, variacao e distancia da VWAP.</small></div>
           <div class="lw-settings" id="lw-ma-settings">
             <div class="lw-settings-title">Medias moveis</div>
@@ -204,7 +205,7 @@ def render_lightweight_chart_html():
       const defaultPrefs = {
         symbol:"BTCUSDT",
         timeframe:"1m",
-        toggles:{ ma:true, vwap:true, bands:true, stdevBands:false, volume:true, volumeProfile:true, oscillator:true, refs:true, signals:true },
+        toggles:{ ma:true, vwap:true, bands:true, stdevBands:false, volume:true, volumeProfile:true, historicalVol:true, oscillator:true, refs:true, signals:true },
         maType:"SMA",
         ma:[
           { id:"ma9", period:9, enabled:true, color:"#22c55e" },
@@ -255,7 +256,7 @@ def render_lightweight_chart_html():
         actionBox.querySelectorAll("button").forEach((el) => el.remove());
         assets.forEach((asset) => assetBox.appendChild(button(asset.label, state.symbol === asset.symbol, () => loadSymbol(asset.symbol, state.timeframe))));
         timeframes.forEach((tf) => tfBox.appendChild(button(tf, state.timeframe === tf, () => loadSymbol(state.symbol, tf))));
-        [["ma","Medias"],["vwap","VWAP"],["bands","Bandas %"],["stdevBands","Desvios"],["refs","Refs"],["signals","Sinais"],["volume","Volume"],["volumeProfile","Vol Profile"],["oscillator","Osc"]].forEach(([key,label]) => {
+        [["ma","Medias"],["vwap","VWAP"],["bands","Bandas %"],["stdevBands","Desvios"],["refs","Refs"],["signals","Sinais"],["volume","Volume"],["volumeProfile","Vol Profile"],["historicalVol","HV"],["oscillator","Osc"]].forEach(([key,label]) => {
           toggleBox.appendChild(button(label, state.toggles[key], () => { state.toggles[key] = !state.toggles[key]; savePrefs(); renderControls(); renderCharts(false); }, state.toggles[key] ? "toggle-on" : ""));
         });
         actionBox.appendChild(button("Reset Zoom", false, () => { state.chart?.timeScale().fitContent(); state.oscChart?.timeScale().fitContent(); }));
@@ -467,6 +468,42 @@ def render_lightweight_chart_html():
         const prevClose = prev[prev.length - 1]?.close;
         return { open, high, low, prevClose, current:candles[candles.length - 1]?.close };
       }
+      function volatilitySource(candles) {
+        const series = (yahooPayload.series && yahooPayload.series[state.symbol]) || {};
+        return Array.isArray(series.daily) && series.daily.length >= 31 ? series.daily : candles;
+      }
+      function historicalVolatility(candles, period, prevClose) {
+        const source = volatilitySource(candles).filter((c) => Number.isFinite(c.close) && c.close > 0);
+        if (source.length < Math.min(period + 1, 31) || !Number.isFinite(prevClose)) {
+          return { period, vol:NaN, annualized:NaN, upper:NaN, lower:NaN };
+        }
+        const slice = source.slice(-(period + 1));
+        const returns = [];
+        for (let i = 1; i < slice.length; i += 1) {
+          const prev = slice[i - 1].close;
+          const curr = slice[i].close;
+          if (prev > 0 && curr > 0) returns.push(Math.log(curr / prev));
+        }
+        if (returns.length < 2) return { period, vol:NaN, annualized:NaN, upper:NaN, lower:NaN };
+        const mean = returns.reduce((a,b) => a + b, 0) / returns.length;
+        const variance = returns.reduce((sum,r) => sum + Math.pow(r - mean, 2), 0) / (returns.length - 1);
+        const vol = Math.sqrt(Math.max(0, variance));
+        const annualized = vol * Math.sqrt(252);
+        return {
+          period,
+          vol,
+          annualized,
+          upper:prevClose * (1 + vol),
+          lower:prevClose * (1 - vol),
+        };
+      }
+      function horizontalSessionLine(candles, value) {
+        if (!candles.length || !Number.isFinite(value)) return [];
+        const lastDay = anchorKey(candles[candles.length - 1].time, "day");
+        const session = candles.filter((c) => anchorKey(c.time, "day") === lastDay);
+        const range = session.length ? session : candles;
+        return range.map((c) => ({ time:c.time, value }));
+      }
       function computeSessionVolumeProfile(candles, bins=36) {
         if (!candles.length) return { bins:[], poc:null, vah:null, val:null, min:NaN, max:NaN, total:0 };
         const lastDay = anchorKey(candles[candles.length - 1].time, "day");
@@ -542,7 +579,9 @@ def render_lightweight_chart_html():
         const stdev2 = computeStdevBands(candles, vwapDay, 2);
         const refs = sessionRefs(candles);
         const volumeProfile = computeSessionVolumeProfile(candles);
-        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, stdev1, stdev2, refs, volumeProfile };
+        const hv252 = historicalVolatility(candles, 252, refs.prevClose);
+        const hv30 = historicalVolatility(candles, 30, refs.prevClose);
+        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, stdev1, stdev2, refs, volumeProfile, hv252, hv30 };
         indicators.signals = detectSignals(candles, indicators);
         return indicators;
       }
@@ -650,6 +689,16 @@ def render_lightweight_chart_html():
           addPriceLine(candleSeries, "VAH", state.indicators.volumeProfile?.vah?.high, "#22c55e");
           addPriceLine(candleSeries, "VAL", state.indicators.volumeProfile?.val?.low, "#ef4444");
         }
+        if (state.toggles.historicalVol) {
+          addLine("hv252u", horizontalSessionLine(state.candles, state.indicators.hv252.upper), "#a78bfa", 1);
+          addLine("hv252l", horizontalSessionLine(state.candles, state.indicators.hv252.lower), "#a78bfa", 1);
+          addLine("hv30u", horizontalSessionLine(state.candles, state.indicators.hv30.upper), "#fb923c", 1);
+          addLine("hv30l", horizontalSessionLine(state.candles, state.indicators.hv30.lower), "#fb923c", 1);
+          addPriceLine(candleSeries, "HV252 +", state.indicators.hv252.upper, "#a78bfa");
+          addPriceLine(candleSeries, "HV252 -", state.indicators.hv252.lower, "#a78bfa");
+          addPriceLine(candleSeries, "HV30 +", state.indicators.hv30.upper, "#fb923c");
+          addPriceLine(candleSeries, "HV30 -", state.indicators.hv30.lower, "#fb923c");
+        }
         if (state.toggles.oscillator) {
           const oscSeries = state.oscChart.addSeries(HistogramSeries, { color:"#38bdf8", priceFormat:{ type:"price", precision:2, minMove:0.01 } });
           oscSeries.setData(computeOsc(state.candles, vwap).map((p) => ({ ...p, color:p.value >= 0 ? "rgba(34,197,94,.65)" : "rgba(239,68,68,.65)" })));
@@ -682,6 +731,9 @@ def render_lightweight_chart_html():
         document.getElementById("lw-vp-poc").textContent = `POC ${fmt(indicators.volumeProfile?.poc?.mid, 2)}`;
         document.getElementById("lw-vp-range").textContent = `Range ${fmt(indicators.volumeProfile?.min, 2)} - ${fmt(indicators.volumeProfile?.max, 2)} | Vol ${fmt(indicators.volumeProfile?.total, 2)}`;
         document.getElementById("lw-vp-value-area").textContent = `VAH ${fmt(indicators.volumeProfile?.vah?.high, 2)} | VAL ${fmt(indicators.volumeProfile?.val?.low, 2)}`;
+        document.getElementById("lw-hv252").textContent = `HV252 ${Number.isFinite(indicators.hv252?.annualized) ? (indicators.hv252.annualized * 100).toFixed(2) : "---"}% anual`;
+        document.getElementById("lw-hv30").textContent = `HV30 ${Number.isFinite(indicators.hv30?.annualized) ? (indicators.hv30.annualized * 100).toFixed(2) : "---"}% anual`;
+        document.getElementById("lw-hv-levels").textContent = `30: ${fmt(indicators.hv30?.lower, 2)} / ${fmt(indicators.hv30?.upper, 2)} | 252: ${fmt(indicators.hv252?.lower, 2)} / ${fmt(indicators.hv252?.upper, 2)}`;
         renderAlerts(last, lastVwap, lastVol.rvol, indicators.signals);
       }
       function renderAlerts(last, vwap, rvol, signals) {
@@ -763,6 +815,10 @@ def render_lightweight_chart_html():
         state.series.stdev1l?.setData(state.indicators.stdev1.map((p) => ({ time:p.time, value:p.lower })));
         state.series.stdev2u?.setData(state.indicators.stdev2.map((p) => ({ time:p.time, value:p.upper })));
         state.series.stdev2l?.setData(state.indicators.stdev2.map((p) => ({ time:p.time, value:p.lower })));
+        state.series.hv252u?.setData(horizontalSessionLine(state.candles, state.indicators.hv252.upper));
+        state.series.hv252l?.setData(horizontalSessionLine(state.candles, state.indicators.hv252.lower));
+        state.series.hv30u?.setData(horizontalSessionLine(state.candles, state.indicators.hv30.upper));
+        state.series.hv30l?.setData(horizontalSessionLine(state.candles, state.indicators.hv30.lower));
         state.indicators.ma.forEach((m) => state.series[m.id]?.setData(m.data));
         if (state.series.osc) {
           state.series.osc.setData(computeOsc(state.candles, state.indicators.vwapDay).map((p) => ({ ...p, color:p.value >= 0 ? "rgba(34,197,94,.65)" : "rgba(239,68,68,.65)" })));
