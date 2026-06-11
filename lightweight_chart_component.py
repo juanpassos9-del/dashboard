@@ -139,6 +139,10 @@ def render_lightweight_chart_html():
         .lw-crosshair-card strong { display:block; color:#f8fafc; font-size:.85rem; margin-bottom:6px; }
         .lw-crosshair-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 10px; color:#cbd5e1; font-size:.75rem; }
         .lw-crosshair-grid span { color:#94a3b8; }
+        .lw-volume-profile { position:absolute; top:0; right:56px; width:150px; height:620px; z-index:3; pointer-events:none; opacity:.82; }
+        .lw-vp-bar { position:absolute; right:0; height:3px; min-width:2px; border-radius:999px 0 0 999px; background:rgba(56,189,248,.32); }
+        .lw-vp-bar.poc { height:5px; background:rgba(245,158,11,.9); box-shadow:0 0 8px rgba(245,158,11,.55); }
+        .lw-vp-label { position:absolute; right:0; top:6px; color:#94a3b8; font-size:.66rem; font-weight:900; text-transform:uppercase; background:rgba(8,13,20,.72); padding:2px 5px; border:1px solid #334155; border-radius:4px; }
         .lw-skeleton { position:absolute; inset:0; z-index:4; display:none; background:linear-gradient(90deg,#0b1220 0%,#111827 50%,#0b1220 100%); background-size:220% 100%; animation:lwPulse 1.2s ease-in-out infinite; }
         .lw-skeleton.show { display:block; }
         @keyframes lwPulse { from{background-position:220% 0;} to{background-position:-220% 0;} }
@@ -155,6 +159,7 @@ def render_lightweight_chart_html():
         <div class="lw-chart-wrap">
           <div class="lw-skeleton" id="lw-skeleton"></div>
           <div class="lw-crosshair-card" id="lw-crosshair-card"></div>
+          <div class="lw-volume-profile" id="lw-volume-profile"></div>
           <div id="lw-chart"></div>
           <div id="lw-osc"></div>
         </div>
@@ -164,6 +169,7 @@ def render_lightweight_chart_html():
           <div class="lw-stat"><span>Dist. VWAP</span><strong id="lw-dist">---</strong></div>
           <div class="lw-stat"><span>Corr preco x volume</span><strong id="lw-corr">---</strong></div>
           <div class="lw-stat"><span>Volume</span><strong id="lw-volume">---</strong><small id="lw-rvol">RVOL ---</small></div>
+          <div class="lw-stat"><span>Volume Profile sessao</span><strong id="lw-vp-poc">POC ---</strong><small id="lw-vp-range">---</small></div>
           <div class="lw-stat"><span>Referencia do candle</span><strong id="lw-hover-title">Passe o mouse</strong><small id="lw-hover-data">OHLC, horario, variacao e distancia da VWAP.</small></div>
           <div class="lw-settings" id="lw-ma-settings">
             <div class="lw-settings-title">Medias moveis</div>
@@ -197,7 +203,7 @@ def render_lightweight_chart_html():
       const defaultPrefs = {
         symbol:"BTCUSDT",
         timeframe:"1m",
-        toggles:{ ma:true, vwap:true, bands:true, stdevBands:false, volume:true, oscillator:true, refs:true, signals:true },
+        toggles:{ ma:true, vwap:true, bands:true, stdevBands:false, volume:true, volumeProfile:true, oscillator:true, refs:true, signals:true },
         maType:"SMA",
         ma:[
           { id:"ma9", period:9, enabled:true, color:"#22c55e" },
@@ -221,6 +227,7 @@ def render_lightweight_chart_html():
       const statusEl = document.getElementById("lw-status");
       const skeletonEl = document.getElementById("lw-skeleton");
       const crosshairCard = document.getElementById("lw-crosshair-card");
+      const volumeProfileEl = document.getElementById("lw-volume-profile");
       const fmt = (n, d=2) => Number.isFinite(n) ? n.toLocaleString("en-US", { maximumFractionDigits:d, minimumFractionDigits:d }) : "---";
       const fmtTime = (time) => new Date(time * 1000).toLocaleString("pt-BR", { timeZone:"America/Sao_Paulo", hour12:false });
       const setStatus = (msg) => { statusEl.textContent = msg; };
@@ -247,7 +254,7 @@ def render_lightweight_chart_html():
         actionBox.querySelectorAll("button").forEach((el) => el.remove());
         assets.forEach((asset) => assetBox.appendChild(button(asset.label, state.symbol === asset.symbol, () => loadSymbol(asset.symbol, state.timeframe))));
         timeframes.forEach((tf) => tfBox.appendChild(button(tf, state.timeframe === tf, () => loadSymbol(state.symbol, tf))));
-        [["ma","Medias"],["vwap","VWAP"],["bands","Bandas %"],["stdevBands","Desvios"],["refs","Refs"],["signals","Sinais"],["volume","Volume"],["oscillator","Osc"]].forEach(([key,label]) => {
+        [["ma","Medias"],["vwap","VWAP"],["bands","Bandas %"],["stdevBands","Desvios"],["refs","Refs"],["signals","Sinais"],["volume","Volume"],["volumeProfile","Vol Profile"],["oscillator","Osc"]].forEach(([key,label]) => {
           toggleBox.appendChild(button(label, state.toggles[key], () => { state.toggles[key] = !state.toggles[key]; savePrefs(); renderControls(); renderCharts(false); }, state.toggles[key] ? "toggle-on" : ""));
         });
         actionBox.appendChild(button("Reset Zoom", false, () => { state.chart?.timeScale().fitContent(); state.oscChart?.timeScale().fitContent(); }));
@@ -459,6 +466,32 @@ def render_lightweight_chart_html():
         const prevClose = prev[prev.length - 1]?.close;
         return { open, high, low, prevClose, current:candles[candles.length - 1]?.close };
       }
+      function computeSessionVolumeProfile(candles, bins=36) {
+        if (!candles.length) return { bins:[], poc:null, min:NaN, max:NaN, total:0 };
+        const lastDay = anchorKey(candles[candles.length - 1].time, "day");
+        const session = candles.filter((c) => anchorKey(c.time, "day") === lastDay);
+        if (!session.length) return { bins:[], poc:null, min:NaN, max:NaN, total:0 };
+        const min = session.reduce((m,c) => Math.min(m, c.low), Infinity);
+        const max = session.reduce((m,c) => Math.max(m, c.high), -Infinity);
+        const step = (max - min) / bins || 1;
+        const profile = Array.from({ length:bins }, (_, i) => ({
+          index:i,
+          low:min + step * i,
+          high:min + step * (i + 1),
+          mid:min + step * (i + .5),
+          volume:0,
+        }));
+        session.forEach((c) => {
+          const from = Math.max(0, Math.floor((c.low - min) / step));
+          const to = Math.min(bins - 1, Math.floor((c.high - min) / step));
+          const parts = Math.max(1, to - from + 1);
+          for (let i = from; i <= to; i += 1) profile[i].volume += (c.volume || 0) / parts;
+        });
+        const maxVolume = profile.reduce((m,b) => Math.max(m, b.volume), 0);
+        const poc = profile.reduce((best,b) => b.volume > (best?.volume || 0) ? b : best, null);
+        const total = session.reduce((sum,c) => sum + (c.volume || 0), 0);
+        return { bins:profile, poc, min, max, maxVolume, total };
+      }
       function detectSignals(candles, indicators) {
         const signals = [];
         candles.forEach((c, i) => {
@@ -487,7 +520,8 @@ def render_lightweight_chart_html():
         const stdev1 = computeStdevBands(candles, vwapDay, 1);
         const stdev2 = computeStdevBands(candles, vwapDay, 2);
         const refs = sessionRefs(candles);
-        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, stdev1, stdev2, refs };
+        const volumeProfile = computeSessionVolumeProfile(candles);
+        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, stdev1, stdev2, refs, volumeProfile };
         indicators.signals = detectSignals(candles, indicators);
         return indicators;
       }
@@ -513,6 +547,30 @@ def render_lightweight_chart_html():
             else state.markerApi = LightweightCharts.createSeriesMarkers(candleSeries, markers);
           }
         } catch (err) { console.warn("Markers indisponiveis", err); }
+      }
+      function renderVolumeProfile() {
+        volumeProfileEl.innerHTML = "";
+        volumeProfileEl.style.display = state.toggles.volumeProfile ? "block" : "none";
+        const profile = state.indicators?.volumeProfile;
+        if (!state.toggles.volumeProfile || !profile?.bins?.length || !state.series.candle) return;
+        const chartHeight = chartEl.clientHeight || 620;
+        volumeProfileEl.style.height = `${chartHeight}px`;
+        const label = document.createElement("div");
+        label.className = "lw-vp-label";
+        label.textContent = "Sessao VP";
+        volumeProfileEl.appendChild(label);
+        const maxWidth = Math.max(72, volumeProfileEl.clientWidth - 8);
+        profile.bins.forEach((bin) => {
+          if (!bin.volume || !profile.maxVolume) return;
+          const y = state.series.candle.priceToCoordinate(bin.mid);
+          if (!Number.isFinite(y) || y < 0 || y > chartHeight) return;
+          const bar = document.createElement("div");
+          bar.className = `lw-vp-bar ${profile.poc && bin.index === profile.poc.index ? "poc" : ""}`;
+          bar.style.top = `${Math.max(0, y - 2)}px`;
+          bar.style.width = `${Math.max(2, (bin.volume / profile.maxVolume) * maxWidth)}px`;
+          bar.title = `${fmt(bin.low,2)} - ${fmt(bin.high,2)} | Vol ${fmt(bin.volume,2)}`;
+          volumeProfileEl.appendChild(bar);
+        });
       }
       function renderCharts(fit=true) {
         if (state.chart) state.chart.remove(); if (state.oscChart) state.oscChart.remove();
@@ -579,6 +637,7 @@ def render_lightweight_chart_html():
         if (fit) state.chart.timeScale().fitContent();
         setupCrosshair();
         updateStats();
+        requestAnimationFrame(renderVolumeProfile);
       }
       function updateStats() {
         const indicators = state.indicators || computeIndicators(state.candles);
@@ -595,6 +654,8 @@ def render_lightweight_chart_html():
         document.getElementById("lw-corr").textContent = Number.isFinite(corr) ? corr.toFixed(2) : "---";
         document.getElementById("lw-volume").textContent = last ? fmt(last.volume, 4) : "---";
         document.getElementById("lw-rvol").textContent = `Media20 ${fmt(lastVol.avg, 2)} | RVOL ${fmt(lastVol.rvol, 2)}x`;
+        document.getElementById("lw-vp-poc").textContent = `POC ${fmt(indicators.volumeProfile?.poc?.mid, 2)}`;
+        document.getElementById("lw-vp-range").textContent = `Range ${fmt(indicators.volumeProfile?.min, 2)} - ${fmt(indicators.volumeProfile?.max, 2)} | Vol ${fmt(indicators.volumeProfile?.total, 2)}`;
         renderAlerts(last, lastVwap, lastVol.rvol, indicators.signals);
       }
       function renderAlerts(last, vwap, rvol, signals) {
@@ -682,6 +743,7 @@ def render_lightweight_chart_html():
         }
         applyMarkers(state.series.candle, state.indicators.signals);
         updateStats();
+        requestAnimationFrame(renderVolumeProfile);
       }
       function startSocket() {
         if (state.socket) state.socket.close();
@@ -732,7 +794,11 @@ def render_lightweight_chart_html():
         }
         finally { setLoading(false); }
       }
-      window.addEventListener("resize", () => { if (state.chart) state.chart.applyOptions({ width:chartEl.clientWidth }); if (state.oscChart) state.oscChart.applyOptions({ width:oscEl.clientWidth }); });
+      window.addEventListener("resize", () => {
+        if (state.chart) state.chart.applyOptions({ width:chartEl.clientWidth });
+        if (state.oscChart) state.oscChart.applyOptions({ width:oscEl.clientWidth });
+        requestAnimationFrame(renderVolumeProfile);
+      });
       renderControls(); loadSymbol(state.symbol, state.timeframe);
     })();
     </script>
