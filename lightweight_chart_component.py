@@ -203,6 +203,7 @@ def render_lightweight_chart_html():
       const tfSeconds = { "30s": 30, "1m": 60, "5m": 300, "h1": 3600, "1d": 86400, "1w": 604800 };
       const binanceIntervals = { "1m": "1m", "5m": "5m", "h1": "1h", "1d": "1d", "1w": "1w", "1month": "1M" };
       const intradayTimeframes = ["30s", "1m", "5m", "h1"];
+      const vwapStdevMultipliers = [0.618, 1, 1.618, 2];
       const defaultPrefs = {
         symbol:"BTCUSDT",
         timeframe:"1m",
@@ -591,12 +592,11 @@ def render_lightweight_chart_html():
         const vwapMonth = computeVWAP(candles, "month");
         const volumeStats = computeVolumeStats(candles, 20);
         const ma = state.ma.filter((m) => m.enabled).map((m) => ({ ...m, data:computeMA(candles, m.period, state.maType) }));
-        const stdev1 = computeStdevBands(candles, vwapDay, 1);
-        const stdev2 = computeStdevBands(candles, vwapDay, 2);
+        const stdevBands = vwapStdevMultipliers.map((multiplier) => ({ multiplier, data:computeStdevBands(candles, vwapDay, multiplier) }));
         const refs = sessionRefs(candles);
         const volumeProfile = computeSessionVolumeProfile(candles);
         const hv252 = calculateHistoricalVolatility(state.dailyCandles, 252);
-        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, stdev1, stdev2, refs, volumeProfile, hv252 };
+        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, stdevBands, refs, volumeProfile, hv252 };
         indicators.signals = detectSignals(candles, indicators);
         return indicators;
       }
@@ -686,10 +686,13 @@ def render_lightweight_chart_html():
           });
         }
         if (state.toggles.stdevBands) {
-          addLine("stdev1u", state.indicators.stdev1.map((p) => ({ time:p.time, value:p.upper })), "#f59e0b", 1);
-          addLine("stdev1l", state.indicators.stdev1.map((p) => ({ time:p.time, value:p.lower })), "#f59e0b", 1);
-          addLine("stdev2u", state.indicators.stdev2.map((p) => ({ time:p.time, value:p.upper })), "#ef4444", 1);
-          addLine("stdev2l", state.indicators.stdev2.map((p) => ({ time:p.time, value:p.lower })), "#ef4444", 1);
+          const colors = ["#22c55e", "#f59e0b", "#a78bfa", "#ef4444"];
+          state.indicators.stdevBands.forEach((band, i) => {
+            const key = String(band.multiplier).replace(".", "_");
+            const color = colors[i] || "#a78bfa";
+            addLine(`stdev_${key}_u`, band.data.map((p) => ({ time:p.time, value:p.upper })), color, 1);
+            addLine(`stdev_${key}_l`, band.data.map((p) => ({ time:p.time, value:p.lower })), color, 1);
+          });
         }
         if (state.toggles.ma) state.indicators.ma.forEach((m) => addLine(m.id, m.data, m.color, m.period >= 200 ? 2 : 1));
         if (state.toggles.refs) {
@@ -833,10 +836,11 @@ def render_lightweight_chart_html():
           state.series[`vwap_p_${pct}`]?.setData(state.indicators.vwapDay.map((p) => ({ time:p.time, value:p.value * (1 + pct) })));
           state.series[`vwap_m_${pct}`]?.setData(state.indicators.vwapDay.map((p) => ({ time:p.time, value:p.value * (1 - pct) })));
         });
-        state.series.stdev1u?.setData(state.indicators.stdev1.map((p) => ({ time:p.time, value:p.upper })));
-        state.series.stdev1l?.setData(state.indicators.stdev1.map((p) => ({ time:p.time, value:p.lower })));
-        state.series.stdev2u?.setData(state.indicators.stdev2.map((p) => ({ time:p.time, value:p.upper })));
-        state.series.stdev2l?.setData(state.indicators.stdev2.map((p) => ({ time:p.time, value:p.lower })));
+        state.indicators.stdevBands.forEach((band) => {
+          const key = String(band.multiplier).replace(".", "_");
+          state.series[`stdev_${key}_u`]?.setData(band.data.map((p) => ({ time:p.time, value:p.upper })));
+          state.series[`stdev_${key}_l`]?.setData(band.data.map((p) => ({ time:p.time, value:p.lower })));
+        });
         if (state.indicators.hv252?.ok) {
           state.indicators.hv252.levels.forEach((level) => {
             const key = `hv252_${String(level.multiplier).replace("-", "m").replace(".", "_")}`;
