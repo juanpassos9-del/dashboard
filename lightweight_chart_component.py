@@ -504,7 +504,7 @@ def render_lightweight_chart_html():
         const prevClose = source[source.length - 2]?.close ?? source[source.length - 1]?.close;
         return { ok:true, period, warning:"", prevClose, dailyVol, annualVol, levels:calculateVolatilityLevels(prevClose, dailyVol) };
       }
-      function calculateVolatilityLevels(prevClose, dailyVol, multipliers=[0.5, 1, 1.5, 2]) {
+      function calculateVolatilityLevels(prevClose, dailyVol, multipliers=[1, 1.5, 2]) {
         if (!Number.isFinite(prevClose) || !Number.isFinite(dailyVol)) return [];
         const levels = [{ label:"Fech. Ant.", price:prevClose, multiplier:0 }];
         multipliers.forEach((m) => {
@@ -705,7 +705,7 @@ def render_lightweight_chart_html():
           addPriceLine(candleSeries, "VAL", state.indicators.volumeProfile?.val?.low, "#ef4444");
         }
         if (state.toggles.hv252 && intradayTimeframes.includes(state.timeframe) && state.indicators.hv252.ok) {
-          const hvColors = { 0:"#f59e0b", 0.5:"#93c5fd", 1:"#60a5fa", 1.5:"#a78bfa", 2:"#f472b6" };
+          const hvColors = { 0:"#f59e0b", 1:"#60a5fa", 1.5:"#a78bfa", 2:"#f472b6" };
           state.indicators.hv252.levels.forEach((level) => {
             const key = `hv252_${String(level.multiplier).replace("-", "m").replace(".", "_")}`;
             const color = hvColors[Math.abs(level.multiplier)] || "#a78bfa";
