@@ -367,13 +367,13 @@ def render_lightweight_chart_html():
         source: "yahoo",
         ticker: asset.ticker,
       }));
-      const finnhubAssets = (finnhubPayload.enabled ? (finnhubPayload.assets || []) : []).map((asset) => ({
+      const finnhubAssets = (finnhubPayload.assets || []).map((asset) => ({
         symbol: asset.symbol,
         label: asset.label,
         source: "finnhub",
         ticker: asset.ticker,
       }));
-      const fredAssets = (fredPayload.enabled ? (fredPayload.assets || []) : []).map((asset) => ({
+      const fredAssets = (fredPayload.assets || []).map((asset) => ({
         symbol: asset.symbol,
         label: asset.label,
         source: "fred",
@@ -524,6 +524,7 @@ def render_lightweight_chart_html():
         return rows.map((r) => ({ time:Math.floor(r[0]/1000), open:+r[1], high:+r[2], low:+r[3], close:+r[4], volume:+r[5] }));
       }
       function fetchFinnhubHistorical(symbol, timeframe) {
+        if (!finnhubPayload.enabled) throw new Error(finnhubPayload.error || "Configure FINNHUB_API_KEY para habilitar Finnhub.");
         const series = (finnhubPayload.series && finnhubPayload.series[symbol]) || {};
         const intraday = series.intraday || [];
         const daily = series.daily || [];
@@ -548,6 +549,7 @@ def render_lightweight_chart_html():
         return intraday;
       }
       function fetchFredHistorical(symbol, timeframe) {
+        if (!fredPayload.enabled) throw new Error(fredPayload.error || "Configure FRED_API_KEY para habilitar FRED.");
         const series = (fredPayload.series && fredPayload.series[symbol]) || {};
         const daily = series.daily || [];
         if (!daily.length) throw new Error(`Sem dados FRED para ${symbol}`);
