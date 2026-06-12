@@ -295,13 +295,11 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         </div>
         <aside class="lw-side">
           <div class="lw-stat"><span>Ultimo</span><strong id="lw-last">---</strong></div>
-          <div class="lw-stat"><span>VWAP diaria</span><strong id="lw-vwap">---</strong><small id="lw-vwap-extra">---</small></div>
-          <div class="lw-stat"><span>Dist. VWAP</span><strong id="lw-dist">---</strong></div>
-          <div class="lw-stat"><span>Corr preco x volume</span><strong id="lw-corr">---</strong></div>
+          <div class="lw-stat"><span>VWAP / distancia</span><strong id="lw-vwap">---</strong><small id="lw-vwap-extra">---</small></div>
           <div class="lw-stat"><span>Volume</span><strong id="lw-volume">---</strong><small id="lw-rvol">RVOL ---</small></div>
-          <div class="lw-stat"><span>Volume Profile sessao</span><strong id="lw-vp-poc">POC ---</strong><small id="lw-vp-range">---</small><small id="lw-vp-value-area">VAH --- | VAL ---</small></div>
-          <div class="lw-stat"><span>HV 252 - bandas intradiarias</span><strong id="lw-hv252">HV252 ---</strong><small id="lw-hv30">Fech. ant. ---</small><small id="lw-hv-levels">---</small></div>
-          <div class="lw-stat"><span>Referencia do candle</span><strong id="lw-hover-title">Passe o mouse</strong><small id="lw-hover-data">OHLC, horario, variacao e distancia da VWAP.</small></div>
+          <div class="lw-stat"><span>Volume Profile</span><strong id="lw-vp-poc">POC ---</strong><small id="lw-vp-value-area">VAH --- | VAL ---</small></div>
+          <div class="lw-stat"><span>HV 252</span><strong id="lw-hv252">HV252 ---</strong><small id="lw-hv30">---</small><small id="lw-hv-levels" style="display:none;">---</small></div>
+          <div class="lw-stat"><span>Sinal / Candle</span><strong id="lw-hover-title">Passe o mouse</strong><small id="lw-hover-data">OHLC, VWAP e sinal.</small></div>
           <div class="lw-settings" id="lw-ma-settings">
             <div class="lw-settings-title">Medias moveis</div>
           </div>
@@ -1176,19 +1174,13 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const indicators = state.indicators || computeIndicators(state.candles);
         const vwap = indicators.vwapDay;
         const last = state.candles[state.candles.length - 1], lastVwap = vwap[vwap.length - 1]?.value;
-        const lastWeek = indicators.vwapWeek[indicators.vwapWeek.length - 1]?.value;
-        const lastMonth = indicators.vwapMonth[indicators.vwapMonth.length - 1]?.value;
         const lastVol = indicators.volumeStats[indicators.volumeStats.length - 1] || {};
         document.getElementById("lw-last").textContent = last ? fmt(last.close, 2) : "---";
         document.getElementById("lw-vwap").textContent = lastVwap ? fmt(lastVwap, 2) : "---";
-        document.getElementById("lw-vwap-extra").textContent = `Sem ${fmt(lastWeek,2)} | Mes ${fmt(lastMonth,2)}`;
-        document.getElementById("lw-dist").textContent = last && lastVwap ? `${(((last.close - lastVwap) / lastVwap) * 100).toFixed(2)}%` : "---";
-        const corr = corrPriceVolume(state.candles);
-        document.getElementById("lw-corr").textContent = Number.isFinite(corr) ? corr.toFixed(2) : "---";
+        document.getElementById("lw-vwap-extra").textContent = last && lastVwap ? `Dist ${(((last.close - lastVwap) / lastVwap) * 100).toFixed(2)}%` : "Dist ---";
         document.getElementById("lw-volume").textContent = last ? fmt(last.volume, 4) : "---";
-        document.getElementById("lw-rvol").textContent = `Media20 ${fmt(lastVol.avg, 2)} | RVOL ${fmt(lastVol.rvol, 2)}x`;
+        document.getElementById("lw-rvol").textContent = `RVOL ${fmt(lastVol.rvol, 2)}x | M20 ${fmt(lastVol.avg, 2)}`;
         document.getElementById("lw-vp-poc").textContent = `POC ${fmt(indicators.volumeProfile?.poc?.mid, 2)}`;
-        document.getElementById("lw-vp-range").textContent = `Range ${fmt(indicators.volumeProfile?.min, 2)} - ${fmt(indicators.volumeProfile?.max, 2)} | Vol ${fmt(indicators.volumeProfile?.total, 2)}`;
         document.getElementById("lw-vp-value-area").textContent = `VAH ${fmt(indicators.volumeProfile?.vah?.high, 2)} | VAL ${fmt(indicators.volumeProfile?.val?.low, 2)}`;
         const hv = indicators.hv252 || {};
         const level = (mult) => (hv.levels || []).find((item) => item.multiplier === mult)?.price;
