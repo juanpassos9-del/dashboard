@@ -329,6 +329,27 @@ def render_lightweight_chart_html():
       const binanceIntervals = { "1m": "1m", "5m": "5m", "h1": "1h", "1d": "1d", "1w": "1w", "1month": "1M" };
       const intradayTimeframes = ["30s", "1m", "5m", "h1"];
       const vwapStdevMultipliers = [1, 2, 3];
+      const defaultSignalConfig = {
+        enabled:true,
+        enabledSignals:{ REV_BUY:true, REV_SELL:true, TREND_BUY:true, TREND_SELL:true },
+        minScore:6,
+        cooldownCandles:10,
+        reversal:{ minDistanceFromVWAPPercent:0.5, proximityPercent:0.15 },
+        trend:{ maxPullbackDistancePercent:0.2, minBodyPercent:0.55 },
+        volume:{ lookback:20, minVolumeMultiplier:1.0 },
+        sessionFilter:{ enabled:false, blockedTimes:[] },
+        weights:{
+          favorableRegime:2,
+          movingAverageAlignment:2,
+          vwapDistance:2,
+          proximityToKeyLevel:1,
+          rejectionCandle:2,
+          impulseCandle:2,
+          volumeConfirmation:1,
+          previousCandleBreak:1,
+          vwapSide:1,
+        },
+      };
       const defaultPrefs = {
         symbol:"BTCUSDT",
         timeframe:"1m",
@@ -347,8 +368,17 @@ def render_lightweight_chart_html():
         ...storedPrefs,
         toggles:{ ...defaultPrefs.toggles, ...(storedPrefs.toggles || {}) },
         ma: Array.isArray(storedPrefs.ma) ? storedPrefs.ma : defaultPrefs.ma,
+        signalConfig:{
+          ...defaultSignalConfig,
+          ...(storedPrefs.signalConfig || {}),
+          enabledSignals:{ ...defaultSignalConfig.enabledSignals, ...((storedPrefs.signalConfig || {}).enabledSignals || {}) },
+          reversal:{ ...defaultSignalConfig.reversal, ...((storedPrefs.signalConfig || {}).reversal || {}) },
+          trend:{ ...defaultSignalConfig.trend, ...((storedPrefs.signalConfig || {}).trend || {}) },
+          volume:{ ...defaultSignalConfig.volume, ...((storedPrefs.signalConfig || {}).volume || {}) },
+          weights:{ ...defaultSignalConfig.weights, ...((storedPrefs.signalConfig || {}).weights || {}) },
+        },
       };
-      const state = { symbol:prefs.symbol, timeframe:prefs.timeframe, candles:[], dailyCandles:[], indicators:null, chart:null, oscChart:null, series:{}, priceLines:[], markerApi:null, socket:null, toggles:prefs.toggles, maType:prefs.maType, ma:prefs.ma };
+      const state = { symbol:prefs.symbol, timeframe:prefs.timeframe, candles:[], dailyCandles:[], indicators:null, chart:null, oscChart:null, series:{}, priceLines:[], markerApi:null, socket:null, toggles:prefs.toggles, maType:prefs.maType, ma:prefs.ma, signalConfig:prefs.signalConfig };
       if (!assetRegistry[state.symbol]) state.symbol = "BTCUSDT";
       if (assetRegistry[state.symbol]?.source === "fred" && !fredPayload.enabled) state.symbol = "BTCUSDT";
       if (!timeframes.includes(state.timeframe)) state.timeframe = "1m";
@@ -365,7 +395,7 @@ def render_lightweight_chart_html():
       const setStatus = (msg) => { statusEl.textContent = msg; };
       const setLoading = (on) => skeletonEl.classList.toggle("show", Boolean(on));
       const savePrefs = () => {
-        localStorage.setItem("lw_chart_prefs", JSON.stringify({ symbol:state.symbol, timeframe:state.timeframe, toggles:state.toggles, maType:state.maType, ma:state.ma }));
+        localStorage.setItem("lw_chart_prefs", JSON.stringify({ symbol:state.symbol, timeframe:state.timeframe, toggles:state.toggles, maType:state.maType, ma:state.ma, signalConfig:state.signalConfig }));
       };
       const providerNotes = [fredPayload.enabled ? "" : fredPayload.error].filter(Boolean).join(" | ");
 
@@ -411,6 +441,51 @@ def render_lightweight_chart_html():
           row.innerHTML = `<label><input type="checkbox" ${ma.enabled ? "checked" : ""}> MA</label><input type="number" min="2" max="500" value="${ma.period}"><span style="color:${ma.color};font-weight:900;">${ma.period}</span>`;
           row.querySelector("input[type='checkbox']").onchange = (e) => { state.ma[index].enabled = e.target.checked; savePrefs(); renderCharts(false); };
           row.querySelector("input[type='number']").onchange = (e) => { state.ma[index].period = Math.max(2, Math.min(500, Number(e.target.value) || ma.period)); savePrefs(); renderMASettings(); renderCharts(false); };
+          box.appendChild(row);
+        });
+        renderSignalSettings(box);
+      }
+      function renderSignalSettings(box) {
+        const cfg = state.signalConfig;
+        const title = document.createElement("div");
+        title.className = "lw-settings-title";
+        title.style.marginTop = "6px";
+        title.textContent = "Motor de sinais";
+        box.appendChild(title);
+        const checks = [
+          ["enabled", "Motor"],
+          ["REV_BUY", "REV BUY"],
+          ["REV_SELL", "REV SELL"],
+          ["TREND_BUY", "TREND BUY"],
+          ["TREND_SELL", "TREND SELL"],
+        ];
+        checks.forEach(([key, label]) => {
+          const row = document.createElement("div");
+          row.className = "lw-setting-row";
+          const checked = key === "enabled" ? cfg.enabled : cfg.enabledSignals[key];
+          row.innerHTML = `<label style="grid-column:1 / 3;"><input type="checkbox" ${checked ? "checked" : ""}> ${label}</label><span></span>`;
+          row.querySelector("input").onchange = (e) => {
+            if (key === "enabled") cfg.enabled = e.target.checked;
+            else cfg.enabledSignals[key] = e.target.checked;
+            savePrefs(); renderCharts(false);
+          };
+          box.appendChild(row);
+        });
+        [
+          ["minScore", "Score", 1, 20, 1, cfg.minScore, (v) => { cfg.minScore = v; }],
+          ["cooldown", "Cooldown", 0, 80, 1, cfg.cooldownCandles, (v) => { cfg.cooldownCandles = v; }],
+          ["vwapDist", "Dist %", 0.1, 5, 0.1, cfg.reversal.minDistanceFromVWAPPercent, (v) => { cfg.reversal.minDistanceFromVWAPPercent = v; }],
+          ["near", "Nivel %", 0.05, 2, 0.05, cfg.reversal.proximityPercent, (v) => { cfg.reversal.proximityPercent = v; }],
+          ["rvol", "RVOL", 0.5, 5, 0.1, cfg.volume.minVolumeMultiplier, (v) => { cfg.volume.minVolumeMultiplier = v; }],
+        ].forEach((item) => {
+          const [, label, min, max, step, value, setter] = item;
+          const row = document.createElement("div");
+          row.className = "lw-setting-row";
+          row.innerHTML = `<span>${label}</span><input type="number" min="${min}" max="${max}" step="${step}" value="${value}"><span>${value}</span>`;
+          row.querySelector("input").onchange = (e) => {
+            const v = Math.max(min, Math.min(max, Number(e.target.value) || value));
+            setter(v); savePrefs(); renderMASettings(); renderCharts(false);
+          };
           box.appendChild(row);
         });
       }
@@ -724,24 +799,199 @@ def render_lightweight_chart_html():
         const vah = profile[highIndex] || null;
         return { bins:profile, poc, vah, val, min, max, maxVolume, total, valueVolume };
       }
-      function detectSignals(candles, indicators) {
-        const signals = [];
-        candles.forEach((c, i) => {
-          if (i < 1) return;
-          const prev = candles[i - 1];
-          const vwap = indicators.vwapDay[i]?.value;
-          const rvol = indicators.volumeStats[i]?.rvol;
-          if (!vwap || !Number.isFinite(rvol)) return;
-          const bullishRejection = c.close > prev.high || (c.low < prev.low && c.close > c.open);
-          const bearishRejection = c.close < prev.low || (c.high > prev.high && c.close < c.open);
-          if (c.close <= vwap * 0.99 && c.close > c.open && rvol >= 1.5 && bullishRejection) {
-            signals.push({ time:c.time, position:"belowBar", color:"#22c55e", shape:"arrowUp", text:"BUY VWAP" });
-          }
-          if (c.close >= vwap * 1.01 && c.close < c.open && rvol >= 1.5 && bearishRejection) {
-            signals.push({ time:c.time, position:"aboveBar", color:"#ef4444", shape:"arrowDown", text:"SELL VWAP" });
-          }
+      const safe = (n) => Number.isFinite(n) ? n : NaN;
+      const pctDistance = (price, level) => Number.isFinite(price) && Number.isFinite(level) && level !== 0 ? ((price - level) / level) * 100 : NaN;
+      const minFinite = (...values) => {
+        const nums = values.filter(Number.isFinite);
+        return nums.length ? Math.min(...nums) : NaN;
+      };
+      const maxFinite = (...values) => {
+        const nums = values.filter(Number.isFinite);
+        return nums.length ? Math.max(...nums) : NaN;
+      };
+      function valueAt(series, time) {
+        return (series || []).find((item) => item.time === time)?.value;
+      }
+      function computeSignalMAs(candles) {
+        const periods = [9, 21, 80, 200];
+        const out = {};
+        periods.forEach((period) => {
+          const map = new Map(computeMA(candles, period, "EMA").map((item) => [item.time, item.value]));
+          out[`ema${period}`] = candles.map((c) => ({ time:c.time, value:map.get(c.time) }));
         });
-        return signals;
+        return out;
+      }
+      function isNearLevel(price, level, tolerancePercent) {
+        return Number.isFinite(price) && Number.isFinite(level) && Math.abs(pctDistance(price, level)) <= tolerancePercent;
+      }
+      function candleShape(c) {
+        const range = Math.max(0, c.high - c.low);
+        const body = Math.abs(c.close - c.open);
+        const upperWick = c.high - Math.max(c.open, c.close);
+        const lowerWick = Math.min(c.open, c.close) - c.low;
+        const closePosition = range > 0 ? (c.close - c.low) / range : 0.5;
+        const bodyShare = range > 0 ? body / range : 0;
+        return { range, body, upperWick, lowerWick, closePosition, bodyShare };
+      }
+      function isBullishRejectionCandle(c) {
+        const s = candleShape(c);
+        return s.range > 0 && s.lowerWick >= Math.max(s.body * 1.5, s.range * 0.18) && s.closePosition >= 0.6 && c.close >= c.open;
+      }
+      function isBearishRejectionCandle(c) {
+        const s = candleShape(c);
+        return s.range > 0 && s.upperWick >= Math.max(s.body * 1.5, s.range * 0.18) && s.closePosition <= 0.4 && c.close <= c.open;
+      }
+      function isBullishImpulseCandle(c, minBodyPercent) {
+        const s = candleShape(c);
+        return s.range > 0 && c.close > c.open && s.bodyShare >= minBodyPercent && s.closePosition >= 0.65;
+      }
+      function isBearishImpulseCandle(c, minBodyPercent) {
+        const s = candleShape(c);
+        return s.range > 0 && c.close < c.open && s.bodyShare >= minBodyPercent && s.closePosition <= 0.35;
+      }
+      function getRecentSwingHigh(candles, index, lookback=20) {
+        return candles.slice(Math.max(0, index - lookback), index).reduce((m,c) => Math.max(m, c.high), -Infinity);
+      }
+      function getRecentSwingLow(candles, index, lookback=20) {
+        return candles.slice(Math.max(0, index - lookback), index).reduce((m,c) => Math.min(m, c.low), Infinity);
+      }
+      function isPullbackNearEMAOrVWAP(c, levels, tolerancePercent) {
+        return levels.some((level) => Number.isFinite(level) && (isNearLevel(c.low, level, tolerancePercent) || isNearLevel(c.high, level, tolerancePercent) || isNearLevel(c.close, level, tolerancePercent)));
+      }
+      function signalContext(candles, indicators, i) {
+        const c = candles[i];
+        const refs = indicators.refs || {};
+        const vp = indicators.volumeProfile || {};
+        const hv = indicators.hv252 || {};
+        const hvLevel = (mult) => (hv.levels || []).find((item) => item.multiplier === mult)?.price;
+        return {
+          c,
+          prev:candles[i - 1],
+          vwap:valueAt(indicators.vwapDay, c.time),
+          ema9:valueAt(indicators.signalMAs.ema9, c.time),
+          ema21:valueAt(indicators.signalMAs.ema21, c.time),
+          ema80:valueAt(indicators.signalMAs.ema80, c.time),
+          ema200:valueAt(indicators.signalMAs.ema200, c.time),
+          ema21Prev:valueAt(indicators.signalMAs.ema21, candles[Math.max(0, i - 5)]?.time),
+          rvol:indicators.volumeStats[i]?.rvol,
+          avgVol:indicators.volumeStats[i]?.avg,
+          vah:vp.vah?.high,
+          val:vp.val?.low,
+          poc:vp.poc?.mid,
+          prevClose:refs.prevClose,
+          dayHigh:refs.high,
+          dayLow:refs.low,
+          hvUpper1:hvLevel(1),
+          hvLower1:hvLevel(-1),
+          hvUpper2:hvLevel(2),
+          hvLower2:hvLevel(-2),
+        };
+      }
+      function detectRegime(ctx, cfg) {
+        const { c, vwap, ema9, ema21, ema80, ema200, ema21Prev, vah, val, dayHigh, dayLow, hvUpper1, hvLower1 } = ctx;
+        const dist = pctDistance(c.close, vwap);
+        const emaSpread = Number.isFinite(ema9) && Number.isFinite(ema21) ? Math.abs(ema9 - ema21) / c.close : Infinity;
+        const slope21 = Number.isFinite(ema21) && Number.isFinite(ema21Prev) ? ema21 - ema21Prev : NaN;
+        if (Number.isFinite(dist) && dist >= cfg.reversal.minDistanceFromVWAPPercent && [vah, dayHigh, hvUpper1].some((level) => isNearLevel(c.close, level, cfg.reversal.proximityPercent * 2))) return "stretched_up";
+        if (Number.isFinite(dist) && dist <= -cfg.reversal.minDistanceFromVWAPPercent && [val, dayLow, hvLower1].some((level) => isNearLevel(c.close, level, cfg.reversal.proximityPercent * 2))) return "stretched_down";
+        if (Number.isFinite(dist) && Math.abs(dist) < 0.3 && emaSpread < 0.0015) return "range";
+        if (c.close > vwap && ema9 > ema21 && ema21 > ema80 && (ema80 >= ema200 || c.close > ema200 || !Number.isFinite(ema200)) && slope21 > 0) return "uptrend";
+        if (c.close < vwap && ema9 < ema21 && ema21 < ema80 && (ema80 <= ema200 || c.close < ema200 || !Number.isFinite(ema200)) && slope21 < 0) return "downtrend";
+        if (Number.isFinite(dist) && Math.abs(dist) < 0.5) return "range";
+        return dist >= 0 ? "stretched_up" : "stretched_down";
+      }
+      function addScore(parts, ok, weight, reason) {
+        if (ok) { parts.score += weight; parts.reasons.push(reason); }
+      }
+      function buildSignal(type, ctx, score, regime, reasons, stop, target1, target2) {
+        return { time:ctx.c.time, type, price:ctx.c.close, score, regime, reasons, suggestedStop:safe(stop), suggestedTarget1:safe(target1), suggestedTarget2:safe(target2) };
+      }
+      function scoreCandidate(type, candles, indicators, i, regime) {
+        const cfg = state.signalConfig;
+        const w = cfg.weights;
+        const ctx = signalContext(candles, indicators, i);
+        const { c, prev, vwap, ema9, ema21, ema80, rvol, vah, val, poc, prevClose, dayHigh, dayLow, hvUpper1, hvLower1, hvUpper2, hvLower2 } = ctx;
+        if (!prev || !Number.isFinite(vwap)) return null;
+        const parts = { score:0, reasons:[] };
+        const dist = pctDistance(c.close, vwap);
+        const volOk = Number.isFinite(rvol) && rvol >= cfg.volume.minVolumeMultiplier;
+        const nearLow = [val, dayLow, hvLower1, hvLower2].some((level) => isNearLevel(c.low, level, cfg.reversal.proximityPercent));
+        const nearHigh = [vah, dayHigh, hvUpper1, hvUpper2].some((level) => isNearLevel(c.high, level, cfg.reversal.proximityPercent));
+        const maBull = ema9 > ema21 && ema21 > ema80;
+        const maBear = ema9 < ema21 && ema21 < ema80;
+        if (type === "REV_BUY") {
+          addScore(parts, ["range","stretched_down"].includes(regime), w.favorableRegime, `Regime ${regime}`);
+          addScore(parts, c.close < vwap, w.vwapSide, "Preco abaixo da VWAP");
+          addScore(parts, Number.isFinite(dist) && dist <= -cfg.reversal.minDistanceFromVWAPPercent, w.vwapDistance, `Distancia VWAP ${dist.toFixed(2)}%`);
+          addScore(parts, nearLow, w.proximityToKeyLevel, "Proximo de VAL/minima/HV inferior");
+          addScore(parts, isBullishRejectionCandle(c), w.rejectionCandle, "Candle com rejeicao inferior");
+          addScore(parts, c.close > prev.close || c.close > prev.high, w.previousCandleBreak, "Virada sobre candle anterior");
+          addScore(parts, volOk, w.volumeConfirmation, `Volume confirmado ${fmt(rvol,2)}x`);
+          return buildSignal(type, ctx, parts.score, regime, parts.reasons, minFinite(c.low, val), vwap, Number.isFinite(poc) ? poc : prevClose);
+        }
+        if (type === "REV_SELL") {
+          addScore(parts, ["range","stretched_up"].includes(regime), w.favorableRegime, `Regime ${regime}`);
+          addScore(parts, c.close > vwap, w.vwapSide, "Preco acima da VWAP");
+          addScore(parts, Number.isFinite(dist) && dist >= cfg.reversal.minDistanceFromVWAPPercent, w.vwapDistance, `Distancia VWAP +${dist.toFixed(2)}%`);
+          addScore(parts, nearHigh, w.proximityToKeyLevel, "Proximo de VAH/maxima/HV superior");
+          addScore(parts, isBearishRejectionCandle(c), w.rejectionCandle, "Candle com rejeicao superior");
+          addScore(parts, c.close < prev.close || c.close < prev.low, w.previousCandleBreak, "Virada abaixo do candle anterior");
+          addScore(parts, volOk, w.volumeConfirmation, `Volume confirmado ${fmt(rvol,2)}x`);
+          return buildSignal(type, ctx, parts.score, regime, parts.reasons, maxFinite(c.high, vah), vwap, Number.isFinite(poc) ? poc : prevClose);
+        }
+        if (type === "TREND_BUY") {
+          addScore(parts, regime === "uptrend", w.favorableRegime, "Regime de alta");
+          addScore(parts, c.close > vwap, w.vwapSide, "Preco acima da VWAP");
+          addScore(parts, maBull, w.movingAverageAlignment, "Medias alinhadas para alta");
+          addScore(parts, isPullbackNearEMAOrVWAP(c, [ema9, ema21, vwap], cfg.trend.maxPullbackDistancePercent), w.proximityToKeyLevel, "Pullback em EMA/VWAP");
+          addScore(parts, isBullishImpulseCandle(c, cfg.trend.minBodyPercent), w.impulseCandle, "Candle de impulso comprador");
+          addScore(parts, c.close > prev.high, w.previousCandleBreak, "Rompimento da maxima anterior");
+          addScore(parts, volOk, w.volumeConfirmation, `Volume confirmado ${fmt(rvol,2)}x`);
+          return buildSignal(type, ctx, parts.score, regime, parts.reasons, minFinite(ema21, vwap, getRecentSwingLow(candles, i, 12)), getRecentSwingHigh(candles, i, 24), Number.isFinite(vah) ? vah : hvUpper1);
+        }
+        addScore(parts, regime === "downtrend", w.favorableRegime, "Regime de baixa");
+        addScore(parts, c.close < vwap, w.vwapSide, "Preco abaixo da VWAP");
+        addScore(parts, maBear, w.movingAverageAlignment, "Medias alinhadas para baixa");
+        addScore(parts, isPullbackNearEMAOrVWAP(c, [ema9, ema21, vwap], cfg.trend.maxPullbackDistancePercent), w.proximityToKeyLevel, "Pullback em EMA/VWAP");
+        addScore(parts, isBearishImpulseCandle(c, cfg.trend.minBodyPercent), w.impulseCandle, "Candle de impulso vendedor");
+        addScore(parts, c.close < prev.low, w.previousCandleBreak, "Rompimento da minima anterior");
+        addScore(parts, volOk, w.volumeConfirmation, `Volume confirmado ${fmt(rvol,2)}x`);
+        return buildSignal(type, ctx, parts.score, regime, parts.reasons, maxFinite(ema21, vwap, getRecentSwingHigh(candles, i, 12)), getRecentSwingLow(candles, i, 24), Number.isFinite(val) ? val : hvLower1);
+      }
+      function generateSignals(candles, indicators) {
+        const cfg = state.signalConfig;
+        if (!cfg.enabled || candles.length < 30) return [];
+        const out = [];
+        const lastByType = {};
+        for (let i = 20; i < candles.length; i += 1) {
+          const ctx = signalContext(candles, indicators, i);
+          const regime = detectRegime(ctx, cfg);
+          const candidates = ["REV_BUY","REV_SELL","TREND_BUY","TREND_SELL"]
+            .filter((type) => cfg.enabledSignals[type])
+            .map((type) => scoreCandidate(type, candles, indicators, i, regime))
+            .filter((sig) => sig && sig.score >= cfg.minScore);
+          if (!candidates.length) continue;
+          candidates.sort((a,b) => b.score - a.score);
+          const best = candidates[0];
+          if (lastByType[best.type] !== undefined && i - lastByType[best.type] < cfg.cooldownCandles) continue;
+          const lastAny = out[out.length - 1];
+          if (lastAny && i - lastAny.index < Math.max(1, Math.floor(cfg.cooldownCandles / 2)) && lastAny.signal.type === best.type) continue;
+          out.push({ index:i, signal:best });
+          lastByType[best.type] = i;
+        }
+        return out.map((item) => item.signal);
+      }
+      function buildSignalMarkers(signals) {
+        const style = {
+          REV_BUY:{ position:"belowBar", shape:"arrowUp", color:"#00C853", label:"REV BUY" },
+          REV_SELL:{ position:"aboveBar", shape:"arrowDown", color:"#D50000", label:"REV SELL" },
+          TREND_BUY:{ position:"belowBar", shape:"arrowUp", color:"#00B0FF", label:"TREND BUY" },
+          TREND_SELL:{ position:"aboveBar", shape:"arrowDown", color:"#FF6D00", label:"TREND SELL" },
+        };
+        return (signals || []).map((signal) => {
+          const s = style[signal.type] || style.REV_BUY;
+          return { time:signal.time, position:s.position, shape:s.shape, color:s.color, text:`${s.label} ${signal.score}` };
+        });
       }
       function computeIndicators(candles) {
         const vwapDay = computeVWAP(candles, "day");
@@ -749,12 +999,13 @@ def render_lightweight_chart_html():
         const vwapMonth = computeVWAP(candles, "month");
         const volumeStats = computeVolumeStats(candles, 20);
         const ma = state.ma.filter((m) => m.enabled).map((m) => ({ ...m, data:computeMA(candles, m.period, state.maType) }));
+        const signalMAs = computeSignalMAs(candles);
         const stdevBands = vwapStdevMultipliers.map((multiplier) => ({ multiplier, data:computeStdevBands(candles, vwapDay, multiplier) }));
         const refs = sessionRefs(candles);
         const volumeProfile = computeSessionVolumeProfile(candles);
         const hv252 = calculateHistoricalVolatility(state.dailyCandles, 252);
-        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, stdevBands, refs, volumeProfile, hv252 };
-        indicators.signals = detectSignals(candles, indicators);
+        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, signalMAs, stdevBands, refs, volumeProfile, hv252 };
+        indicators.signals = generateSignals(candles, indicators);
         return indicators;
       }
       function addLine(key, data, color, width) {
@@ -771,7 +1022,7 @@ def render_lightweight_chart_html():
         state.priceLines.push(line);
       }
       function applyMarkers(candleSeries, markers) {
-        if (!state.toggles.signals) markers = [];
+        markers = state.toggles.signals ? buildSignalMarkers(markers) : [];
         try {
           if (typeof candleSeries.setMarkers === "function") candleSeries.setMarkers(markers);
           else if (typeof LightweightCharts.createSeriesMarkers === "function") {
@@ -930,8 +1181,10 @@ def render_lightweight_chart_html():
         if (Number.isFinite(rvol) && rvol >= 2) alerts.push(["Volume relativo extremo", "hot"]);
         else if (Number.isFinite(rvol) && rvol >= 1.5) alerts.push(["Volume relativo alto", "hot"]);
         const recent = (signals || []).filter((s) => last && s.time >= last.time - (tfSeconds[state.timeframe] || 60) * 3);
-        if (recent.some((s) => s.text.includes("BUY"))) alerts.push(["Setup compra em formação", "buy"]);
-        if (recent.some((s) => s.text.includes("SELL"))) alerts.push(["Setup venda em formação", "sell"]);
+        const buySignal = recent.find((s) => s.type.includes("BUY"));
+        const sellSignal = recent.find((s) => s.type.includes("SELL"));
+        if (buySignal) alerts.push([`${buySignal.type} score ${buySignal.score}`, "buy"]);
+        if (sellSignal) alerts.push([`${sellSignal.type} score ${sellSignal.score}`, "sell"]);
         if (!alerts.length) alerts.push(["Sem alerta operacional ativo", ""]);
         alerts.forEach(([text, cls]) => {
           const div = document.createElement("div");
@@ -943,14 +1196,25 @@ def render_lightweight_chart_html():
       function candleByTime(time) {
         return state.candles.find((c) => c.time === time);
       }
+      function signalByTime(time) {
+        return (state.indicators?.signals || []).find((s) => s.time === time);
+      }
       function vwapAt(time) {
         return (state.indicators?.vwapDay || []).find((v) => v.time === time)?.value;
       }
       function renderHover(c, x=12, y=12) {
         if (!c) return;
         const v = vwapAt(c.time);
+        const signal = signalByTime(c.time);
         const change = ((c.close - c.open) / c.open) * 100;
         const dist = v ? ((c.close - v) / v) * 100 : NaN;
+        const signalHtml = signal ? `
+            <div style="grid-column:1 / -1; border-top:1px solid #334155; margin-top:6px; padding-top:6px;">
+              <div style="color:#f8fafc; font-weight:900;">${escapeHtml(signal.type)} | Score ${signal.score} | ${escapeHtml(signal.regime)}</div>
+              <div><span>Entrada</span> ${fmt(signal.price,2)} | <span>Stop</span> ${fmt(signal.suggestedStop,2)}</div>
+              <div><span>Alvo 1</span> ${fmt(signal.suggestedTarget1,2)} | <span>Alvo 2</span> ${fmt(signal.suggestedTarget2,2)}</div>
+              <div style="color:#cbd5e1; margin-top:3px;">${escapeHtml(signal.reasons.slice(0, 5).join(" | "))}</div>
+            </div>` : "";
         const html = `
           <strong>${state.symbol} | ${fmtTime(c.time)}</strong>
           <div class="lw-crosshair-grid">
@@ -958,13 +1222,16 @@ def render_lightweight_chart_html():
             <div><span>Low</span> ${fmt(c.low,2)}</div><div><span>Close</span> ${fmt(c.close,2)}</div>
             <div><span>Volume</span> ${fmt(c.volume,2)}</div><div><span>Var</span> ${Number.isFinite(change) ? change.toFixed(2) : "---"}%</div>
             <div><span>VWAP</span> ${fmt(v,2)}</div><div><span>Dist VWAP</span> ${Number.isFinite(dist) ? dist.toFixed(2) : "---"}%</div>
+            ${signalHtml}
           </div>`;
         crosshairCard.innerHTML = html;
         crosshairCard.style.display = "block";
         crosshairCard.style.left = `${Math.min(x + 16, Math.max(12, chartEl.clientWidth - 280))}px`;
         crosshairCard.style.top = `${Math.min(y + 16, Math.max(12, chartEl.clientHeight - 160))}px`;
         document.getElementById("lw-hover-title").textContent = `${fmtTime(c.time)}`;
-        document.getElementById("lw-hover-data").textContent = `O ${fmt(c.open,2)} H ${fmt(c.high,2)} L ${fmt(c.low,2)} C ${fmt(c.close,2)} | Vol ${fmt(c.volume,2)} | Dist VWAP ${Number.isFinite(dist) ? dist.toFixed(2) : "---"}%`;
+        document.getElementById("lw-hover-data").textContent = signal
+          ? `${signal.type} score ${signal.score} | Stop ${fmt(signal.suggestedStop,2)} | Alvos ${fmt(signal.suggestedTarget1,2)} / ${fmt(signal.suggestedTarget2,2)}`
+          : `O ${fmt(c.open,2)} H ${fmt(c.high,2)} L ${fmt(c.low,2)} C ${fmt(c.close,2)} | Vol ${fmt(c.volume,2)} | Dist VWAP ${Number.isFinite(dist) ? dist.toFixed(2) : "---"}%`;
       }
       function setupCrosshair() {
         state.chart.subscribeCrosshairMove((param) => {
