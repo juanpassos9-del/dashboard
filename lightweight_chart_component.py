@@ -203,7 +203,7 @@ def render_lightweight_chart_html():
       const tfSeconds = { "30s": 30, "1m": 60, "5m": 300, "h1": 3600, "1d": 86400, "1w": 604800 };
       const binanceIntervals = { "1m": "1m", "5m": "5m", "h1": "1h", "1d": "1d", "1w": "1w", "1month": "1M" };
       const intradayTimeframes = ["30s", "1m", "5m", "h1"];
-      const vwapStdevMultipliers = [0.618, 1, 1.618, 2];
+      const vwapStdevMultipliers = [1, 2, 3];
       const defaultPrefs = {
         symbol:"BTCUSDT",
         timeframe:"1m",
