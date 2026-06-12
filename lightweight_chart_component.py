@@ -218,8 +218,9 @@ def load_fred_lightweight_payload():
     return {"enabled": True, "assets": FRED_LIGHTWEIGHT_ASSETS, "series": payload, "error": "; ".join(errors) or None}
 
 
-def render_lightweight_chart_html(signal_mode="all", chart_title=None):
+def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_id="main"):
     signal_mode = signal_mode if signal_mode in {"all", "reversal", "trend"} else "all"
+    instance_id = "".join(ch for ch in str(instance_id or "main") if ch.isalnum() or ch in ("_", "-")) or "main"
     chart_title = chart_title or {
         "all": "Grafico operacional",
         "reversal": "Grafico operacional - Reversao",
@@ -231,6 +232,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None):
     fred_json = json.dumps(fred_payload, ensure_ascii=False)
     signal_mode_json = json.dumps(signal_mode)
     chart_title_json = json.dumps(chart_title, ensure_ascii=False)
+    instance_id_json = json.dumps(instance_id)
     html = """
     <div id="lw-root">
       <style>
@@ -316,6 +318,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None):
       const fredPayload = __FRED_PAYLOAD__;
       const signalMode = __SIGNAL_MODE__;
       const chartTitle = __CHART_TITLE__;
+      const instanceId = __INSTANCE_ID__;
       const binanceAssets = [
         { symbol: "BTCUSDT", label: "BTC", source: "binance" },
         { symbol: "ETHUSDT", label: "ETH", source: "binance" },
@@ -346,9 +349,10 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None):
         trend:["TREND_BUY","TREND_SELL"],
       };
       const allowedSignalTypes = signalModeTypes[signalMode] || signalModeTypes.all;
-      const signalStorageKey = `lw_chart_prefs_${signalMode}`;
+      const signalStorageKey = `lw_chart_prefs_${signalMode}_${instanceId}`;
       const defaultSignalConfig = {
         enabled:true,
+        signalFamilies:{ reversal:true, trend:true },
         enabledSignals:{
           REV_BUY:allowedSignalTypes.includes("REV_BUY"),
           REV_SELL:allowedSignalTypes.includes("REV_SELL"),
@@ -394,6 +398,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None):
         signalConfig:{
           ...defaultSignalConfig,
           ...(storedPrefs.signalConfig || {}),
+          signalFamilies:{ ...defaultSignalConfig.signalFamilies, ...((storedPrefs.signalConfig || {}).signalFamilies || {}) },
           enabledSignals:{ ...defaultSignalConfig.enabledSignals, ...((storedPrefs.signalConfig || {}).enabledSignals || {}) },
           reversal:{ ...defaultSignalConfig.reversal, ...((storedPrefs.signalConfig || {}).reversal || {}) },
           trend:{ ...defaultSignalConfig.trend, ...((storedPrefs.signalConfig || {}).trend || {}) },
@@ -404,6 +409,8 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None):
       const state = { symbol:prefs.symbol, timeframe:prefs.timeframe, candles:[], dailyCandles:[], indicators:null, chart:null, oscChart:null, series:{}, priceLines:[], markerApi:null, socket:null, toggles:prefs.toggles, maType:prefs.maType, ma:prefs.ma, signalConfig:prefs.signalConfig };
       allowedSignalTypes.forEach((type) => { state.signalConfig.enabledSignals[type] = state.signalConfig.enabledSignals[type] !== false; });
       Object.keys(state.signalConfig.enabledSignals).forEach((type) => { if (!allowedSignalTypes.includes(type)) state.signalConfig.enabledSignals[type] = false; });
+      if (signalMode === "reversal") state.signalConfig.signalFamilies.trend = false;
+      if (signalMode === "trend") state.signalConfig.signalFamilies.reversal = false;
       if (!assetRegistry[state.symbol]) state.symbol = "BTCUSDT";
       if (assetRegistry[state.symbol]?.source === "fred" && !fredPayload.enabled) state.symbol = "BTCUSDT";
       if (!timeframes.includes(state.timeframe)) state.timeframe = "1m";
@@ -478,14 +485,20 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None):
         title.style.marginTop = "6px";
         title.textContent = "Motor de sinais";
         box.appendChild(title);
-        const checks = [["enabled", "Motor"], ...allowedSignalTypes.map((type) => [type, type.replace("_", " ")])];
+        const familyChecks = [["family:reversal", "REV"], ["family:trend", "TREND"]].filter(([key]) => {
+          if (signalMode === "reversal") return key === "family:reversal";
+          if (signalMode === "trend") return key === "family:trend";
+          return true;
+        });
+        const checks = [["enabled", "Motor"], ...familyChecks, ...allowedSignalTypes.map((type) => [type, type.replace("_", " ")])];
         checks.forEach(([key, label]) => {
           const row = document.createElement("div");
           row.className = "lw-setting-row";
-          const checked = key === "enabled" ? cfg.enabled : cfg.enabledSignals[key];
+          const checked = key === "enabled" ? cfg.enabled : key.startsWith("family:") ? cfg.signalFamilies[key.split(":")[1]] : cfg.enabledSignals[key];
           row.innerHTML = `<label style="grid-column:1 / 3;"><input type="checkbox" ${checked ? "checked" : ""}> ${label}</label><span></span>`;
           row.querySelector("input").onchange = (e) => {
             if (key === "enabled") cfg.enabled = e.target.checked;
+            else if (key.startsWith("family:")) cfg.signalFamilies[key.split(":")[1]] = e.target.checked;
             else cfg.enabledSignals[key] = e.target.checked;
             savePrefs(); renderCharts(false);
           };
@@ -988,6 +1001,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None):
           const regime = detectRegime(ctx, cfg);
           const candidates = ["REV_BUY","REV_SELL","TREND_BUY","TREND_SELL"]
             .filter((type) => cfg.enabledSignals[type])
+            .filter((type) => type.startsWith("REV_") ? cfg.signalFamilies.reversal : cfg.signalFamilies.trend)
             .map((type) => scoreCandidate(type, candles, indicators, i, regime))
             .filter((sig) => sig && sig.score >= cfg.minScore);
           if (!candidates.length) continue;
@@ -1377,4 +1391,5 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None):
         .replace("__FRED_PAYLOAD__", fred_json)
         .replace("__SIGNAL_MODE__", signal_mode_json)
         .replace("__CHART_TITLE__", chart_title_json)
+        .replace("__INSTANCE_ID__", instance_id_json)
     )
