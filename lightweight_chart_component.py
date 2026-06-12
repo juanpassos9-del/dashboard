@@ -727,14 +727,40 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       }
       function sessionRefs(candles) {
         if (!candles.length) return {};
-        const lastDay = anchorKey(candles[candles.length - 1].time, "day");
-        const today = candles.filter((c) => anchorKey(c.time, "day") === lastDay);
-        const prev = candles.filter((c) => anchorKey(c.time, "day") !== lastDay);
-        const open = today[0]?.open;
-        const high = today.reduce((m,c) => Math.max(m, c.high), -Infinity);
-        const low = today.reduce((m,c) => Math.min(m, c.low), Infinity);
-        const prevClose = prev[prev.length - 1]?.close;
-        return { open, high, low, prevClose, current:candles[candles.length - 1]?.close };
+        const statsFor = (anchor, offset=0) => {
+          const grouped = new Map();
+          candles.forEach((c) => {
+            const key = anchorKey(c.time, anchor);
+            if (!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key).push(c);
+          });
+          const keys = Array.from(grouped.keys());
+          const key = keys[keys.length - 1 - offset];
+          const rows = grouped.get(key) || [];
+          if (!rows.length) return {};
+          return {
+            key,
+            open:rows[0]?.open,
+            high:rows.reduce((m,c) => Math.max(m, c.high), -Infinity),
+            low:rows.reduce((m,c) => Math.min(m, c.low), Infinity),
+            close:rows[rows.length - 1]?.close,
+          };
+        };
+        const day = statsFor("day", 0);
+        const prevDay = statsFor("day", 1);
+        const prevWeek = statsFor("week", 1);
+        const prevMonth = statsFor("month", 1);
+        return {
+          open:day.open,
+          high:day.high,
+          low:day.low,
+          prevClose:prevDay.close,
+          current:candles[candles.length - 1]?.close,
+          day,
+          prevDay,
+          prevWeek,
+          prevMonth,
+        };
       }
       function calculateLogReturns(closes) {
         const returns = [];
@@ -1036,9 +1062,9 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const s = state.chart.addSeries(LineSeries, { color, lineWidth:width, priceLineVisible:false, lastValueVisible:false });
         s.setData(data); state.series[key] = s;
       }
-      function addPriceLine(series, title, price, color, style=2) {
+      function addPriceLine(series, title, price, color, style=2, width=1) {
         if (!Number.isFinite(price)) return;
-        const line = series.createPriceLine({ price, color, lineWidth:1, lineStyle:style, axisLabelVisible:true, title });
+        const line = series.createPriceLine({ price, color, lineWidth:width, lineStyle:style, axisLabelVisible:true, title });
         state.priceLines.push(line);
       }
       function applyMarkers(candleSeries, markers) {
@@ -1123,11 +1149,17 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         if (state.toggles.ma) state.indicators.ma.forEach((m) => addLine(m.id, m.data, m.color, m.period >= 200 ? 2 : 1));
         if (state.toggles.refs) {
           const refs = state.indicators.refs;
-          addPriceLine(candleSeries, "Abertura", refs.open, "#38bdf8");
-          addPriceLine(candleSeries, "Max dia", refs.high, "#22c55e");
-          addPriceLine(candleSeries, "Min dia", refs.low, "#ef4444");
-          addPriceLine(candleSeries, "Fech ant", refs.prevClose, "#f59e0b");
-          addPriceLine(candleSeries, "Atual", refs.current, "#f8fafc", 0);
+          addPriceLine(candleSeries, "DIA MAX", refs.day?.high, "#22c55e", 0, 2);
+          addPriceLine(candleSeries, "DIA MIN", refs.day?.low, "#ef4444", 0, 2);
+          addPriceLine(candleSeries, "ABERT DIA", refs.day?.open, "#38bdf8", 2, 1);
+          addPriceLine(candleSeries, "DIA ANT MAX", refs.prevDay?.high, "#60a5fa", 2, 2);
+          addPriceLine(candleSeries, "DIA ANT MIN", refs.prevDay?.low, "#f97316", 2, 2);
+          addPriceLine(candleSeries, "FECH ANT", refs.prevDay?.close, "#f59e0b", 2, 1);
+          addPriceLine(candleSeries, "SEM ANT MAX", refs.prevWeek?.high, "#a78bfa", 3, 2);
+          addPriceLine(candleSeries, "SEM ANT MIN", refs.prevWeek?.low, "#c084fc", 3, 2);
+          addPriceLine(candleSeries, "MES ANT MAX", refs.prevMonth?.high, "#f472b6", 1, 2);
+          addPriceLine(candleSeries, "MES ANT MIN", refs.prevMonth?.low, "#fb7185", 1, 2);
+          addPriceLine(candleSeries, "ATUAL", refs.current, "#f8fafc", 0, 1);
         }
         if (state.toggles.volumeProfile) {
           addPriceLine(candleSeries, "VAH", state.indicators.volumeProfile?.vah?.high, "#22c55e");
