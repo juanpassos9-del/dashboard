@@ -714,12 +714,23 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         return out;
       }
       function computeVolumeStats(candles, period=20) {
-        const out = []; let sum = 0;
+        const out = []; let sum = 0, financialSum = 0;
         candles.forEach((c, i) => {
+          const financialVolume = Math.max(0, Number(c.volume || 0)) * Number(c.close || 0);
           sum += c.volume || 0;
+          financialSum += financialVolume;
           if (i >= period) sum -= candles[i - period].volume || 0;
+          if (i >= period) financialSum -= Math.max(0, Number(candles[i - period].volume || 0)) * Number(candles[i - period].close || 0);
           const avg = i >= period - 1 ? sum / period : NaN;
-          out.push({ time:c.time, avg, rvol:Number.isFinite(avg) && avg > 0 ? c.volume / avg : NaN });
+          const financialAvg = i >= period - 1 ? financialSum / period : NaN;
+          out.push({
+            time:c.time,
+            avg,
+            rvol:Number.isFinite(avg) && avg > 0 ? c.volume / avg : NaN,
+            financialVolume,
+            financialAvg,
+            financialRvol:Number.isFinite(financialAvg) && financialAvg > 0 ? financialVolume / financialAvg : NaN,
+          });
         });
         return out;
       }
@@ -971,6 +982,9 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           ema21Prev:valueAt(indicators.signalMAs.ema21, candles[Math.max(0, i - 5)]?.time),
           rvol:indicators.volumeStats[i]?.rvol,
           avgVol:indicators.volumeStats[i]?.avg,
+          financialVolume:indicators.volumeStats[i]?.financialVolume,
+          avgFinancialVolume:indicators.volumeStats[i]?.financialAvg,
+          financialRvol:indicators.volumeStats[i]?.financialRvol,
           prevClose:refs.prevClose,
           dayHigh:refs.high,
           dayLow:refs.low,
@@ -1035,11 +1049,11 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const cfg = state.signalConfig;
         const w = cfg.weights;
         const ctx = signalContext(candles, indicators, i);
-        const { c, prev, vwap, ema9, ema21, ema80, rvol, prevClose, dayHigh, dayLow, hvUpper1, hvLower1, hvUpper2, hvLower2 } = ctx;
+        const { c, prev, vwap, ema9, ema21, ema80, rvol, financialVolume, avgFinancialVolume, financialRvol, prevClose, dayHigh, dayLow, hvUpper1, hvLower1, hvUpper2, hvLower2 } = ctx;
         if (!prev || !Number.isFinite(vwap)) return null;
         const parts = { score:0, reasons:[] };
         const dist = pctDistance(c.close, vwap);
-        const volOk = Number.isFinite(rvol) && rvol >= cfg.volume.minVolumeMultiplier;
+        const volOk = Number.isFinite(financialVolume) && Number.isFinite(avgFinancialVolume) && avgFinancialVolume > 0 && financialVolume > avgFinancialVolume && (!Number.isFinite(cfg.volume.minVolumeMultiplier) || financialRvol >= cfg.volume.minVolumeMultiplier);
         const nearLow = [dayLow, hvLower1, hvLower2].some((level) => isNearLevel(c.low, level, cfg.reversal.proximityPercent));
         const nearHigh = [dayHigh, hvUpper1, hvUpper2].some((level) => isNearLevel(c.high, level, cfg.reversal.proximityPercent));
         const maBull = ema9 > ema21 && ema21 > ema80;
@@ -1055,7 +1069,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           addScore(parts, nearLow, w.proximityToKeyLevel, "Proximo de minima/HV inferior");
           addScore(parts, isBullishRejectionCandle(c), w.rejectionCandle, "Candle com rejeicao inferior");
           addScore(parts, c.close > prev.close || c.close > prev.high, w.previousCandleBreak, "Virada sobre candle anterior");
-          addScore(parts, volOk, w.volumeConfirmation, `Volume confirmado ${fmt(rvol,2)}x`);
+          addScore(parts, volOk, w.volumeConfirmation, `Volume financeiro confirmado ${fmt(financialRvol,2)}x`);
           return buildSignal(type, ctx, parts.score, regime, parts.reasons, minFinite(c.low, dayLow, hvLower1), vwap, Number.isFinite(prevClose) ? prevClose : hvUpper1);
         }
         if (type === "REV_SELL") {
@@ -1069,7 +1083,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           addScore(parts, nearHigh, w.proximityToKeyLevel, "Proximo de maxima/HV superior");
           addScore(parts, isBearishRejectionCandle(c), w.rejectionCandle, "Candle com rejeicao superior");
           addScore(parts, c.close < prev.close || c.close < prev.low, w.previousCandleBreak, "Virada abaixo do candle anterior");
-          addScore(parts, volOk, w.volumeConfirmation, `Volume confirmado ${fmt(rvol,2)}x`);
+          addScore(parts, volOk, w.volumeConfirmation, `Volume financeiro confirmado ${fmt(financialRvol,2)}x`);
           return buildSignal(type, ctx, parts.score, regime, parts.reasons, maxFinite(c.high, dayHigh, hvUpper1), vwap, Number.isFinite(prevClose) ? prevClose : hvLower1);
         }
         if (type === "TREND_BUY") {
@@ -1082,7 +1096,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           addScore(parts, rsi.ok, w.rsiConfirmation, rsi.reason);
           addScore(parts, isBullishImpulseCandle(c, cfg.trend.minBodyPercent), w.impulseCandle, "Candle de impulso comprador");
           addScore(parts, c.close > prev.high, w.previousCandleBreak, "Rompimento da maxima anterior");
-          addScore(parts, volOk, w.volumeConfirmation, `Volume confirmado ${fmt(rvol,2)}x`);
+          addScore(parts, volOk, w.volumeConfirmation, `Volume financeiro confirmado ${fmt(financialRvol,2)}x`);
           return buildSignal(type, ctx, parts.score, regime, parts.reasons, minFinite(ema21, vwap, getRecentSwingLow(candles, i, 12)), getRecentSwingHigh(candles, i, 24), Number.isFinite(dayHigh) ? dayHigh : hvUpper1);
         }
         const rsi = trendRsiConfirmation(ctx, "sell", cfg);
@@ -1094,7 +1108,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         addScore(parts, rsi.ok, w.rsiConfirmation, rsi.reason);
         addScore(parts, isBearishImpulseCandle(c, cfg.trend.minBodyPercent), w.impulseCandle, "Candle de impulso vendedor");
         addScore(parts, c.close < prev.low, w.previousCandleBreak, "Rompimento da minima anterior");
-        addScore(parts, volOk, w.volumeConfirmation, `Volume confirmado ${fmt(rvol,2)}x`);
+        addScore(parts, volOk, w.volumeConfirmation, `Volume financeiro confirmado ${fmt(financialRvol,2)}x`);
         return buildSignal(type, ctx, parts.score, regime, parts.reasons, maxFinite(ema21, vwap, getRecentSwingHigh(candles, i, 12)), getRecentSwingLow(candles, i, 24), Number.isFinite(dayLow) ? dayLow : hvLower1);
       }
       function generateSignals(candles, indicators) {
@@ -1279,7 +1293,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         document.getElementById("lw-vwap").textContent = lastVwap ? fmt(lastVwap, 2) : "---";
         document.getElementById("lw-vwap-extra").textContent = last && lastVwap ? `Dist ${(((last.close - lastVwap) / lastVwap) * 100).toFixed(2)}%` : "Dist ---";
         document.getElementById("lw-volume").textContent = last ? fmt(last.volume, 4) : "---";
-        document.getElementById("lw-rvol").textContent = `RVOL ${fmt(lastVol.rvol, 2)}x | M20 ${fmt(lastVol.avg, 2)}`;
+        document.getElementById("lw-rvol").textContent = `RVOL ${fmt(lastVol.rvol, 2)}x | Fin ${fmt(lastVol.financialRvol, 2)}x | M20 ${fmt(lastVol.avg, 2)}`;
         document.getElementById("lw-vp-poc").textContent = `POC ${fmt(indicators.volumeProfile?.poc?.mid, 2)}`;
         document.getElementById("lw-vp-value-area").textContent = `VAH ${fmt(indicators.volumeProfile?.vah?.high, 2)} | VAL ${fmt(indicators.volumeProfile?.val?.low, 2)}`;
         const hv = indicators.hv252 || {};
