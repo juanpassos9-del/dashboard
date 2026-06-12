@@ -38,11 +38,33 @@ FRED_LIGHTWEIGHT_ASSETS = [
 ]
 
 
+def _clean_secret(value) -> str:
+    return str(value or "").strip().strip('"').strip("'")
+
+
 def _secret_or_env(name: str) -> str:
     try:
-        return str(st.secrets.get(name, "") or os.environ.get(name, "")).strip()
+        value = st.secrets.get(name, "") or os.environ.get(name, "")
+        return _clean_secret(value)
     except Exception:
-        return str(os.environ.get(name, "")).strip()
+        return _clean_secret(os.environ.get(name, ""))
+
+
+def _nested_secret_or_env(name: str, *paths) -> str:
+    direct = _secret_or_env(name)
+    if direct:
+        return direct
+    for path in paths:
+        try:
+            node = st.secrets
+            for part in path:
+                node = node.get(part, {})
+            value = _clean_secret(node)
+            if value:
+                return value
+        except Exception:
+            continue
+    return ""
 
 
 def _rows_to_candles(rows, limit=650):
@@ -60,6 +82,40 @@ def _rows_to_candles(rows, limit=650):
         except Exception:
             continue
     return candles
+
+
+def _download_yahoo_pair(ticker: str, intraday_limit=650, daily_limit=520):
+    def extract_candles(data, limit):
+        if data is None or data.empty:
+            return []
+        df = data.dropna(subset=["Open", "High", "Low", "Close"])
+        candles = []
+        for idx, row in df.tail(limit).iterrows():
+            ts = int(idx.timestamp())
+            volume = row.get("Volume", 0)
+            candles.append({
+                "time": ts,
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": float(row["Close"]),
+                "volume": float(volume) if volume == volume else 0.0,
+            })
+        return candles
+
+    intraday = []
+    daily = []
+    try:
+        data = yf.download(ticker, period="5d", interval="1m", prepost=True, progress=False, threads=False, timeout=15)
+        intraday = extract_candles(data, intraday_limit)
+    except Exception:
+        intraday = []
+    try:
+        data = yf.download(ticker, period="2y", interval="1d", prepost=True, progress=False, threads=False, timeout=15)
+        daily = extract_candles(data, daily_limit)
+    except Exception:
+        daily = []
+    return intraday, daily
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -147,7 +203,10 @@ def load_yahoo_lightweight_payload():
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_finnhub_lightweight_payload():
-    token = _secret_or_env("FINNHUB_API_KEY") or _secret_or_env("FINNHUB_TOKEN")
+    token = (
+        _nested_secret_or_env("FINNHUB_API_KEY", ("finnhub", "api_key"), ("finnhub", "token"))
+        or _nested_secret_or_env("FINNHUB_TOKEN", ("FINNHUB", "API_KEY"), ("FINNHUB", "TOKEN"))
+    )
     if not token:
         return {
             "enabled": False,
@@ -177,9 +236,13 @@ def load_finnhub_lightweight_payload():
         res.raise_for_status()
         data = res.json()
         if data.get("s") != "ok":
+            message = data.get("error") or data.get("s") or "sem dados"
+            raise ValueError(f"Finnhub {ticker} {resolution}: {message}")
+        timestamps = data.get("t", [])
+        if not timestamps:
             return []
         rows = []
-        for i, ts in enumerate(data.get("t", [])):
+        for i, ts in enumerate(timestamps):
             rows.append({
                 "time": int(ts),
                 "open": data.get("o", [])[i],
@@ -192,24 +255,39 @@ def load_finnhub_lightweight_payload():
 
     for asset in FINNHUB_LIGHTWEIGHT_ASSETS:
         ticker = asset["ticker"]
+        intraday = []
+        daily = []
+        source_label = "Finnhub"
         try:
             intraday = fetch_candles(ticker, "1", from_intraday, now)
-            daily = fetch_candles(ticker, "D", from_daily, now)
-            if intraday or daily:
-                payload[asset["symbol"]] = {
-                    "label": asset["label"],
-                    "ticker": ticker,
-                    "intraday": intraday,
-                    "daily": daily,
-                }
         except Exception as e:
-            errors.append(f"{ticker}: {e}")
+            errors.append(f"{ticker} intraday: {e}")
+        try:
+            daily = fetch_candles(ticker, "D", from_daily, now)
+        except Exception as e:
+            errors.append(f"{ticker} daily: {e}")
+        if not intraday or not daily:
+            fallback_intraday, fallback_daily = _download_yahoo_pair(ticker)
+            if not intraday and fallback_intraday:
+                intraday = fallback_intraday
+                source_label = "yfinance fallback"
+            if not daily and fallback_daily:
+                daily = fallback_daily
+                source_label = "yfinance fallback"
+        if intraday or daily:
+            payload[asset["symbol"]] = {
+                "label": asset["label"],
+                "ticker": ticker,
+                "intraday": intraday,
+                "daily": daily,
+                "sourceLabel": source_label,
+            }
     return {"enabled": True, "assets": FINNHUB_LIGHTWEIGHT_ASSETS, "series": payload, "error": "; ".join(errors) or None}
 
 
 @st.cache_data(ttl=900, show_spinner=False)
 def load_fred_lightweight_payload():
-    api_key = _secret_or_env("FRED_API_KEY")
+    api_key = _nested_secret_or_env("FRED_API_KEY", ("fred", "api_key"), ("FRED", "API_KEY"))
     if not api_key:
         return {
             "enabled": False,
@@ -410,6 +488,7 @@ def render_lightweight_chart_html():
       if (assetRegistry[state.symbol]?.source === "finnhub" && !finnhubPayload.enabled) state.symbol = "BTCUSDT";
       if (assetRegistry[state.symbol]?.source === "fred" && !fredPayload.enabled) state.symbol = "BTCUSDT";
       if (!timeframes.includes(state.timeframe)) state.timeframe = "1m";
+      if (assetRegistry[state.symbol]?.source === "fred" && intradayTimeframes.includes(state.timeframe)) state.timeframe = "1d";
       const chartEl = document.getElementById("lw-chart");
       const oscEl = document.getElementById("lw-osc");
       const statusEl = document.getElementById("lw-status");
@@ -418,6 +497,7 @@ def render_lightweight_chart_html():
       const volumeProfileEl = document.getElementById("lw-volume-profile");
       const fmt = (n, d=2) => Number.isFinite(n) ? n.toLocaleString("en-US", { maximumFractionDigits:d, minimumFractionDigits:d }) : "---";
       const fmtTime = (time) => new Date(time * 1000).toLocaleString("pt-BR", { timeZone:"America/Sao_Paulo", hour12:false });
+      const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;" }[ch]));
       const setStatus = (msg) => { statusEl.textContent = msg; };
       const setLoading = (on) => skeletonEl.classList.toggle("show", Boolean(on));
       const savePrefs = () => {
@@ -484,8 +564,8 @@ def render_lightweight_chart_html():
         chartEl.innerHTML = `
           <div style="display:grid;place-items:center;height:100%;padding:24px;color:#cbd5e1;text-align:center;">
             <div>
-              <div style="font-weight:900;font-size:1rem;color:#f8fafc;">${title}</div>
-              ${detail ? `<div style="margin-top:8px;color:#94a3b8;font-size:.82rem;max-width:620px;line-height:1.45;">${detail}</div>` : ""}
+              <div style="font-weight:900;font-size:1rem;color:#f8fafc;">${escapeHtml(title)}</div>
+              ${detail ? `<div style="margin-top:8px;color:#94a3b8;font-size:.82rem;max-width:620px;line-height:1.45;">${escapeHtml(detail)}</div>` : ""}
             </div>
           </div>`;
         oscEl.innerHTML = "";
@@ -1103,7 +1183,8 @@ def render_lightweight_chart_html():
         const asset = assetRegistry[state.symbol] || { source: "binance" };
         if (asset.source !== "binance") {
           state.socket = null;
-          const sourceName = asset.source === "finnhub" ? "Finnhub" : asset.source === "fred" ? "FRED" : "yfinance";
+          const loadedSeries = asset.source === "finnhub" ? finnhubPayload.series?.[state.symbol] : asset.source === "fred" ? fredPayload.series?.[state.symbol] : yahooPayload.series?.[state.symbol];
+          const sourceName = loadedSeries?.sourceLabel || (asset.source === "finnhub" ? "Finnhub" : asset.source === "fred" ? "FRED" : "yfinance");
           const code = asset.ticker || asset.seriesId || state.symbol;
           setStatus(`Dados ${sourceName} carregados: ${asset.label} (${code}). Sem WebSocket no browser; use Recarregar para atualizar.`);
           return;
@@ -1125,26 +1206,29 @@ def render_lightweight_chart_html():
         state.socket.onerror = () => setStatus("WebSocket Binance indisponivel no momento.");
       }
       async function loadSymbol(symbol, timeframe) {
-        state.symbol = symbol; state.timeframe = timeframe; renderControls();
+        const nextAsset = assetRegistry[symbol] || { source: "binance", label: symbol };
+        state.symbol = symbol;
+        state.timeframe = nextAsset.source === "fred" && intradayTimeframes.includes(timeframe) ? "1d" : timeframe;
+        renderControls();
         savePrefs();
-        const asset = assetRegistry[symbol] || { source: "binance", label: symbol };
+        const asset = nextAsset;
         setLoading(true);
-        if (asset.source === "yahoo" && timeframe === "30s") {
+        if (asset.source === "yahoo" && state.timeframe === "30s") {
           setStatus(`${asset.label}: yfinance nao possui 30s; usando candles de 1m.`);
-        } else if (asset.source === "fred" && intradayTimeframes.includes(timeframe)) {
-          setStatus(`${asset.label}: FRED entrega serie diaria. Troque para 1d, 1w ou 1month.`);
+        } else if (asset.source === "fred" && state.timeframe !== timeframe) {
+          setStatus(`${asset.label}: FRED entrega serie diaria. Ajustei automaticamente para 1d.`);
         } else {
           const sourceName = asset.source === "yahoo" ? "yfinance" : asset.source === "finnhub" ? "Finnhub" : asset.source === "fred" ? "FRED" : "Binance";
-          setStatus(`Carregando historico ${sourceName}: ${asset.label || symbol} ${timeframe}...`);
+          setStatus(`Carregando historico ${sourceName}: ${asset.label || symbol} ${state.timeframe}...`);
         }
         try {
           const [candles, dailyCandles] = await Promise.all([
-            fetchHistorical(symbol, timeframe),
+            fetchHistorical(symbol, state.timeframe),
             fetchDailyCandles(symbol).catch((err) => { console.warn("Daily candles indisponiveis", err); return []; }),
           ]);
           state.candles = candles;
           state.dailyCandles = dailyCandles;
-          if (!state.candles.length) throw new Error(`Ativo ${asset.label || symbol} sem candles para ${timeframe}.`);
+          if (!state.candles.length) throw new Error(`Ativo ${asset.label || symbol} sem candles para ${state.timeframe}.`);
           renderCharts();
           startSocket();
           if (asset.source === "binance") setStatus("Historico carregado. Atualizacao em tempo real via Binance WebSocket.");
