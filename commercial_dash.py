@@ -2849,13 +2849,13 @@ def pagina_graficos():
     st.markdown("##### Grafico 1")
     components.html(
         render_lightweight_chart_html(signal_mode="all", chart_title="Motor de sinais 1", instance_id="signals_1"),
-        height=1120,
+        height=1360,
         scrolling=False,
     )
     st.markdown("##### Grafico 2")
     components.html(
         render_lightweight_chart_html(signal_mode="all", chart_title="Motor de sinais 2", instance_id="signals_2"),
-        height=1120,
+        height=1360,
         scrolling=False,
     )
     

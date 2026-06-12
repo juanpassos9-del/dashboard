@@ -245,7 +245,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         .lw-btn.toggle-on { border-color:#22c55e; color:#eafff3; }
         .lw-btn.warn { border-color:#f59e0b; color:#fff7ed; }
         .lw-main { display:grid; grid-template-columns:minmax(0,1fr) 310px; gap:0; }
-        #lw-chart { height:760px; min-width:0; }
+        #lw-chart { height:1000px; min-width:0; }
         .lw-chart-wrap { position:relative; min-width:0; }
         .lw-side { border-left:1px solid #1f2937; background:#0b1220; padding:10px; display:grid; align-content:start; gap:8px; }
         .lw-stat { background:#111827; border:1px solid #253044; border-radius:6px; padding:8px; }
@@ -266,7 +266,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         .lw-crosshair-card strong { display:block; color:#f8fafc; font-size:.85rem; margin-bottom:6px; }
         .lw-crosshair-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 10px; color:#cbd5e1; font-size:.75rem; }
         .lw-crosshair-grid span { color:#94a3b8; }
-        .lw-volume-profile { position:absolute; top:0; right:56px; width:150px; height:760px; z-index:3; pointer-events:none; opacity:.82; }
+        .lw-volume-profile { position:absolute; top:0; right:56px; width:150px; height:1000px; z-index:3; pointer-events:none; opacity:.82; }
         .lw-vp-bar { position:absolute; right:0; height:3px; min-width:2px; border-radius:999px 0 0 999px; background:rgba(56,189,248,.32); }
         .lw-vp-bar.value-area { background:rgba(34,197,94,.38); }
         .lw-vp-bar.poc { height:5px; background:rgba(245,158,11,.9); box-shadow:0 0 8px rgba(245,158,11,.55); }
@@ -275,7 +275,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         .lw-skeleton.show { display:block; }
         @keyframes lwPulse { from{background-position:220% 0;} to{background-position:-220% 0;} }
         .lw-status { color:#94a3b8; font-size:.75rem; padding:8px 12px 10px; border-top:1px solid #1f2937; background:#0d1420; }
-        @media (max-width:900px){ .lw-main{grid-template-columns:1fr;} .lw-side{border-left:0; border-top:1px solid #1f2937; grid-template-columns:repeat(2,minmax(0,1fr));} #lw-chart{height:560px;} }
+        @media (max-width:900px){ .lw-main{grid-template-columns:1fr;} .lw-side{border-left:0; border-top:1px solid #1f2937; grid-template-columns:repeat(2,minmax(0,1fr));} #lw-chart{height:640px;} }
       </style>
       <div class="lw-toolbar">
         <div class="lw-group"><span class="lw-label" id="lw-chart-title">Grafico operacional</span></div>
@@ -1056,7 +1056,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         volumeProfileEl.style.display = state.toggles.volumeProfile ? "block" : "none";
         const profile = state.indicators?.volumeProfile;
         if (!state.toggles.volumeProfile || !profile?.bins?.length || !state.series.candle) return;
-        const chartHeight = chartEl.clientHeight || 620;
+        const chartHeight = chartEl.clientHeight || 1000;
         volumeProfileEl.style.height = `${chartHeight}px`;
         const label = document.createElement("div");
         label.className = "lw-vp-label";
@@ -1078,7 +1078,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       function renderCharts(fit=true) {
         if (state.chart) state.chart.remove();
         chartEl.innerHTML = ""; state.series = {}; state.priceLines = []; state.markerApi = null;
-        state.chart = makeChart(chartEl, chartEl.clientHeight || 760);
+        state.chart = makeChart(chartEl, chartEl.clientHeight || 1000);
         state.indicators = computeIndicators(state.candles);
         const candleSeries = state.chart.addSeries(CandlestickSeries, { upColor:"#00c087", downColor:"#ff4b4b", borderVisible:false, wickUpColor:"#00c087", wickDownColor:"#ff4b4b" });
         candleSeries.setData(state.candles); state.series.candle = candleSeries;
