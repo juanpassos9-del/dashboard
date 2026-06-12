@@ -234,6 +234,19 @@ def render_lightweight_chart_html():
       const fmtTime = (time) => new Date(time * 1000).toLocaleString("pt-BR", { timeZone:"America/Sao_Paulo", hour12:false });
       const setStatus = (msg) => { statusEl.textContent = msg; };
       const setLoading = (on) => skeletonEl.classList.toggle("show", Boolean(on));
+      const tickSizeBySymbol = {
+        BTCUSDT:0.01, ETHUSDT:0.01, SOLUSDT:0.01,
+        SP500:0.25, NASDAQ:0.25, RUSSELL:0.1, DXY:0.001, "6L1":0.0001,
+        BRENT:0.01, WTI:0.01, XAUUSD:0.1, EEM:0.01, EWZ:0.01, IBOV:1,
+      };
+      function tickSizeFor(symbol, price) {
+        if (tickSizeBySymbol[symbol]) return tickSizeBySymbol[symbol];
+        if (!Number.isFinite(price)) return 0.01;
+        if (price >= 1000) return 0.25;
+        if (price >= 100) return 0.05;
+        if (price >= 10) return 0.01;
+        return 0.0001;
+      }
       const savePrefs = () => {
         localStorage.setItem("lw_chart_prefs", JSON.stringify({ symbol:state.symbol, timeframe:state.timeframe, toggles:state.toggles, maType:state.maType, ma:state.ma }));
       };
@@ -475,7 +488,7 @@ def render_lightweight_chart_html():
       function historicalVolatility(candles, period, prevClose) {
         const source = volatilitySource(candles).filter((c) => Number.isFinite(c.close) && c.close > 0);
         if (source.length < Math.min(period + 1, 31) || !Number.isFinite(prevClose)) {
-          return { period, vol:NaN, annualized:NaN, upper:NaN, lower:NaN };
+          return { period, vol:NaN, annualized:NaN, ticks:NaN, tickSize:tickSizeFor(state.symbol, prevClose), upper:NaN, lower:NaN };
         }
         const slice = source.slice(-(period + 1));
         const returns = [];
@@ -484,17 +497,24 @@ def render_lightweight_chart_html():
           const curr = slice[i].close;
           if (prev > 0 && curr > 0) returns.push(Math.log(curr / prev));
         }
-        if (returns.length < 2) return { period, vol:NaN, annualized:NaN, upper:NaN, lower:NaN };
+        if (returns.length < 2) return { period, vol:NaN, annualized:NaN, ticks:NaN, tickSize:tickSizeFor(state.symbol, prevClose), upper:NaN, lower:NaN };
         const mean = returns.reduce((a,b) => a + b, 0) / returns.length;
         const variance = returns.reduce((sum,r) => sum + Math.pow(r - mean, 2), 0) / (returns.length - 1);
         const vol = Math.sqrt(Math.max(0, variance));
         const annualized = vol * Math.sqrt(252);
+        const tickSize = tickSizeFor(state.symbol, prevClose);
+        const rawDistance = prevClose * vol;
+        const ticks = Math.max(1, Math.round(rawDistance / tickSize));
+        const tickDistance = ticks * tickSize;
         return {
           period,
           vol,
           annualized,
-          upper:prevClose * (1 + vol),
-          lower:prevClose * (1 - vol),
+          ticks,
+          tickSize,
+          tickDistance,
+          upper:prevClose + tickDistance,
+          lower:prevClose - tickDistance,
         };
       }
       function horizontalSessionLine(candles, value) {
@@ -731,9 +751,9 @@ def render_lightweight_chart_html():
         document.getElementById("lw-vp-poc").textContent = `POC ${fmt(indicators.volumeProfile?.poc?.mid, 2)}`;
         document.getElementById("lw-vp-range").textContent = `Range ${fmt(indicators.volumeProfile?.min, 2)} - ${fmt(indicators.volumeProfile?.max, 2)} | Vol ${fmt(indicators.volumeProfile?.total, 2)}`;
         document.getElementById("lw-vp-value-area").textContent = `VAH ${fmt(indicators.volumeProfile?.vah?.high, 2)} | VAL ${fmt(indicators.volumeProfile?.val?.low, 2)}`;
-        document.getElementById("lw-hv252").textContent = `HV252 ${Number.isFinite(indicators.hv252?.annualized) ? (indicators.hv252.annualized * 100).toFixed(2) : "---"}% anual`;
-        document.getElementById("lw-hv30").textContent = `HV30 ${Number.isFinite(indicators.hv30?.annualized) ? (indicators.hv30.annualized * 100).toFixed(2) : "---"}% anual`;
-        document.getElementById("lw-hv-levels").textContent = `30: ${fmt(indicators.hv30?.lower, 2)} / ${fmt(indicators.hv30?.upper, 2)} | 252: ${fmt(indicators.hv252?.lower, 2)} / ${fmt(indicators.hv252?.upper, 2)}`;
+        document.getElementById("lw-hv252").textContent = `HV252 ${Number.isFinite(indicators.hv252?.annualized) ? (indicators.hv252.annualized * 100).toFixed(2) : "---"}% | ${Number.isFinite(indicators.hv252?.ticks) ? indicators.hv252.ticks : "---"} ticks`;
+        document.getElementById("lw-hv30").textContent = `HV30 ${Number.isFinite(indicators.hv30?.annualized) ? (indicators.hv30.annualized * 100).toFixed(2) : "---"}% | ${Number.isFinite(indicators.hv30?.ticks) ? indicators.hv30.ticks : "---"} ticks`;
+        document.getElementById("lw-hv-levels").textContent = `Tick ${fmt(indicators.hv30?.tickSize || indicators.hv252?.tickSize, 4)} | 30: ${fmt(indicators.hv30?.lower, 2)} / ${fmt(indicators.hv30?.upper, 2)} | 252: ${fmt(indicators.hv252?.lower, 2)} / ${fmt(indicators.hv252?.upper, 2)}`;
         renderAlerts(last, lastVwap, lastVol.rvol, indicators.signals);
       }
       function renderAlerts(last, vwap, rvol, signals) {
