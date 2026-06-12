@@ -407,6 +407,8 @@ def render_lightweight_chart_html():
       };
       const state = { symbol:prefs.symbol, timeframe:prefs.timeframe, candles:[], dailyCandles:[], indicators:null, chart:null, oscChart:null, series:{}, priceLines:[], markerApi:null, socket:null, toggles:prefs.toggles, maType:prefs.maType, ma:prefs.ma };
       if (!assetRegistry[state.symbol]) state.symbol = "BTCUSDT";
+      if (assetRegistry[state.symbol]?.source === "finnhub" && !finnhubPayload.enabled) state.symbol = "BTCUSDT";
+      if (assetRegistry[state.symbol]?.source === "fred" && !fredPayload.enabled) state.symbol = "BTCUSDT";
       if (!timeframes.includes(state.timeframe)) state.timeframe = "1m";
       const chartEl = document.getElementById("lw-chart");
       const oscEl = document.getElementById("lw-osc");
@@ -477,6 +479,17 @@ def render_lightweight_chart_html():
           link.href = canvas.toDataURL("image/png");
           link.click();
         } catch (err) { setStatus(`Nao foi possivel exportar PNG: ${err.message}`); }
+      }
+      function renderChartMessage(title, detail="") {
+        chartEl.innerHTML = `
+          <div style="display:grid;place-items:center;height:100%;padding:24px;color:#cbd5e1;text-align:center;">
+            <div>
+              <div style="font-weight:900;font-size:1rem;color:#f8fafc;">${title}</div>
+              ${detail ? `<div style="margin-top:8px;color:#94a3b8;font-size:.82rem;max-width:620px;line-height:1.45;">${detail}</div>` : ""}
+            </div>
+          </div>`;
+        oscEl.innerHTML = "";
+        volumeProfileEl.innerHTML = "";
       }
       function makeChart(container, height) {
         return createChart(container, {
@@ -1138,8 +1151,7 @@ def render_lightweight_chart_html():
         }
         catch (err) {
           console.error(err);
-          chartEl.innerHTML = '<div style="display:grid;place-items:center;height:100%;color:#cbd5e1;font-weight:900;">Sem dados para este ativo/timeframe.</div>';
-          oscEl.innerHTML = "";
+          renderChartMessage("Sem dados para este ativo/timeframe.", err.message || "Verifique a fonte de dados e tente novamente.");
           setStatus(`Erro ao carregar dados: ${err.message}`);
         }
         finally { setLoading(false); }
