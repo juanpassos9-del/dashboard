@@ -21,14 +21,6 @@ YAHOO_LIGHTWEIGHT_ASSETS = [
     {"symbol": "IBOV", "label": "IBOV", "ticker": "^BVSP"},
 ]
 
-FINNHUB_LIGHTWEIGHT_ASSETS = [
-    {"symbol": "FINNHUB_SPY", "label": "SPY FH", "ticker": "SPY"},
-    {"symbol": "FINNHUB_QQQ", "label": "QQQ FH", "ticker": "QQQ"},
-    {"symbol": "FINNHUB_IWM", "label": "IWM FH", "ticker": "IWM"},
-    {"symbol": "FINNHUB_AAPL", "label": "AAPL FH", "ticker": "AAPL"},
-    {"symbol": "FINNHUB_NVDA", "label": "NVDA FH", "ticker": "NVDA"},
-]
-
 FRED_LIGHTWEIGHT_ASSETS = [
     {"symbol": "FRED_DGS10", "label": "US10Y FRED", "series_id": "DGS10"},
     {"symbol": "FRED_DGS30", "label": "US30Y FRED", "series_id": "DGS30"},
@@ -82,48 +74,6 @@ def _rows_to_candles(rows, limit=650):
         except Exception:
             continue
     return candles
-
-
-def _download_yahoo_pair(ticker: str, intraday_limit=650, daily_limit=520):
-    def extract_candles(data, limit):
-        if data is None or data.empty:
-            return []
-        if hasattr(data.columns, "levels"):
-            try:
-                if ticker in set(data.columns.get_level_values(-1)):
-                    data = data.xs(ticker, level=-1, axis=1)
-                elif ticker in set(data.columns.get_level_values(0)):
-                    data = data[ticker]
-            except Exception:
-                return []
-        df = data.dropna(subset=["Open", "High", "Low", "Close"])
-        candles = []
-        for idx, row in df.tail(limit).iterrows():
-            ts = int(idx.timestamp())
-            volume = row.get("Volume", 0)
-            candles.append({
-                "time": ts,
-                "open": float(row["Open"]),
-                "high": float(row["High"]),
-                "low": float(row["Low"]),
-                "close": float(row["Close"]),
-                "volume": float(volume) if volume == volume else 0.0,
-            })
-        return candles
-
-    intraday = []
-    daily = []
-    try:
-        data = yf.download(ticker, period="5d", interval="1m", prepost=True, progress=False, threads=False, timeout=15)
-        intraday = extract_candles(data, intraday_limit)
-    except Exception:
-        intraday = []
-    try:
-        data = yf.download(ticker, period="2y", interval="1d", prepost=True, progress=False, threads=False, timeout=15)
-        daily = extract_candles(data, daily_limit)
-    except Exception:
-        daily = []
-    return intraday, daily
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -209,90 +159,6 @@ def load_yahoo_lightweight_payload():
     return {"assets": YAHOO_LIGHTWEIGHT_ASSETS, "series": payload, "error": "; ".join(errors) or None}
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def load_finnhub_lightweight_payload():
-    token = (
-        _nested_secret_or_env("FINNHUB_API_KEY", ("finnhub", "api_key"), ("finnhub", "token"))
-        or _nested_secret_or_env("FINNHUB_TOKEN", ("FINNHUB", "API_KEY"), ("FINNHUB", "TOKEN"))
-    )
-    if not token:
-        return {
-            "enabled": False,
-            "assets": FINNHUB_LIGHTWEIGHT_ASSETS,
-            "series": {},
-            "error": "Configure FINNHUB_API_KEY para habilitar Finnhub.",
-        }
-
-    now = int(time.time())
-    from_intraday = now - 7 * 24 * 60 * 60
-    from_daily = now - 420 * 24 * 60 * 60
-    payload = {}
-    errors = []
-
-    def fetch_candles(ticker, resolution, start_ts, end_ts):
-        res = requests.get(
-            "https://finnhub.io/api/v1/stock/candle",
-            params={
-                "symbol": ticker,
-                "resolution": resolution,
-                "from": start_ts,
-                "to": end_ts,
-                "token": token,
-            },
-            timeout=12,
-        )
-        res.raise_for_status()
-        data = res.json()
-        if data.get("s") != "ok":
-            message = data.get("error") or data.get("s") or "sem dados"
-            raise ValueError(f"Finnhub {ticker} {resolution}: {message}")
-        timestamps = data.get("t", [])
-        if not timestamps:
-            return []
-        rows = []
-        for i, ts in enumerate(timestamps):
-            rows.append({
-                "time": int(ts),
-                "open": data.get("o", [])[i],
-                "high": data.get("h", [])[i],
-                "low": data.get("l", [])[i],
-                "close": data.get("c", [])[i],
-                "volume": data.get("v", [0])[i],
-            })
-        return _rows_to_candles(rows)
-
-    for asset in FINNHUB_LIGHTWEIGHT_ASSETS:
-        ticker = asset["ticker"]
-        intraday = []
-        daily = []
-        source_label = "Finnhub"
-        try:
-            intraday = fetch_candles(ticker, "1", from_intraday, now)
-        except Exception as e:
-            errors.append(f"{ticker} intraday: {e}")
-        try:
-            daily = fetch_candles(ticker, "D", from_daily, now)
-        except Exception as e:
-            errors.append(f"{ticker} daily: {e}")
-        if not intraday or not daily:
-            fallback_intraday, fallback_daily = _download_yahoo_pair(ticker)
-            if not intraday and fallback_intraday:
-                intraday = fallback_intraday
-                source_label = "yfinance fallback"
-            if not daily and fallback_daily:
-                daily = fallback_daily
-                source_label = "yfinance fallback"
-        if intraday or daily:
-            payload[asset["symbol"]] = {
-                "label": asset["label"],
-                "ticker": ticker,
-                "intraday": intraday,
-                "daily": daily,
-                "sourceLabel": source_label,
-            }
-    return {"enabled": True, "assets": FINNHUB_LIGHTWEIGHT_ASSETS, "series": payload, "error": "; ".join(errors) or None}
-
-
 @st.cache_data(ttl=900, show_spinner=False)
 def load_fred_lightweight_payload():
     api_key = _nested_secret_or_env("FRED_API_KEY", ("fred", "api_key"), ("FRED", "API_KEY"))
@@ -354,10 +220,8 @@ def load_fred_lightweight_payload():
 
 def render_lightweight_chart_html():
     yahoo_payload = load_yahoo_lightweight_payload()
-    finnhub_payload = load_finnhub_lightweight_payload()
     fred_payload = load_fred_lightweight_payload()
     yahoo_json = json.dumps(yahoo_payload, ensure_ascii=False)
-    finnhub_json = json.dumps(finnhub_payload, ensure_ascii=False)
     fred_json = json.dumps(fred_payload, ensure_ascii=False)
     html = """
     <div id="lw-root">
@@ -440,7 +304,6 @@ def render_lightweight_chart_html():
     (() => {
       const { createChart, CandlestickSeries, HistogramSeries, LineSeries } = LightweightCharts;
       const yahooPayload = __YAHOO_PAYLOAD__;
-      const finnhubPayload = __FINNHUB_PAYLOAD__;
       const fredPayload = __FRED_PAYLOAD__;
       const binanceAssets = [
         { symbol: "BTCUSDT", label: "BTC", source: "binance" },
@@ -453,19 +316,13 @@ def render_lightweight_chart_html():
         source: "yahoo",
         ticker: asset.ticker,
       }));
-      const finnhubAssets = (finnhubPayload.assets || []).map((asset) => ({
-        symbol: asset.symbol,
-        label: asset.label,
-        source: "finnhub",
-        ticker: asset.ticker,
-      }));
       const fredAssets = (fredPayload.assets || []).map((asset) => ({
         symbol: asset.symbol,
         label: asset.label,
         source: "fred",
         seriesId: asset.series_id,
       }));
-      const assets = [...binanceAssets, ...yahooAssets, ...finnhubAssets, ...fredAssets];
+      const assets = [...binanceAssets, ...yahooAssets, ...fredAssets];
       const assetRegistry = Object.fromEntries(assets.map((asset) => [asset.symbol, asset]));
       const timeframes = ["30s", "1m", "5m", "h1", "1d", "1w", "1month"];
       const tfSeconds = { "30s": 30, "1m": 60, "5m": 300, "h1": 3600, "1d": 86400, "1w": 604800 };
@@ -493,7 +350,6 @@ def render_lightweight_chart_html():
       };
       const state = { symbol:prefs.symbol, timeframe:prefs.timeframe, candles:[], dailyCandles:[], indicators:null, chart:null, oscChart:null, series:{}, priceLines:[], markerApi:null, socket:null, toggles:prefs.toggles, maType:prefs.maType, ma:prefs.ma };
       if (!assetRegistry[state.symbol]) state.symbol = "BTCUSDT";
-      if (assetRegistry[state.symbol]?.source === "finnhub" && !finnhubPayload.enabled) state.symbol = "BTCUSDT";
       if (assetRegistry[state.symbol]?.source === "fred" && !fredPayload.enabled) state.symbol = "BTCUSDT";
       if (!timeframes.includes(state.timeframe)) state.timeframe = "1m";
       if (assetRegistry[state.symbol]?.source === "fred" && intradayTimeframes.includes(state.timeframe)) state.timeframe = "1d";
@@ -511,7 +367,7 @@ def render_lightweight_chart_html():
       const savePrefs = () => {
         localStorage.setItem("lw_chart_prefs", JSON.stringify({ symbol:state.symbol, timeframe:state.timeframe, toggles:state.toggles, maType:state.maType, ma:state.ma }));
       };
-      const providerNotes = [finnhubPayload.enabled ? "" : finnhubPayload.error, fredPayload.enabled ? "" : fredPayload.error].filter(Boolean).join(" | ");
+      const providerNotes = [fredPayload.enabled ? "" : fredPayload.error].filter(Boolean).join(" | ");
 
       function button(label, active, onClick, extraClass="") {
         const b = document.createElement("button");
@@ -592,7 +448,6 @@ def render_lightweight_chart_html():
       async function fetchHistorical(symbol, timeframe) {
         const asset = assetRegistry[symbol] || { source: "binance" };
         if (asset.source === "yahoo") return fetchYahooHistorical(symbol, timeframe);
-        if (asset.source === "finnhub") return fetchFinnhubHistorical(symbol, timeframe);
         if (asset.source === "fred") return fetchFredHistorical(symbol, timeframe);
         if (binanceIntervals[timeframe]) {
           const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${binanceIntervals[timeframe]}&limit=600`);
@@ -611,10 +466,6 @@ def render_lightweight_chart_html():
           const series = (yahooPayload.series && yahooPayload.series[symbol]) || {};
           return Array.isArray(series.daily) ? series.daily : [];
         }
-        if (asset.source === "finnhub") {
-          const series = (finnhubPayload.series && finnhubPayload.series[symbol]) || {};
-          return Array.isArray(series.daily) ? series.daily : [];
-        }
         if (asset.source === "fred") {
           const series = (fredPayload.series && fredPayload.series[symbol]) || {};
           return Array.isArray(series.daily) ? series.daily : [];
@@ -623,31 +474,6 @@ def render_lightweight_chart_html():
         if (!res.ok) throw new Error(`Binance daily klines ${res.status}`);
         const rows = await res.json();
         return rows.map((r) => ({ time:Math.floor(r[0]/1000), open:+r[1], high:+r[2], low:+r[3], close:+r[4], volume:+r[5] }));
-      }
-      function fetchFinnhubHistorical(symbol, timeframe) {
-        if (!finnhubPayload.enabled) throw new Error(finnhubPayload.error || "Configure FINNHUB_API_KEY para habilitar Finnhub.");
-        const series = (finnhubPayload.series && finnhubPayload.series[symbol]) || {};
-        const intraday = series.intraday || [];
-        const daily = series.daily || [];
-        if (timeframe === "30s" || timeframe === "1m") {
-          if (!intraday.length) throw new Error(`Sem dados intraday Finnhub para ${symbol}`);
-          return intraday;
-        }
-        if (timeframe === "5m") {
-          if (!intraday.length) throw new Error(`Sem dados intraday Finnhub para ${symbol}`);
-          return aggregateCandles(intraday, 300);
-        }
-        if (timeframe === "h1") {
-          if (!intraday.length) throw new Error(`Sem dados intraday Finnhub para ${symbol}`);
-          return aggregateCandles(intraday, 3600);
-        }
-        if (timeframe === "1d") {
-          if (!daily.length) throw new Error(`Sem dados diarios Finnhub para ${symbol}`);
-          return daily;
-        }
-        if (timeframe === "1w") return aggregateCalendarCandles(daily, "week");
-        if (timeframe === "1month") return aggregateCalendarCandles(daily, "month");
-        return intraday;
       }
       function fetchFredHistorical(symbol, timeframe) {
         if (!fredPayload.enabled) throw new Error(fredPayload.error || "Configure FRED_API_KEY para habilitar FRED.");
@@ -1191,8 +1017,8 @@ def render_lightweight_chart_html():
         const asset = assetRegistry[state.symbol] || { source: "binance" };
         if (asset.source !== "binance") {
           state.socket = null;
-          const loadedSeries = asset.source === "finnhub" ? finnhubPayload.series?.[state.symbol] : asset.source === "fred" ? fredPayload.series?.[state.symbol] : yahooPayload.series?.[state.symbol];
-          const sourceName = loadedSeries?.sourceLabel || (asset.source === "finnhub" ? "Finnhub" : asset.source === "fred" ? "FRED" : "yfinance");
+          const loadedSeries = asset.source === "fred" ? fredPayload.series?.[state.symbol] : yahooPayload.series?.[state.symbol];
+          const sourceName = loadedSeries?.sourceLabel || (asset.source === "fred" ? "FRED" : "yfinance");
           const code = asset.ticker || asset.seriesId || state.symbol;
           setStatus(`Dados ${sourceName} carregados: ${asset.label} (${code}). Sem WebSocket no browser; use Recarregar para atualizar.`);
           return;
@@ -1226,7 +1052,7 @@ def render_lightweight_chart_html():
         } else if (asset.source === "fred" && state.timeframe !== timeframe) {
           setStatus(`${asset.label}: FRED entrega serie diaria. Ajustei automaticamente para 1d.`);
         } else {
-          const sourceName = asset.source === "yahoo" ? "yfinance" : asset.source === "finnhub" ? "Finnhub" : asset.source === "fred" ? "FRED" : "Binance";
+          const sourceName = asset.source === "yahoo" ? "yfinance" : asset.source === "fred" ? "FRED" : "Binance";
           setStatus(`Carregando historico ${sourceName}: ${asset.label || symbol} ${state.timeframe}...`);
         }
         try {
@@ -1261,6 +1087,5 @@ def render_lightweight_chart_html():
     return (
         html
         .replace("__YAHOO_PAYLOAD__", yahoo_json)
-        .replace("__FINNHUB_PAYLOAD__", finnhub_json)
         .replace("__FRED_PAYLOAD__", fred_json)
     )
