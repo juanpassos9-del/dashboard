@@ -245,8 +245,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         .lw-btn.toggle-on { border-color:#22c55e; color:#eafff3; }
         .lw-btn.warn { border-color:#f59e0b; color:#fff7ed; }
         .lw-main { display:grid; grid-template-columns:minmax(0,1fr) 310px; gap:0; }
-        #lw-chart { height:620px; min-width:0; }
-        #lw-osc { height:150px; border-top:1px solid #1f2937; }
+        #lw-chart { height:760px; min-width:0; }
         .lw-chart-wrap { position:relative; min-width:0; }
         .lw-side { border-left:1px solid #1f2937; background:#0b1220; padding:10px; display:grid; align-content:start; gap:8px; }
         .lw-stat { background:#111827; border:1px solid #253044; border-radius:6px; padding:8px; }
@@ -267,7 +266,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         .lw-crosshair-card strong { display:block; color:#f8fafc; font-size:.85rem; margin-bottom:6px; }
         .lw-crosshair-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 10px; color:#cbd5e1; font-size:.75rem; }
         .lw-crosshair-grid span { color:#94a3b8; }
-        .lw-volume-profile { position:absolute; top:0; right:56px; width:150px; height:620px; z-index:3; pointer-events:none; opacity:.82; }
+        .lw-volume-profile { position:absolute; top:0; right:56px; width:150px; height:760px; z-index:3; pointer-events:none; opacity:.82; }
         .lw-vp-bar { position:absolute; right:0; height:3px; min-width:2px; border-radius:999px 0 0 999px; background:rgba(56,189,248,.32); }
         .lw-vp-bar.value-area { background:rgba(34,197,94,.38); }
         .lw-vp-bar.poc { height:5px; background:rgba(245,158,11,.9); box-shadow:0 0 8px rgba(245,158,11,.55); }
@@ -276,7 +275,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         .lw-skeleton.show { display:block; }
         @keyframes lwPulse { from{background-position:220% 0;} to{background-position:-220% 0;} }
         .lw-status { color:#94a3b8; font-size:.75rem; padding:8px 12px 10px; border-top:1px solid #1f2937; background:#0d1420; }
-        @media (max-width:900px){ .lw-main{grid-template-columns:1fr;} .lw-side{border-left:0; border-top:1px solid #1f2937; grid-template-columns:repeat(2,minmax(0,1fr));} #lw-chart{height:520px;} }
+        @media (max-width:900px){ .lw-main{grid-template-columns:1fr;} .lw-side{border-left:0; border-top:1px solid #1f2937; grid-template-columns:repeat(2,minmax(0,1fr));} #lw-chart{height:560px;} }
       </style>
       <div class="lw-toolbar">
         <div class="lw-group"><span class="lw-label" id="lw-chart-title">Grafico operacional</span></div>
@@ -291,7 +290,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           <div class="lw-crosshair-card" id="lw-crosshair-card"></div>
           <div class="lw-volume-profile" id="lw-volume-profile"></div>
           <div id="lw-chart"></div>
-          <div id="lw-osc"></div>
         </div>
         <aside class="lw-side">
           <div class="lw-stat"><span>Ultimo</span><strong id="lw-last">---</strong></div>
@@ -378,7 +376,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       const defaultPrefs = {
         symbol:"BTCUSDT",
         timeframe:"1m",
-        toggles:{ ma:true, vwap:true, bands:true, stdevBands:false, volume:true, volumeProfile:true, hv252:true, oscillator:true, refs:true, signals:true },
+        toggles:{ ma:true, vwap:true, bands:true, stdevBands:false, volume:true, volumeProfile:true, hv252:true, refs:true, signals:true },
         maType:"SMA",
         ma:[
           { id:"ma9", period:9, enabled:true, color:"#22c55e" },
@@ -404,7 +402,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           weights:{ ...defaultSignalConfig.weights, ...((storedPrefs.signalConfig || {}).weights || {}) },
         },
       };
-      const state = { symbol:prefs.symbol, timeframe:prefs.timeframe, candles:[], dailyCandles:[], indicators:null, chart:null, oscChart:null, series:{}, priceLines:[], markerApi:null, socket:null, toggles:prefs.toggles, maType:prefs.maType, ma:prefs.ma, signalConfig:prefs.signalConfig };
+      const state = { symbol:prefs.symbol, timeframe:prefs.timeframe, candles:[], dailyCandles:[], indicators:null, chart:null, series:{}, priceLines:[], markerApi:null, socket:null, liveUpdateQueued:false, lastFullRefresh:0, toggles:prefs.toggles, maType:prefs.maType, ma:prefs.ma, signalConfig:prefs.signalConfig };
       allowedSignalTypes.forEach((type) => { state.signalConfig.enabledSignals[type] = state.signalConfig.enabledSignals[type] !== false; });
       Object.keys(state.signalConfig.enabledSignals).forEach((type) => { if (!allowedSignalTypes.includes(type)) state.signalConfig.enabledSignals[type] = false; });
       if (signalMode === "reversal") state.signalConfig.signalFamilies.trend = false;
@@ -414,7 +412,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       if (!timeframes.includes(state.timeframe)) state.timeframe = "1m";
       if (assetRegistry[state.symbol]?.source === "fred" && intradayTimeframes.includes(state.timeframe)) state.timeframe = "1d";
       const chartEl = document.getElementById("lw-chart");
-      const oscEl = document.getElementById("lw-osc");
       const statusEl = document.getElementById("lw-status");
       const skeletonEl = document.getElementById("lw-skeleton");
       const crosshairCard = document.getElementById("lw-crosshair-card");
@@ -448,11 +445,11 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         actionBox.querySelectorAll("button").forEach((el) => el.remove());
         assets.forEach((asset) => assetBox.appendChild(button(asset.label, state.symbol === asset.symbol, () => loadSymbol(asset.symbol, state.timeframe))));
         timeframes.forEach((tf) => tfBox.appendChild(button(tf, state.timeframe === tf, () => loadSymbol(state.symbol, tf))));
-        [["ma","Medias"],["vwap","VWAP"],["bands","Bandas %"],["stdevBands","Desvios"],["refs","Refs"],["signals","Sinais"],["volume","Volume"],["volumeProfile","Vol Profile"],["hv252","HV 252"],["oscillator","Osc"]].forEach(([key,label]) => {
+        [["ma","Medias"],["vwap","VWAP"],["bands","Bandas %"],["stdevBands","Desvios"],["refs","Refs"],["signals","Sinais"],["volume","Volume"],["volumeProfile","Vol Profile"],["hv252","HV 252"]].forEach(([key,label]) => {
           toggleBox.appendChild(button(label, state.toggles[key], () => { state.toggles[key] = !state.toggles[key]; savePrefs(); renderControls(); renderCharts(false); }, state.toggles[key] ? "toggle-on" : ""));
         });
-        actionBox.appendChild(button("Reset Zoom", false, () => { state.chart?.timeScale().fitContent(); state.oscChart?.timeScale().fitContent(); }));
-        actionBox.appendChild(button("Ultimo candle", false, () => { state.chart?.timeScale().scrollToRealTime(); state.oscChart?.timeScale().scrollToRealTime(); }));
+        actionBox.appendChild(button("Reset Zoom", false, () => { state.chart?.timeScale().fitContent(); }));
+        actionBox.appendChild(button("Ultimo candle", false, () => { state.chart?.timeScale().scrollToRealTime(); }));
         actionBox.appendChild(button("Exportar PNG", false, exportPng));
         actionBox.appendChild(button("Recarregar", false, () => loadSymbol(state.symbol, state.timeframe), "warn"));
         renderMASettings();
@@ -538,7 +535,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
               ${detail ? `<div style="margin-top:8px;color:#94a3b8;font-size:.82rem;max-width:620px;line-height:1.45;">${escapeHtml(detail)}</div>` : ""}
             </div>
           </div>`;
-        oscEl.innerHTML = "";
         volumeProfileEl.innerHTML = "";
       }
       function makeChart(container, height) {
@@ -721,10 +717,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const out = []; let sum = 0;
         candles.forEach((c, i) => { sum += c.close; if (i >= period) sum -= candles[i - period].close; if (i >= period - 1) out.push({ time:c.time, value:sum / period }); });
         return out;
-      }
-      function computeOsc(candles, vwap) {
-        const byTime = new Map(vwap.map((v) => [v.time, v.value]));
-        return candles.map((c) => { const v = byTime.get(c.time); return { time:c.time, value:v ? ((c.close - v) / v) * 100 : 0 }; });
       }
       function corrPriceVolume(candles, n=80) {
         const data = candles.slice(-n); if (data.length < 10) return NaN;
@@ -1044,10 +1036,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const s = state.chart.addSeries(LineSeries, { color, lineWidth:width, priceLineVisible:false, lastValueVisible:false });
         s.setData(data); state.series[key] = s;
       }
-      function addOscLine(key, data, color, width=1) {
-        const s = state.oscChart.addSeries(LineSeries, { color, lineWidth:width, priceLineVisible:false, lastValueVisible:false });
-        s.setData(data); state.series[key] = s;
-      }
       function addPriceLine(series, title, price, color, style=2) {
         if (!Number.isFinite(price)) return;
         const line = series.createPriceLine({ price, color, lineWidth:1, lineStyle:style, axisLabelVisible:true, title });
@@ -1088,11 +1076,9 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         });
       }
       function renderCharts(fit=true) {
-        if (state.chart) state.chart.remove(); if (state.oscChart) state.oscChart.remove();
-        chartEl.innerHTML = ""; oscEl.innerHTML = ""; state.series = {}; state.priceLines = []; state.markerApi = null;
-        state.chart = makeChart(chartEl, chartEl.clientHeight || 620);
-        state.oscChart = makeChart(oscEl, state.toggles.oscillator ? 150 : 1);
-        oscEl.style.display = state.toggles.oscillator ? "block" : "none";
+        if (state.chart) state.chart.remove();
+        chartEl.innerHTML = ""; state.series = {}; state.priceLines = []; state.markerApi = null;
+        state.chart = makeChart(chartEl, chartEl.clientHeight || 760);
         state.indicators = computeIndicators(state.candles);
         const candleSeries = state.chart.addSeries(CandlestickSeries, { upColor:"#00c087", downColor:"#ff4b4b", borderVisible:false, wickUpColor:"#00c087", wickDownColor:"#ff4b4b" });
         candleSeries.setData(state.candles); state.series.candle = candleSeries;
@@ -1155,15 +1141,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
             addLine(key, horizontalSessionLine(state.candles, level.price), color, level.multiplier === 0 ? 2 : 1);
             addPriceLine(candleSeries, level.label, level.price, color, level.multiplier === 0 ? 0 : 2);
           });
-        }
-        if (state.toggles.oscillator) {
-          const oscSeries = state.oscChart.addSeries(HistogramSeries, { color:"#38bdf8", priceFormat:{ type:"price", precision:2, minMove:0.01 } });
-          oscSeries.setData(computeOsc(state.candles, vwap).map((p) => ({ ...p, color:p.value >= 0 ? "rgba(34,197,94,.65)" : "rgba(239,68,68,.65)" })));
-          state.series.osc = oscSeries;
-          [0, .5, 1, 2, -.5, -1, -2].forEach((level) => oscSeries.createPriceLine({ price:level, color:level === 0 ? "#e5e7eb" : "#475569", lineWidth:1, lineStyle:2, axisLabelVisible:true, title:`${level}%` }));
-          const flat = state.candles.map((c) => ({ time:c.time, value:0 }));
-          addOscLine("oscZero", flat, "#e5e7eb", 1);
-          if (fit) state.oscChart.timeScale().fitContent();
         }
         if (fit) state.chart.timeScale().fitContent();
         setupCrosshair();
@@ -1268,6 +1245,18 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       }
       function refreshLiveSeries() {
         if (!state.series.candle || !state.candles.length) return renderCharts(false);
+        const nowMs = Date.now();
+        if (nowMs - state.lastFullRefresh < 1000) {
+          const lastQuick = state.candles[state.candles.length - 1];
+          state.series.candle.update(lastQuick);
+          if (state.series.volume) state.series.volume.update({ time:lastQuick.time, value:lastQuick.volume, color:lastQuick.close >= lastQuick.open ? "rgba(0,192,135,.32)" : "rgba(255,75,75,.32)" });
+          if (!state.liveUpdateQueued) {
+            state.liveUpdateQueued = true;
+            setTimeout(() => { state.liveUpdateQueued = false; refreshLiveSeries(); }, 1000);
+          }
+          return;
+        }
+        state.lastFullRefresh = nowMs;
         state.indicators = computeIndicators(state.candles);
         const last = state.candles[state.candles.length - 1];
         state.series.candle.update(last);
@@ -1298,9 +1287,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           });
         }
         state.indicators.ma.forEach((m) => state.series[m.id]?.setData(m.data));
-        if (state.series.osc) {
-          state.series.osc.setData(computeOsc(state.candles, state.indicators.vwapDay).map((p) => ({ ...p, color:p.value >= 0 ? "rgba(34,197,94,.65)" : "rgba(239,68,68,.65)" })));
-        }
         applyMarkers(state.series.candle, state.indicators.signals);
         updateStats();
         requestAnimationFrame(renderVolumeProfile);
@@ -1369,7 +1355,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       }
       window.addEventListener("resize", () => {
         if (state.chart) state.chart.applyOptions({ width:chartEl.clientWidth });
-        if (state.oscChart) state.oscChart.applyOptions({ width:oscEl.clientWidth });
         requestAnimationFrame(renderVolumeProfile);
       });
       renderControls(); loadSymbol(state.symbol, state.timeframe);
