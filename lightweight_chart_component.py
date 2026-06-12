@@ -218,11 +218,19 @@ def load_fred_lightweight_payload():
     return {"enabled": True, "assets": FRED_LIGHTWEIGHT_ASSETS, "series": payload, "error": "; ".join(errors) or None}
 
 
-def render_lightweight_chart_html():
+def render_lightweight_chart_html(signal_mode="all", chart_title=None):
+    signal_mode = signal_mode if signal_mode in {"all", "reversal", "trend"} else "all"
+    chart_title = chart_title or {
+        "all": "Grafico operacional",
+        "reversal": "Grafico operacional - Reversao",
+        "trend": "Grafico operacional - Trend Following",
+    }[signal_mode]
     yahoo_payload = load_yahoo_lightweight_payload()
     fred_payload = load_fred_lightweight_payload()
     yahoo_json = json.dumps(yahoo_payload, ensure_ascii=False)
     fred_json = json.dumps(fred_payload, ensure_ascii=False)
+    signal_mode_json = json.dumps(signal_mode)
+    chart_title_json = json.dumps(chart_title, ensure_ascii=False)
     html = """
     <div id="lw-root">
       <style>
@@ -269,6 +277,7 @@ def render_lightweight_chart_html():
         @media (max-width:900px){ .lw-main{grid-template-columns:1fr;} .lw-side{border-left:0; border-top:1px solid #1f2937; grid-template-columns:repeat(2,minmax(0,1fr));} #lw-chart{height:520px;} }
       </style>
       <div class="lw-toolbar">
+        <div class="lw-group"><span class="lw-label" id="lw-chart-title">Grafico operacional</span></div>
         <div class="lw-group" id="lw-assets"><span class="lw-label">Ativo</span></div>
         <div class="lw-group" id="lw-timeframes"><span class="lw-label">Tempo</span></div>
         <div class="lw-group" id="lw-toggles"><span class="lw-label">Camadas</span></div>
@@ -305,6 +314,8 @@ def render_lightweight_chart_html():
       const { createChart, CandlestickSeries, HistogramSeries, LineSeries } = LightweightCharts;
       const yahooPayload = __YAHOO_PAYLOAD__;
       const fredPayload = __FRED_PAYLOAD__;
+      const signalMode = __SIGNAL_MODE__;
+      const chartTitle = __CHART_TITLE__;
       const binanceAssets = [
         { symbol: "BTCUSDT", label: "BTC", source: "binance" },
         { symbol: "ETHUSDT", label: "ETH", source: "binance" },
@@ -329,9 +340,21 @@ def render_lightweight_chart_html():
       const binanceIntervals = { "1m": "1m", "5m": "5m", "h1": "1h", "1d": "1d", "1w": "1w", "1month": "1M" };
       const intradayTimeframes = ["30s", "1m", "5m", "h1"];
       const vwapStdevMultipliers = [1, 2, 3];
+      const signalModeTypes = {
+        all:["REV_BUY","REV_SELL","TREND_BUY","TREND_SELL"],
+        reversal:["REV_BUY","REV_SELL"],
+        trend:["TREND_BUY","TREND_SELL"],
+      };
+      const allowedSignalTypes = signalModeTypes[signalMode] || signalModeTypes.all;
+      const signalStorageKey = `lw_chart_prefs_${signalMode}`;
       const defaultSignalConfig = {
         enabled:true,
-        enabledSignals:{ REV_BUY:true, REV_SELL:true, TREND_BUY:true, TREND_SELL:true },
+        enabledSignals:{
+          REV_BUY:allowedSignalTypes.includes("REV_BUY"),
+          REV_SELL:allowedSignalTypes.includes("REV_SELL"),
+          TREND_BUY:allowedSignalTypes.includes("TREND_BUY"),
+          TREND_SELL:allowedSignalTypes.includes("TREND_SELL"),
+        },
         minScore:6,
         cooldownCandles:10,
         reversal:{ minDistanceFromVWAPPercent:0.5, proximityPercent:0.15 },
@@ -362,7 +385,7 @@ def render_lightweight_chart_html():
           { id:"ma200", period:200, enabled:false, color:"#f8fafc" },
         ],
       };
-      const storedPrefs = (() => { try { return JSON.parse(localStorage.getItem("lw_chart_prefs") || "{}"); } catch (_) { return {}; } })();
+      const storedPrefs = (() => { try { return JSON.parse(localStorage.getItem(signalStorageKey) || "{}"); } catch (_) { return {}; } })();
       const prefs = {
         ...defaultPrefs,
         ...storedPrefs,
@@ -379,6 +402,8 @@ def render_lightweight_chart_html():
         },
       };
       const state = { symbol:prefs.symbol, timeframe:prefs.timeframe, candles:[], dailyCandles:[], indicators:null, chart:null, oscChart:null, series:{}, priceLines:[], markerApi:null, socket:null, toggles:prefs.toggles, maType:prefs.maType, ma:prefs.ma, signalConfig:prefs.signalConfig };
+      allowedSignalTypes.forEach((type) => { state.signalConfig.enabledSignals[type] = state.signalConfig.enabledSignals[type] !== false; });
+      Object.keys(state.signalConfig.enabledSignals).forEach((type) => { if (!allowedSignalTypes.includes(type)) state.signalConfig.enabledSignals[type] = false; });
       if (!assetRegistry[state.symbol]) state.symbol = "BTCUSDT";
       if (assetRegistry[state.symbol]?.source === "fred" && !fredPayload.enabled) state.symbol = "BTCUSDT";
       if (!timeframes.includes(state.timeframe)) state.timeframe = "1m";
@@ -395,9 +420,10 @@ def render_lightweight_chart_html():
       const setStatus = (msg) => { statusEl.textContent = msg; };
       const setLoading = (on) => skeletonEl.classList.toggle("show", Boolean(on));
       const savePrefs = () => {
-        localStorage.setItem("lw_chart_prefs", JSON.stringify({ symbol:state.symbol, timeframe:state.timeframe, toggles:state.toggles, maType:state.maType, ma:state.ma, signalConfig:state.signalConfig }));
+        localStorage.setItem(signalStorageKey, JSON.stringify({ symbol:state.symbol, timeframe:state.timeframe, toggles:state.toggles, maType:state.maType, ma:state.ma, signalConfig:state.signalConfig }));
       };
       const providerNotes = [fredPayload.enabled ? "" : fredPayload.error].filter(Boolean).join(" | ");
+      document.getElementById("lw-chart-title").textContent = chartTitle;
 
       function button(label, active, onClick, extraClass="") {
         const b = document.createElement("button");
@@ -452,13 +478,7 @@ def render_lightweight_chart_html():
         title.style.marginTop = "6px";
         title.textContent = "Motor de sinais";
         box.appendChild(title);
-        const checks = [
-          ["enabled", "Motor"],
-          ["REV_BUY", "REV BUY"],
-          ["REV_SELL", "REV SELL"],
-          ["TREND_BUY", "TREND BUY"],
-          ["TREND_SELL", "TREND SELL"],
-        ];
+        const checks = [["enabled", "Motor"], ...allowedSignalTypes.map((type) => [type, type.replace("_", " ")])];
         checks.forEach(([key, label]) => {
           const row = document.createElement("div");
           row.className = "lw-setting-row";
@@ -1181,8 +1201,8 @@ def render_lightweight_chart_html():
         if (Number.isFinite(rvol) && rvol >= 2) alerts.push(["Volume relativo extremo", "hot"]);
         else if (Number.isFinite(rvol) && rvol >= 1.5) alerts.push(["Volume relativo alto", "hot"]);
         const recent = (signals || []).filter((s) => last && s.time >= last.time - (tfSeconds[state.timeframe] || 60) * 3);
-        const buySignal = recent.find((s) => s.type.includes("BUY"));
-        const sellSignal = recent.find((s) => s.type.includes("SELL"));
+          const buySignal = recent.find((s) => allowedSignalTypes.includes(s.type) && s.type.includes("BUY"));
+          const sellSignal = recent.find((s) => allowedSignalTypes.includes(s.type) && s.type.includes("SELL"));
         if (buySignal) alerts.push([`${buySignal.type} score ${buySignal.score}`, "buy"]);
         if (sellSignal) alerts.push([`${sellSignal.type} score ${sellSignal.score}`, "sell"]);
         if (!alerts.length) alerts.push(["Sem alerta operacional ativo", ""]);
@@ -1355,4 +1375,6 @@ def render_lightweight_chart_html():
         html
         .replace("__YAHOO_PAYLOAD__", yahoo_json)
         .replace("__FRED_PAYLOAD__", fred_json)
+        .replace("__SIGNAL_MODE__", signal_mode_json)
+        .replace("__CHART_TITLE__", chart_title_json)
     )
