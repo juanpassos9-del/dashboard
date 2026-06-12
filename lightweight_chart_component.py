@@ -955,7 +955,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       function signalContext(candles, indicators, i) {
         const c = candles[i];
         const refs = indicators.refs || {};
-        const vp = indicators.volumeProfile || {};
         const hv = indicators.hv252 || {};
         const hvLevel = (mult) => (hv.levels || []).find((item) => item.multiplier === mult)?.price;
         const stdevLevel = (mult) => bandAt(indicators.stdevBands, mult, c.time);
@@ -972,9 +971,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           ema21Prev:valueAt(indicators.signalMAs.ema21, candles[Math.max(0, i - 5)]?.time),
           rvol:indicators.volumeStats[i]?.rvol,
           avgVol:indicators.volumeStats[i]?.avg,
-          vah:vp.vah?.high,
-          val:vp.val?.low,
-          poc:vp.poc?.mid,
           prevClose:refs.prevClose,
           dayHigh:refs.high,
           dayLow:refs.low,
@@ -990,12 +986,12 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         };
       }
       function detectRegime(ctx, cfg) {
-        const { c, vwap, ema9, ema21, ema80, ema200, ema21Prev, vah, val, dayHigh, dayLow, hvUpper1, hvLower1 } = ctx;
+        const { c, vwap, ema9, ema21, ema80, ema200, ema21Prev, dayHigh, dayLow, hvUpper1, hvLower1 } = ctx;
         const dist = pctDistance(c.close, vwap);
         const emaSpread = Number.isFinite(ema9) && Number.isFinite(ema21) ? Math.abs(ema9 - ema21) / c.close : Infinity;
         const slope21 = Number.isFinite(ema21) && Number.isFinite(ema21Prev) ? ema21 - ema21Prev : NaN;
-        if (Number.isFinite(dist) && dist >= cfg.reversal.minDistanceFromVWAPPercent && [vah, dayHigh, hvUpper1].some((level) => isNearLevel(c.close, level, cfg.reversal.proximityPercent * 2))) return "stretched_up";
-        if (Number.isFinite(dist) && dist <= -cfg.reversal.minDistanceFromVWAPPercent && [val, dayLow, hvLower1].some((level) => isNearLevel(c.close, level, cfg.reversal.proximityPercent * 2))) return "stretched_down";
+        if (Number.isFinite(dist) && dist >= cfg.reversal.minDistanceFromVWAPPercent && [dayHigh, hvUpper1].some((level) => isNearLevel(c.close, level, cfg.reversal.proximityPercent * 2))) return "stretched_up";
+        if (Number.isFinite(dist) && dist <= -cfg.reversal.minDistanceFromVWAPPercent && [dayLow, hvLower1].some((level) => isNearLevel(c.close, level, cfg.reversal.proximityPercent * 2))) return "stretched_down";
         if (Number.isFinite(dist) && Math.abs(dist) < 0.3 && emaSpread < 0.0015) return "range";
         if (c.close > vwap && ema9 > ema21 && ema21 > ema80 && (ema80 >= ema200 || c.close > ema200 || !Number.isFinite(ema200)) && slope21 > 0) return "uptrend";
         if (c.close < vwap && ema9 < ema21 && ema21 < ema80 && (ema80 <= ema200 || c.close < ema200 || !Number.isFinite(ema200)) && slope21 < 0) return "downtrend";
@@ -1039,13 +1035,13 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const cfg = state.signalConfig;
         const w = cfg.weights;
         const ctx = signalContext(candles, indicators, i);
-        const { c, prev, vwap, ema9, ema21, ema80, rvol, vah, val, poc, prevClose, dayHigh, dayLow, hvUpper1, hvLower1, hvUpper2, hvLower2 } = ctx;
+        const { c, prev, vwap, ema9, ema21, ema80, rvol, prevClose, dayHigh, dayLow, hvUpper1, hvLower1, hvUpper2, hvLower2 } = ctx;
         if (!prev || !Number.isFinite(vwap)) return null;
         const parts = { score:0, reasons:[] };
         const dist = pctDistance(c.close, vwap);
         const volOk = Number.isFinite(rvol) && rvol >= cfg.volume.minVolumeMultiplier;
-        const nearLow = [val, dayLow, hvLower1, hvLower2].some((level) => isNearLevel(c.low, level, cfg.reversal.proximityPercent));
-        const nearHigh = [vah, dayHigh, hvUpper1, hvUpper2].some((level) => isNearLevel(c.high, level, cfg.reversal.proximityPercent));
+        const nearLow = [dayLow, hvLower1, hvLower2].some((level) => isNearLevel(c.low, level, cfg.reversal.proximityPercent));
+        const nearHigh = [dayHigh, hvUpper1, hvUpper2].some((level) => isNearLevel(c.high, level, cfg.reversal.proximityPercent));
         const maBull = ema9 > ema21 && ema21 > ema80;
         const maBear = ema9 < ema21 && ema21 < ema80;
         if (type === "REV_BUY") {
@@ -1056,11 +1052,11 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           addScore(parts, Number.isFinite(dist) && dist <= -cfg.reversal.minDistanceFromVWAPPercent, w.vwapDistance, `Distancia VWAP ${dist.toFixed(2)}%`);
           addScore(parts, confluence.vwapExtreme, w.vwapDistance, `Extremo em desvio VWAP >= ${cfg.reversal.minStdevMultiplier}`);
           addScore(parts, confluence.hvExtreme, w.hvConfluence, "Confluencia com banda HV252 inferior");
-          addScore(parts, nearLow, w.proximityToKeyLevel, "Proximo de VAL/minima/HV inferior");
+          addScore(parts, nearLow, w.proximityToKeyLevel, "Proximo de minima/HV inferior");
           addScore(parts, isBullishRejectionCandle(c), w.rejectionCandle, "Candle com rejeicao inferior");
           addScore(parts, c.close > prev.close || c.close > prev.high, w.previousCandleBreak, "Virada sobre candle anterior");
           addScore(parts, volOk, w.volumeConfirmation, `Volume confirmado ${fmt(rvol,2)}x`);
-          return buildSignal(type, ctx, parts.score, regime, parts.reasons, minFinite(c.low, val), vwap, Number.isFinite(poc) ? poc : prevClose);
+          return buildSignal(type, ctx, parts.score, regime, parts.reasons, minFinite(c.low, dayLow, hvLower1), vwap, Number.isFinite(prevClose) ? prevClose : hvUpper1);
         }
         if (type === "REV_SELL") {
           const confluence = reversalConfluence(ctx, "sell", cfg);
@@ -1070,11 +1066,11 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           addScore(parts, Number.isFinite(dist) && dist >= cfg.reversal.minDistanceFromVWAPPercent, w.vwapDistance, `Distancia VWAP +${dist.toFixed(2)}%`);
           addScore(parts, confluence.vwapExtreme, w.vwapDistance, `Extremo em desvio VWAP >= ${cfg.reversal.minStdevMultiplier}`);
           addScore(parts, confluence.hvExtreme, w.hvConfluence, "Confluencia com banda HV252 superior");
-          addScore(parts, nearHigh, w.proximityToKeyLevel, "Proximo de VAH/maxima/HV superior");
+          addScore(parts, nearHigh, w.proximityToKeyLevel, "Proximo de maxima/HV superior");
           addScore(parts, isBearishRejectionCandle(c), w.rejectionCandle, "Candle com rejeicao superior");
           addScore(parts, c.close < prev.close || c.close < prev.low, w.previousCandleBreak, "Virada abaixo do candle anterior");
           addScore(parts, volOk, w.volumeConfirmation, `Volume confirmado ${fmt(rvol,2)}x`);
-          return buildSignal(type, ctx, parts.score, regime, parts.reasons, maxFinite(c.high, vah), vwap, Number.isFinite(poc) ? poc : prevClose);
+          return buildSignal(type, ctx, parts.score, regime, parts.reasons, maxFinite(c.high, dayHigh, hvUpper1), vwap, Number.isFinite(prevClose) ? prevClose : hvLower1);
         }
         if (type === "TREND_BUY") {
           const rsi = trendRsiConfirmation(ctx, "buy", cfg);
@@ -1087,7 +1083,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           addScore(parts, isBullishImpulseCandle(c, cfg.trend.minBodyPercent), w.impulseCandle, "Candle de impulso comprador");
           addScore(parts, c.close > prev.high, w.previousCandleBreak, "Rompimento da maxima anterior");
           addScore(parts, volOk, w.volumeConfirmation, `Volume confirmado ${fmt(rvol,2)}x`);
-          return buildSignal(type, ctx, parts.score, regime, parts.reasons, minFinite(ema21, vwap, getRecentSwingLow(candles, i, 12)), getRecentSwingHigh(candles, i, 24), Number.isFinite(vah) ? vah : hvUpper1);
+          return buildSignal(type, ctx, parts.score, regime, parts.reasons, minFinite(ema21, vwap, getRecentSwingLow(candles, i, 12)), getRecentSwingHigh(candles, i, 24), Number.isFinite(dayHigh) ? dayHigh : hvUpper1);
         }
         const rsi = trendRsiConfirmation(ctx, "sell", cfg);
         if (cfg.trend.requireRsiPullback && !rsi.ok) return null;
@@ -1099,7 +1095,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         addScore(parts, isBearishImpulseCandle(c, cfg.trend.minBodyPercent), w.impulseCandle, "Candle de impulso vendedor");
         addScore(parts, c.close < prev.low, w.previousCandleBreak, "Rompimento da minima anterior");
         addScore(parts, volOk, w.volumeConfirmation, `Volume confirmado ${fmt(rvol,2)}x`);
-        return buildSignal(type, ctx, parts.score, regime, parts.reasons, maxFinite(ema21, vwap, getRecentSwingHigh(candles, i, 12)), getRecentSwingLow(candles, i, 24), Number.isFinite(val) ? val : hvLower1);
+        return buildSignal(type, ctx, parts.score, regime, parts.reasons, maxFinite(ema21, vwap, getRecentSwingHigh(candles, i, 12)), getRecentSwingLow(candles, i, 24), Number.isFinite(dayLow) ? dayLow : hvLower1);
       }
       function generateSignals(candles, indicators) {
         const cfg = state.signalConfig;
