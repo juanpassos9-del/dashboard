@@ -357,8 +357,8 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         },
         minScore:6,
         cooldownCandles:10,
-        reversal:{ minDistanceFromVWAPPercent:0.5, proximityPercent:0.15 },
-        trend:{ maxPullbackDistancePercent:0.2, minBodyPercent:0.55 },
+        reversal:{ minDistanceFromVWAPPercent:0.5, proximityPercent:0.15, requireVwapHvConfluence:true, minStdevMultiplier:1, hvProximityPercent:0.35 },
+        trend:{ maxPullbackDistancePercent:0.2, minBodyPercent:0.55, requireRsiPullback:true, rsiPeriod:14, rsiBuyMin:38, rsiBuyMax:58, rsiSellMin:42, rsiSellMax:62 },
         volume:{ lookback:20, minVolumeMultiplier:1.0 },
         sessionFilter:{ enabled:false, blockedTimes:[] },
         weights:{
@@ -368,6 +368,8 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           proximityToKeyLevel:1,
           rejectionCandle:2,
           impulseCandle:2,
+          rsiConfirmation:2,
+          hvConfluence:2,
           volumeConfirmation:1,
           previousCandleBreak:1,
           vwapSide:1,
@@ -504,6 +506,12 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           ["cooldown", "Cooldown", 0, 80, 1, cfg.cooldownCandles, (v) => { cfg.cooldownCandles = v; }],
           ["vwapDist", "Dist %", 0.1, 5, 0.1, cfg.reversal.minDistanceFromVWAPPercent, (v) => { cfg.reversal.minDistanceFromVWAPPercent = v; }],
           ["near", "Nivel %", 0.05, 2, 0.05, cfg.reversal.proximityPercent, (v) => { cfg.reversal.proximityPercent = v; }],
+          ["hvNear", "HV %", 0.05, 2, 0.05, cfg.reversal.hvProximityPercent, (v) => { cfg.reversal.hvProximityPercent = v; }],
+          ["devMin", "Dev REV", 1, 3, 1, cfg.reversal.minStdevMultiplier, (v) => { cfg.reversal.minStdevMultiplier = v; }],
+          ["rsiBuyMin", "RSI B min", 20, 60, 1, cfg.trend.rsiBuyMin, (v) => { cfg.trend.rsiBuyMin = v; }],
+          ["rsiBuyMax", "RSI B max", 40, 80, 1, cfg.trend.rsiBuyMax, (v) => { cfg.trend.rsiBuyMax = v; }],
+          ["rsiSellMin", "RSI S min", 20, 60, 1, cfg.trend.rsiSellMin, (v) => { cfg.trend.rsiSellMin = v; }],
+          ["rsiSellMax", "RSI S max", 40, 80, 1, cfg.trend.rsiSellMax, (v) => { cfg.trend.rsiSellMax = v; }],
           ["rvol", "RVOL", 0.5, 5, 0.1, cfg.volume.minVolumeMultiplier, (v) => { cfg.volume.minVolumeMultiplier = v; }],
         ].forEach((item) => {
           const [, label, min, max, step, value, setter] = item;
@@ -514,6 +522,17 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
             const v = Math.max(min, Math.min(max, Number(e.target.value) || value));
             setter(v); savePrefs(); renderMASettings(); renderCharts(false);
           };
+          box.appendChild(row);
+        });
+        [
+          ["revHv", "REV VWAP+HV", cfg.reversal.requireVwapHvConfluence, (v) => { cfg.reversal.requireVwapHvConfluence = v; }],
+          ["trendRsi", "TREND RSI14", cfg.trend.requireRsiPullback, (v) => { cfg.trend.requireRsiPullback = v; }],
+        ].forEach((item) => {
+          const [, label, checked, setter] = item;
+          const row = document.createElement("div");
+          row.className = "lw-setting-row";
+          row.innerHTML = `<label style="grid-column:1 / 3;"><input type="checkbox" ${checked ? "checked" : ""}> ${label}</label><span></span>`;
+          row.querySelector("input").onchange = (e) => { setter(e.target.checked); savePrefs(); renderCharts(false); };
           box.appendChild(row);
         });
       }
@@ -870,6 +889,32 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         });
         return out;
       }
+      function computeRSI(candles, period=14) {
+        const out = candles.map((c) => ({ time:c.time, value:NaN }));
+        if (candles.length <= period) return out;
+        let gain = 0, loss = 0;
+        for (let i = 1; i <= period; i += 1) {
+          const diff = candles[i].close - candles[i - 1].close;
+          if (diff >= 0) gain += diff;
+          else loss -= diff;
+        }
+        let avgGain = gain / period;
+        let avgLoss = loss / period;
+        out[period].value = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
+        for (let i = period + 1; i < candles.length; i += 1) {
+          const diff = candles[i].close - candles[i - 1].close;
+          const up = Math.max(diff, 0);
+          const down = Math.max(-diff, 0);
+          avgGain = ((avgGain * (period - 1)) + up) / period;
+          avgLoss = ((avgLoss * (period - 1)) + down) / period;
+          out[i].value = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
+        }
+        return out;
+      }
+      function bandAt(bands, multiplier, time) {
+        const band = (bands || []).find((item) => Number(item.multiplier) === Number(multiplier));
+        return (band?.data || []).find((item) => item.time === time);
+      }
       function isNearLevel(price, level, tolerancePercent) {
         return Number.isFinite(price) && Number.isFinite(level) && Math.abs(pctDistance(price, level)) <= tolerancePercent;
       }
@@ -913,10 +958,13 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const vp = indicators.volumeProfile || {};
         const hv = indicators.hv252 || {};
         const hvLevel = (mult) => (hv.levels || []).find((item) => item.multiplier === mult)?.price;
+        const stdevLevel = (mult) => bandAt(indicators.stdevBands, mult, c.time);
         return {
           c,
           prev:candles[i - 1],
           vwap:valueAt(indicators.vwapDay, c.time),
+          rsi14:valueAt(indicators.rsi14, c.time),
+          rsi14Prev:valueAt(indicators.rsi14, candles[Math.max(0, i - 1)]?.time),
           ema9:valueAt(indicators.signalMAs.ema9, c.time),
           ema21:valueAt(indicators.signalMAs.ema21, c.time),
           ema80:valueAt(indicators.signalMAs.ema80, c.time),
@@ -934,6 +982,11 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           hvLower1:hvLevel(-1),
           hvUpper2:hvLevel(2),
           hvLower2:hvLevel(-2),
+          hvUpper15:hvLevel(1.5),
+          hvLower15:hvLevel(-1.5),
+          stdev1:stdevLevel(1),
+          stdev2:stdevLevel(2),
+          stdev3:stdevLevel(3),
         };
       }
       function detectRegime(ctx, cfg) {
@@ -955,6 +1008,33 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       function buildSignal(type, ctx, score, regime, reasons, stop, target1, target2) {
         return { time:ctx.c.time, type, price:ctx.c.close, score, regime, reasons, suggestedStop:safe(stop), suggestedTarget1:safe(target1), suggestedTarget2:safe(target2) };
       }
+      function reversalConfluence(ctx, side, cfg) {
+        const minMult = Math.max(1, Math.min(3, Number(cfg.reversal.minStdevMultiplier) || 1));
+        const stdevBands = [ctx.stdev1, ctx.stdev2, ctx.stdev3].filter((band, index) => index + 1 >= minMult);
+        const hvLevels = side === "buy"
+          ? [ctx.hvLower1, ctx.hvLower15, ctx.hvLower2]
+          : [ctx.hvUpper1, ctx.hvUpper15, ctx.hvUpper2];
+        const price = side === "buy" ? ctx.c.low : ctx.c.high;
+        const vwapExtreme = stdevBands.some((band) => {
+          if (!band) return false;
+          return side === "buy" ? ctx.c.low <= band.lower || ctx.c.close <= band.lower : ctx.c.high >= band.upper || ctx.c.close >= band.upper;
+        });
+        const hvExtreme = hvLevels.some((level) => isNearLevel(price, level, cfg.reversal.hvProximityPercent) || (side === "buy" ? price <= level : price >= level));
+        return { ok:vwapExtreme && hvExtreme, vwapExtreme, hvExtreme };
+      }
+      function trendRsiConfirmation(ctx, side, cfg) {
+        const rsi = ctx.rsi14;
+        const prev = ctx.rsi14Prev;
+        if (!Number.isFinite(rsi)) return { ok:false, reason:"RSI14 indisponivel" };
+        if (side === "buy") {
+          const inPullbackZone = rsi >= cfg.trend.rsiBuyMin && rsi <= cfg.trend.rsiBuyMax;
+          const turningUp = !Number.isFinite(prev) || rsi >= prev;
+          return { ok:inPullbackZone && turningUp, reason:`RSI14 ${fmt(rsi,1)} em pullback comprador` };
+        }
+        const inPullbackZone = rsi >= cfg.trend.rsiSellMin && rsi <= cfg.trend.rsiSellMax;
+        const turningDown = !Number.isFinite(prev) || rsi <= prev;
+        return { ok:inPullbackZone && turningDown, reason:`RSI14 ${fmt(rsi,1)} em pullback vendedor` };
+      }
       function scoreCandidate(type, candles, indicators, i, regime) {
         const cfg = state.signalConfig;
         const w = cfg.weights;
@@ -969,9 +1049,13 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const maBull = ema9 > ema21 && ema21 > ema80;
         const maBear = ema9 < ema21 && ema21 < ema80;
         if (type === "REV_BUY") {
+          const confluence = reversalConfluence(ctx, "buy", cfg);
+          if (cfg.reversal.requireVwapHvConfluence && !confluence.ok) return null;
           addScore(parts, ["range","stretched_down"].includes(regime), w.favorableRegime, `Regime ${regime}`);
           addScore(parts, c.close < vwap, w.vwapSide, "Preco abaixo da VWAP");
           addScore(parts, Number.isFinite(dist) && dist <= -cfg.reversal.minDistanceFromVWAPPercent, w.vwapDistance, `Distancia VWAP ${dist.toFixed(2)}%`);
+          addScore(parts, confluence.vwapExtreme, w.vwapDistance, `Extremo em desvio VWAP >= ${cfg.reversal.minStdevMultiplier}`);
+          addScore(parts, confluence.hvExtreme, w.hvConfluence, "Confluencia com banda HV252 inferior");
           addScore(parts, nearLow, w.proximityToKeyLevel, "Proximo de VAL/minima/HV inferior");
           addScore(parts, isBullishRejectionCandle(c), w.rejectionCandle, "Candle com rejeicao inferior");
           addScore(parts, c.close > prev.close || c.close > prev.high, w.previousCandleBreak, "Virada sobre candle anterior");
@@ -979,9 +1063,13 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           return buildSignal(type, ctx, parts.score, regime, parts.reasons, minFinite(c.low, val), vwap, Number.isFinite(poc) ? poc : prevClose);
         }
         if (type === "REV_SELL") {
+          const confluence = reversalConfluence(ctx, "sell", cfg);
+          if (cfg.reversal.requireVwapHvConfluence && !confluence.ok) return null;
           addScore(parts, ["range","stretched_up"].includes(regime), w.favorableRegime, `Regime ${regime}`);
           addScore(parts, c.close > vwap, w.vwapSide, "Preco acima da VWAP");
           addScore(parts, Number.isFinite(dist) && dist >= cfg.reversal.minDistanceFromVWAPPercent, w.vwapDistance, `Distancia VWAP +${dist.toFixed(2)}%`);
+          addScore(parts, confluence.vwapExtreme, w.vwapDistance, `Extremo em desvio VWAP >= ${cfg.reversal.minStdevMultiplier}`);
+          addScore(parts, confluence.hvExtreme, w.hvConfluence, "Confluencia com banda HV252 superior");
           addScore(parts, nearHigh, w.proximityToKeyLevel, "Proximo de VAH/maxima/HV superior");
           addScore(parts, isBearishRejectionCandle(c), w.rejectionCandle, "Candle com rejeicao superior");
           addScore(parts, c.close < prev.close || c.close < prev.low, w.previousCandleBreak, "Virada abaixo do candle anterior");
@@ -989,19 +1077,25 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           return buildSignal(type, ctx, parts.score, regime, parts.reasons, maxFinite(c.high, vah), vwap, Number.isFinite(poc) ? poc : prevClose);
         }
         if (type === "TREND_BUY") {
+          const rsi = trendRsiConfirmation(ctx, "buy", cfg);
+          if (cfg.trend.requireRsiPullback && !rsi.ok) return null;
           addScore(parts, regime === "uptrend", w.favorableRegime, "Regime de alta");
           addScore(parts, c.close > vwap, w.vwapSide, "Preco acima da VWAP");
           addScore(parts, maBull, w.movingAverageAlignment, "Medias alinhadas para alta");
           addScore(parts, isPullbackNearEMAOrVWAP(c, [ema9, ema21, vwap], cfg.trend.maxPullbackDistancePercent), w.proximityToKeyLevel, "Pullback em EMA/VWAP");
+          addScore(parts, rsi.ok, w.rsiConfirmation, rsi.reason);
           addScore(parts, isBullishImpulseCandle(c, cfg.trend.minBodyPercent), w.impulseCandle, "Candle de impulso comprador");
           addScore(parts, c.close > prev.high, w.previousCandleBreak, "Rompimento da maxima anterior");
           addScore(parts, volOk, w.volumeConfirmation, `Volume confirmado ${fmt(rvol,2)}x`);
           return buildSignal(type, ctx, parts.score, regime, parts.reasons, minFinite(ema21, vwap, getRecentSwingLow(candles, i, 12)), getRecentSwingHigh(candles, i, 24), Number.isFinite(vah) ? vah : hvUpper1);
         }
+        const rsi = trendRsiConfirmation(ctx, "sell", cfg);
+        if (cfg.trend.requireRsiPullback && !rsi.ok) return null;
         addScore(parts, regime === "downtrend", w.favorableRegime, "Regime de baixa");
         addScore(parts, c.close < vwap, w.vwapSide, "Preco abaixo da VWAP");
         addScore(parts, maBear, w.movingAverageAlignment, "Medias alinhadas para baixa");
         addScore(parts, isPullbackNearEMAOrVWAP(c, [ema9, ema21, vwap], cfg.trend.maxPullbackDistancePercent), w.proximityToKeyLevel, "Pullback em EMA/VWAP");
+        addScore(parts, rsi.ok, w.rsiConfirmation, rsi.reason);
         addScore(parts, isBearishImpulseCandle(c, cfg.trend.minBodyPercent), w.impulseCandle, "Candle de impulso vendedor");
         addScore(parts, c.close < prev.low, w.previousCandleBreak, "Rompimento da minima anterior");
         addScore(parts, volOk, w.volumeConfirmation, `Volume confirmado ${fmt(rvol,2)}x`);
@@ -1050,11 +1144,12 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const volumeStats = computeVolumeStats(candles, 20);
         const ma = state.ma.filter((m) => m.enabled).map((m) => ({ ...m, data:computeMA(candles, m.period, state.maType) }));
         const signalMAs = computeSignalMAs(candles);
+        const rsi14 = computeRSI(candles, 14);
         const stdevBands = vwapStdevMultipliers.map((multiplier) => ({ multiplier, data:computeStdevBands(candles, vwapDay, multiplier) }));
         const refs = sessionRefs(candles);
         const volumeProfile = computeSessionVolumeProfile(candles);
         const hv252 = calculateHistoricalVolatility(state.dailyCandles, 252);
-        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, signalMAs, stdevBands, refs, volumeProfile, hv252 };
+        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, signalMAs, rsi14, stdevBands, refs, volumeProfile, hv252 };
         indicators.signals = generateSignals(candles, indicators);
         return indicators;
       }
