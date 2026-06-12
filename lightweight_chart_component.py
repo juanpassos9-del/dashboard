@@ -88,6 +88,14 @@ def _download_yahoo_pair(ticker: str, intraday_limit=650, daily_limit=520):
     def extract_candles(data, limit):
         if data is None or data.empty:
             return []
+        if hasattr(data.columns, "levels"):
+            try:
+                if ticker in set(data.columns.get_level_values(-1)):
+                    data = data.xs(ticker, level=-1, axis=1)
+                elif ticker in set(data.columns.get_level_values(0)):
+                    data = data[ticker]
+            except Exception:
+                return []
         df = data.dropna(subset=["Open", "High", "Low", "Close"])
         candles = []
         for idx, row in df.tail(limit).iterrows():
