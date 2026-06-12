@@ -171,7 +171,7 @@ def render_lightweight_chart_html():
           <div class="lw-stat"><span>Corr preco x volume</span><strong id="lw-corr">---</strong></div>
           <div class="lw-stat"><span>Volume</span><strong id="lw-volume">---</strong><small id="lw-rvol">RVOL ---</small></div>
           <div class="lw-stat"><span>Volume Profile sessao</span><strong id="lw-vp-poc">POC ---</strong><small id="lw-vp-range">---</small><small id="lw-vp-value-area">VAH --- | VAL ---</small></div>
-          <div class="lw-stat"><span>Volatilidade historica</span><strong id="lw-hv252">HV252 ---</strong><small id="lw-hv30">HV30 ---</small><small id="lw-hv-levels">---</small></div>
+          <div class="lw-stat"><span>HV 252 - bandas intradiarias</span><strong id="lw-hv252">HV252 ---</strong><small id="lw-hv30">Fech. ant. ---</small><small id="lw-hv-levels">---</small></div>
           <div class="lw-stat"><span>Referencia do candle</span><strong id="lw-hover-title">Passe o mouse</strong><small id="lw-hover-data">OHLC, horario, variacao e distancia da VWAP.</small></div>
           <div class="lw-settings" id="lw-ma-settings">
             <div class="lw-settings-title">Medias moveis</div>
@@ -202,10 +202,11 @@ def render_lightweight_chart_html():
       const timeframes = ["30s", "1m", "5m", "h1", "1d", "1w", "1month"];
       const tfSeconds = { "30s": 30, "1m": 60, "5m": 300, "h1": 3600, "1d": 86400, "1w": 604800 };
       const binanceIntervals = { "1m": "1m", "5m": "5m", "h1": "1h", "1d": "1d", "1w": "1w", "1month": "1M" };
+      const intradayTimeframes = ["30s", "1m", "5m", "h1"];
       const defaultPrefs = {
         symbol:"BTCUSDT",
         timeframe:"1m",
-        toggles:{ ma:true, vwap:true, bands:true, stdevBands:false, volume:true, volumeProfile:true, historicalVol:true, oscillator:true, refs:true, signals:true },
+        toggles:{ ma:true, vwap:true, bands:true, stdevBands:false, volume:true, volumeProfile:true, hv252:true, oscillator:true, refs:true, signals:true },
         maType:"SMA",
         ma:[
           { id:"ma9", period:9, enabled:true, color:"#22c55e" },
@@ -221,7 +222,7 @@ def render_lightweight_chart_html():
         toggles:{ ...defaultPrefs.toggles, ...(storedPrefs.toggles || {}) },
         ma: Array.isArray(storedPrefs.ma) ? storedPrefs.ma : defaultPrefs.ma,
       };
-      const state = { symbol:prefs.symbol, timeframe:prefs.timeframe, candles:[], indicators:null, chart:null, oscChart:null, series:{}, priceLines:[], markerApi:null, socket:null, toggles:prefs.toggles, maType:prefs.maType, ma:prefs.ma };
+      const state = { symbol:prefs.symbol, timeframe:prefs.timeframe, candles:[], dailyCandles:[], indicators:null, chart:null, oscChart:null, series:{}, priceLines:[], markerApi:null, socket:null, toggles:prefs.toggles, maType:prefs.maType, ma:prefs.ma };
       if (!assetRegistry[state.symbol]) state.symbol = "BTCUSDT";
       if (!timeframes.includes(state.timeframe)) state.timeframe = "1m";
       const chartEl = document.getElementById("lw-chart");
@@ -234,19 +235,6 @@ def render_lightweight_chart_html():
       const fmtTime = (time) => new Date(time * 1000).toLocaleString("pt-BR", { timeZone:"America/Sao_Paulo", hour12:false });
       const setStatus = (msg) => { statusEl.textContent = msg; };
       const setLoading = (on) => skeletonEl.classList.toggle("show", Boolean(on));
-      const tickSizeBySymbol = {
-        BTCUSDT:0.01, ETHUSDT:0.01, SOLUSDT:0.01,
-        SP500:0.25, NASDAQ:0.25, RUSSELL:0.1, DXY:0.001, "6L1":0.0001,
-        BRENT:0.01, WTI:0.01, XAUUSD:0.1, EEM:0.01, EWZ:0.01, IBOV:1,
-      };
-      function tickSizeFor(symbol, price) {
-        if (tickSizeBySymbol[symbol]) return tickSizeBySymbol[symbol];
-        if (!Number.isFinite(price)) return 0.01;
-        if (price >= 1000) return 0.25;
-        if (price >= 100) return 0.05;
-        if (price >= 10) return 0.01;
-        return 0.0001;
-      }
       const savePrefs = () => {
         localStorage.setItem("lw_chart_prefs", JSON.stringify({ symbol:state.symbol, timeframe:state.timeframe, toggles:state.toggles, maType:state.maType, ma:state.ma }));
       };
@@ -269,7 +257,7 @@ def render_lightweight_chart_html():
         actionBox.querySelectorAll("button").forEach((el) => el.remove());
         assets.forEach((asset) => assetBox.appendChild(button(asset.label, state.symbol === asset.symbol, () => loadSymbol(asset.symbol, state.timeframe))));
         timeframes.forEach((tf) => tfBox.appendChild(button(tf, state.timeframe === tf, () => loadSymbol(state.symbol, tf))));
-        [["ma","Medias"],["vwap","VWAP"],["bands","Bandas %"],["stdevBands","Desvios"],["refs","Refs"],["signals","Sinais"],["volume","Volume"],["volumeProfile","Vol Profile"],["historicalVol","HV"],["oscillator","Osc"]].forEach(([key,label]) => {
+        [["ma","Medias"],["vwap","VWAP"],["bands","Bandas %"],["stdevBands","Desvios"],["refs","Refs"],["signals","Sinais"],["volume","Volume"],["volumeProfile","Vol Profile"],["hv252","HV 252"],["oscillator","Osc"]].forEach(([key,label]) => {
           toggleBox.appendChild(button(label, state.toggles[key], () => { state.toggles[key] = !state.toggles[key]; savePrefs(); renderControls(); renderCharts(false); }, state.toggles[key] ? "toggle-on" : ""));
         });
         actionBox.appendChild(button("Reset Zoom", false, () => { state.chart?.timeScale().fitContent(); state.oscChart?.timeScale().fitContent(); }));
@@ -329,6 +317,17 @@ def render_lightweight_chart_html():
         if (!res.ok) throw new Error(`Binance trades ${res.status}`);
         const trades = await res.json();
         return aggregateTrades(trades.map((t) => ({ timeMs:t.T, price:+t.p, qty:+t.q })), tfSeconds[timeframe]);
+      }
+      async function fetchDailyCandles(symbol) {
+        const asset = assetRegistry[symbol] || { source: "binance" };
+        if (asset.source === "yahoo") {
+          const series = (yahooPayload.series && yahooPayload.series[symbol]) || {};
+          return Array.isArray(series.daily) ? series.daily : [];
+        }
+        const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1d&limit=300`);
+        if (!res.ok) throw new Error(`Binance daily klines ${res.status}`);
+        const rows = await res.json();
+        return rows.map((r) => ({ time:Math.floor(r[0]/1000), open:+r[1], high:+r[2], low:+r[3], close:+r[4], volume:+r[5] }));
       }
       function fetchYahooHistorical(symbol, timeframe) {
         const series = (yahooPayload.series && yahooPayload.series[symbol]) || {};
@@ -481,41 +480,38 @@ def render_lightweight_chart_html():
         const prevClose = prev[prev.length - 1]?.close;
         return { open, high, low, prevClose, current:candles[candles.length - 1]?.close };
       }
-      function volatilitySource(candles) {
-        const series = (yahooPayload.series && yahooPayload.series[state.symbol]) || {};
-        return Array.isArray(series.daily) && series.daily.length >= 31 ? series.daily : candles;
-      }
-      function historicalVolatility(candles, period, prevClose) {
-        const source = volatilitySource(candles).filter((c) => Number.isFinite(c.close) && c.close > 0);
-        if (source.length < Math.min(period + 1, 31) || !Number.isFinite(prevClose)) {
-          return { period, vol:NaN, annualized:NaN, ticks:NaN, tickSize:tickSizeFor(state.symbol, prevClose), upper:NaN, lower:NaN };
-        }
-        const slice = source.slice(-(period + 1));
+      function calculateLogReturns(closes) {
         const returns = [];
-        for (let i = 1; i < slice.length; i += 1) {
-          const prev = slice[i - 1].close;
-          const curr = slice[i].close;
+        for (let i = 1; i < closes.length; i += 1) {
+          const prev = closes[i - 1];
+          const curr = closes[i];
           if (prev > 0 && curr > 0) returns.push(Math.log(curr / prev));
         }
-        if (returns.length < 2) return { period, vol:NaN, annualized:NaN, ticks:NaN, tickSize:tickSizeFor(state.symbol, prevClose), upper:NaN, lower:NaN };
+        return returns;
+      }
+      function calculateHistoricalVolatility(dailyCandles, period=252) {
+        const source = (dailyCandles || []).filter((c) => Number.isFinite(c.close) && c.close > 0);
+        if (source.length < period + 1) {
+          return { ok:false, period, warning:`Historico insuficiente para HV ${period}`, prevClose:NaN, dailyVol:NaN, annualVol:NaN, levels:[] };
+        }
+        const closes = source.map((c) => c.close);
+        const returns = calculateLogReturns(closes).slice(-period);
+        if (returns.length < period) return { ok:false, period, warning:`Historico insuficiente para HV ${period}`, prevClose:NaN, dailyVol:NaN, annualVol:NaN, levels:[] };
         const mean = returns.reduce((a,b) => a + b, 0) / returns.length;
         const variance = returns.reduce((sum,r) => sum + Math.pow(r - mean, 2), 0) / (returns.length - 1);
-        const vol = Math.sqrt(Math.max(0, variance));
-        const annualized = vol * Math.sqrt(252);
-        const tickSize = tickSizeFor(state.symbol, prevClose);
-        const rawDistance = prevClose * vol;
-        const ticks = Math.max(1, Math.round(rawDistance / tickSize));
-        const tickDistance = ticks * tickSize;
-        return {
-          period,
-          vol,
-          annualized,
-          ticks,
-          tickSize,
-          tickDistance,
-          upper:prevClose + tickDistance,
-          lower:prevClose - tickDistance,
-        };
+        const dailyVol = Math.sqrt(Math.max(0, variance));
+        const annualVol = dailyVol * Math.sqrt(252);
+        const prevClose = source[source.length - 2]?.close ?? source[source.length - 1]?.close;
+        return { ok:true, period, warning:"", prevClose, dailyVol, annualVol, levels:calculateVolatilityLevels(prevClose, dailyVol) };
+      }
+      function calculateVolatilityLevels(prevClose, dailyVol, multipliers=[0.5, 1, 1.5, 2]) {
+        if (!Number.isFinite(prevClose) || !Number.isFinite(dailyVol)) return [];
+        const levels = [{ label:"Fech. Ant.", price:prevClose, multiplier:0 }];
+        multipliers.forEach((m) => {
+          levels.push({ label:`HV +${m}σ`, price:prevClose * Math.exp(m * dailyVol), multiplier:m });
+          levels.push({ label:`HV -${m}σ`, price:prevClose * Math.exp(-m * dailyVol), multiplier:-m });
+        });
+        return levels;
       }
       function horizontalSessionLine(candles, value) {
         if (!candles.length || !Number.isFinite(value)) return [];
@@ -599,9 +595,8 @@ def render_lightweight_chart_html():
         const stdev2 = computeStdevBands(candles, vwapDay, 2);
         const refs = sessionRefs(candles);
         const volumeProfile = computeSessionVolumeProfile(candles);
-        const hv252 = historicalVolatility(candles, 252, refs.prevClose);
-        const hv30 = historicalVolatility(candles, 30, refs.prevClose);
-        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, stdev1, stdev2, refs, volumeProfile, hv252, hv30 };
+        const hv252 = calculateHistoricalVolatility(state.dailyCandles, 252);
+        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, stdev1, stdev2, refs, volumeProfile, hv252 };
         indicators.signals = detectSignals(candles, indicators);
         return indicators;
       }
@@ -709,15 +704,14 @@ def render_lightweight_chart_html():
           addPriceLine(candleSeries, "VAH", state.indicators.volumeProfile?.vah?.high, "#22c55e");
           addPriceLine(candleSeries, "VAL", state.indicators.volumeProfile?.val?.low, "#ef4444");
         }
-        if (state.toggles.historicalVol) {
-          addLine("hv252u", horizontalSessionLine(state.candles, state.indicators.hv252.upper), "#a78bfa", 1);
-          addLine("hv252l", horizontalSessionLine(state.candles, state.indicators.hv252.lower), "#a78bfa", 1);
-          addLine("hv30u", horizontalSessionLine(state.candles, state.indicators.hv30.upper), "#fb923c", 1);
-          addLine("hv30l", horizontalSessionLine(state.candles, state.indicators.hv30.lower), "#fb923c", 1);
-          addPriceLine(candleSeries, "HV252 +", state.indicators.hv252.upper, "#a78bfa");
-          addPriceLine(candleSeries, "HV252 -", state.indicators.hv252.lower, "#a78bfa");
-          addPriceLine(candleSeries, "HV30 +", state.indicators.hv30.upper, "#fb923c");
-          addPriceLine(candleSeries, "HV30 -", state.indicators.hv30.lower, "#fb923c");
+        if (state.toggles.hv252 && intradayTimeframes.includes(state.timeframe) && state.indicators.hv252.ok) {
+          const hvColors = { 0:"#f59e0b", 0.5:"#93c5fd", 1:"#60a5fa", 1.5:"#a78bfa", 2:"#f472b6" };
+          state.indicators.hv252.levels.forEach((level) => {
+            const key = `hv252_${String(level.multiplier).replace("-", "m").replace(".", "_")}`;
+            const color = hvColors[Math.abs(level.multiplier)] || "#a78bfa";
+            addLine(key, horizontalSessionLine(state.candles, level.price), color, level.multiplier === 0 ? 2 : 1);
+            addPriceLine(candleSeries, level.label, level.price, color, level.multiplier === 0 ? 0 : 2);
+          });
         }
         if (state.toggles.oscillator) {
           const oscSeries = state.oscChart.addSeries(HistogramSeries, { color:"#38bdf8", priceFormat:{ type:"price", precision:2, minMove:0.01 } });
@@ -751,9 +745,17 @@ def render_lightweight_chart_html():
         document.getElementById("lw-vp-poc").textContent = `POC ${fmt(indicators.volumeProfile?.poc?.mid, 2)}`;
         document.getElementById("lw-vp-range").textContent = `Range ${fmt(indicators.volumeProfile?.min, 2)} - ${fmt(indicators.volumeProfile?.max, 2)} | Vol ${fmt(indicators.volumeProfile?.total, 2)}`;
         document.getElementById("lw-vp-value-area").textContent = `VAH ${fmt(indicators.volumeProfile?.vah?.high, 2)} | VAL ${fmt(indicators.volumeProfile?.val?.low, 2)}`;
-        document.getElementById("lw-hv252").textContent = `HV252 ${Number.isFinite(indicators.hv252?.annualized) ? (indicators.hv252.annualized * 100).toFixed(2) : "---"}% | ${Number.isFinite(indicators.hv252?.ticks) ? indicators.hv252.ticks : "---"} ticks`;
-        document.getElementById("lw-hv30").textContent = `HV30 ${Number.isFinite(indicators.hv30?.annualized) ? (indicators.hv30.annualized * 100).toFixed(2) : "---"}% | ${Number.isFinite(indicators.hv30?.ticks) ? indicators.hv30.ticks : "---"} ticks`;
-        document.getElementById("lw-hv-levels").textContent = `Tick ${fmt(indicators.hv30?.tickSize || indicators.hv252?.tickSize, 4)} | 30: ${fmt(indicators.hv30?.lower, 2)} / ${fmt(indicators.hv30?.upper, 2)} | 252: ${fmt(indicators.hv252?.lower, 2)} / ${fmt(indicators.hv252?.upper, 2)}`;
+        const hv = indicators.hv252 || {};
+        const level = (mult) => (hv.levels || []).find((item) => item.multiplier === mult)?.price;
+        const nearest = last && hv.ok ? hv.levels.filter((item) => item.multiplier !== 0).reduce((best, item) => {
+          const distance = Math.abs(last.close - item.price);
+          return !best || distance < best.distance ? { ...item, distance } : best;
+        }, null) : null;
+        document.getElementById("lw-hv252").textContent = hv.ok ? `Fech. ant. ${fmt(hv.prevClose, 2)}` : (hv.warning || "Historico insuficiente para HV 252");
+        document.getElementById("lw-hv30").textContent = hv.ok ? `HV diaria ${(hv.dailyVol * 100).toFixed(2)}% | anual ${(hv.annualVol * 100).toFixed(2)}%` : "Use candles diarios suficientes";
+        document.getElementById("lw-hv-levels").textContent = hv.ok
+          ? `1σ ${fmt(level(-1),2)} / ${fmt(level(1),2)} | 2σ ${fmt(level(-2),2)} / ${fmt(level(2),2)} | prox ${nearest ? `${nearest.label} (${fmt(nearest.distance,2)})` : "---"}`
+          : "Historico insuficiente para HV 252";
         renderAlerts(last, lastVwap, lastVol.rvol, indicators.signals);
       }
       function renderAlerts(last, vwap, rvol, signals) {
@@ -835,10 +837,12 @@ def render_lightweight_chart_html():
         state.series.stdev1l?.setData(state.indicators.stdev1.map((p) => ({ time:p.time, value:p.lower })));
         state.series.stdev2u?.setData(state.indicators.stdev2.map((p) => ({ time:p.time, value:p.upper })));
         state.series.stdev2l?.setData(state.indicators.stdev2.map((p) => ({ time:p.time, value:p.lower })));
-        state.series.hv252u?.setData(horizontalSessionLine(state.candles, state.indicators.hv252.upper));
-        state.series.hv252l?.setData(horizontalSessionLine(state.candles, state.indicators.hv252.lower));
-        state.series.hv30u?.setData(horizontalSessionLine(state.candles, state.indicators.hv30.upper));
-        state.series.hv30l?.setData(horizontalSessionLine(state.candles, state.indicators.hv30.lower));
+        if (state.indicators.hv252?.ok) {
+          state.indicators.hv252.levels.forEach((level) => {
+            const key = `hv252_${String(level.multiplier).replace("-", "m").replace(".", "_")}`;
+            state.series[key]?.setData(horizontalSessionLine(state.candles, level.price));
+          });
+        }
         state.indicators.ma.forEach((m) => state.series[m.id]?.setData(m.data));
         if (state.series.osc) {
           state.series.osc.setData(computeOsc(state.candles, state.indicators.vwapDay).map((p) => ({ ...p, color:p.value >= 0 ? "rgba(34,197,94,.65)" : "rgba(239,68,68,.65)" })));
@@ -882,7 +886,12 @@ def render_lightweight_chart_html():
           setStatus(`Carregando historico ${asset.source === "yahoo" ? "yfinance" : "Binance"}: ${asset.label || symbol} ${timeframe}...`);
         }
         try {
-          state.candles = await fetchHistorical(symbol, timeframe);
+          const [candles, dailyCandles] = await Promise.all([
+            fetchHistorical(symbol, timeframe),
+            fetchDailyCandles(symbol).catch((err) => { console.warn("Daily candles indisponiveis", err); return []; }),
+          ]);
+          state.candles = candles;
+          state.dailyCandles = dailyCandles;
           if (!state.candles.length) throw new Error(`Ativo ${asset.label || symbol} sem candles para ${timeframe}.`);
           renderCharts();
           startSocket();
