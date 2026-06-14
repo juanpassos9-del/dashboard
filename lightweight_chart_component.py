@@ -360,7 +360,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         reversal:{ minDistanceFromVWAPPercent:0.5, proximityPercent:0.15, requireVwapHvConfluence:true, minStdevMultiplier:1, hvProximityPercent:0.35 },
         trend:{ maxPullbackDistancePercent:0.15, maxVWAPDistancePercent:0.45, minBodyPercent:0.55 },
         volume:{ enabled:true, lookback:20, minVolumeMultiplier:1.2, minRelativeVolume:1.2, strongRelativeVolume:1.5, blockLowVolumeSignals:true, requireBarVolumeAboveAverage:true, requireVolumeExpansion:true, legLookback:5, minLegRelativeVolume:1.1, requireReversalVolumeClimaxOrRejection:true, requireTrendVolumeResumption:true, blockFallingVolume:true, fallingVolumeLookback:3 },
-        garch:{ enabled:true, omega:0.000001, alpha:0.08, beta:0.90, referenceMode:"previousClose", adjustment:null, minSigmaForSignal:1.5 },
+        garch:{ enabled:true, omega:0.000001, alpha:0.08, beta:0.90, garchTimeframe:"D", referenceMode:"previousClose", adjustment:null, minSigmaForSignal:1.5 },
         sessionFilter:{ enabled:false, blockedTimes:[] },
         weights:{
           favorableRegime:2,
@@ -550,6 +550,22 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         garchRefRow.querySelector("select").value = cfg.garch.referenceMode || "previousClose";
         garchRefRow.querySelector("select").onchange = (e) => {
           cfg.garch.referenceMode = e.target.value;
+          savePrefs();
+          renderCharts(false);
+        };
+        const garchTfRow = document.createElement("div");
+        garchTfRow.className = "lw-setting-row";
+        garchTfRow.innerHTML = `
+          <span>TF GARCH</span>
+          <select id="lw-garch-tf">
+            <option value="D">Diario</option>
+            <option value="intraday">Intraday</option>
+          </select>
+          <span></span>`;
+        box.appendChild(garchTfRow);
+        garchTfRow.querySelector("select").value = cfg.garch.garchTimeframe || "D";
+        garchTfRow.querySelector("select").onchange = (e) => {
+          cfg.garch.garchTimeframe = e.target.value;
           savePrefs();
           renderCharts(false);
         };
@@ -1008,10 +1024,13 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         if (abs < 3) return { zone:"extreme", side, sigmaDistance, message:"Zona estatisticamente esticada." };
         return { zone:"anomaly", side, sigmaDistance, message:"Movimento anormal. Exigir confirmacao forte." };
       }
-      function calculateGarchOverlay(candles, refs, vwapDay) {
+      function calculateGarchOverlay(candles, dailyCandles, refs, vwapDay) {
         const cfg = state.signalConfig.garch || {};
         const referenceMode = cfg.referenceMode || "previousClose";
-        const garch = calculateGarch11Volatility(candles, { ...cfg, annualizationFactor:annualizationFactorForTimeframe(state.timeframe) });
+        const garchTimeframe = cfg.garchTimeframe || "D";
+        const garchSource = garchTimeframe === "D" && Array.isArray(dailyCandles) && dailyCandles.length >= 31 ? dailyCandles : candles;
+        const annualizationFactor = garchTimeframe === "D" ? 252 : annualizationFactorForTimeframe(state.timeframe);
+        const garch = calculateGarch11Volatility(garchSource, { ...cfg, annualizationFactor });
         if (!garch.ok) return { ...garch, referencePrice:NaN, zones:[], classification:{ zone:"indisponivel", side:"center", sigmaDistance:NaN, message:garch.warning } };
         const referencePrice = getGarchReferencePrice(candles, referenceMode, {
           previousClose:refs?.prevClose,
@@ -1022,7 +1041,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const zones = calculateGarchVolatilityZones(referencePrice, garch.latestVolatility);
         const current = candles[candles.length - 1]?.close;
         const classification = classifyCurrentGarchZone(current, referencePrice, garch.latestVolatility);
-        return { ...garch, referencePrice, referenceMode, zones, classification };
+        return { ...garch, referencePrice, referenceMode, garchTimeframe:garchSource === dailyCandles ? "D" : "intraday", zones, classification };
       }
       function horizontalSessionLine(candles, value) {
         if (!candles.length || !Number.isFinite(value)) return [];
@@ -1321,7 +1340,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const refs = sessionRefs(candles);
         const volumeProfile = computeSessionVolumeProfile(candles);
         const weisWave = computeWeisWaveVolume(candles, 0.2);
-        const garch = calculateGarchOverlay(candles, refs, vwapDay);
+        const garch = calculateGarchOverlay(candles, state.dailyCandles, refs, vwapDay);
         const hv252 = calculateHistoricalVolatility(state.dailyCandles, 252);
         const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, signalMAs, stdevBands, weekVolBands, refs, volumeProfile, weisWave, garch, hv252 };
         indicators.signals = generateSignals(candles, indicators);
@@ -1552,7 +1571,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const garchRefLabels = { previousClose:"Fech. ant.", sessionOpen:"Abertura", vwap:"VWAP", lastClose:"Ultimo", adjustment:"Manual" };
         document.getElementById("lw-garch-zone").textContent = garch.ok ? `${Number.isFinite(gClass.sigmaDistance) ? gClass.sigmaDistance.toFixed(2) : "---"}σ | ${gClass.zone || "---"}` : (garch.warning || "GARCH indisponivel");
         document.getElementById("lw-garch-extra").textContent = garch.ok
-          ? `Hull/lognormal | Vol ${(garch.latestVolatility * 100).toFixed(2)}% | Ref ${garchRefLabels[garch.referenceMode] || garch.referenceMode}: ${fmt(garch.referencePrice, 2)}`
+          ? `Hull/lognormal | TF ${garch.garchTimeframe || "D"} | Vol ${(garch.latestVolatility * 100).toFixed(2)}% | Ref ${garchRefLabels[garch.referenceMode] || garch.referenceMode}: ${fmt(garch.referencePrice, 2)}`
           : "Historico insuficiente ou parametro instavel";
         document.getElementById("lw-vp-poc").textContent = `POC ${fmt(indicators.volumeProfile?.poc?.mid, 2)}`;
         document.getElementById("lw-vp-value-area").textContent = `VAH ${fmt(indicators.volumeProfile?.vah?.high, 2)} | VAL ${fmt(indicators.volumeProfile?.val?.low, 2)}`;
