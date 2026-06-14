@@ -1378,6 +1378,29 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           state.series[`${prefix}_m_${pct}`]?.setData(percentBandData(series, pct, "lower"));
         });
       }
+      function candleVolumeStyle(c, rvol) {
+        const up = c.close >= c.open;
+        if (Number.isFinite(rvol) && rvol >= 2) {
+          return { color:"#f59e0b", borderColor:"#fde68a", wickColor:"#fde68a" };
+        }
+        if (Number.isFinite(rvol) && rvol >= 1.5) {
+          return up
+            ? { color:"#00e676", borderColor:"#a7f3d0", wickColor:"#a7f3d0" }
+            : { color:"#ff1744", borderColor:"#fecdd3", wickColor:"#fecdd3" };
+        }
+        if (Number.isFinite(rvol) && rvol >= 1.2) {
+          return up
+            ? { color:"#00c087", borderColor:"#34d399", wickColor:"#34d399" }
+            : { color:"#ff4b4b", borderColor:"#fb7185", wickColor:"#fb7185" };
+        }
+        return up
+          ? { color:"#00a878", borderColor:"#00a878", wickColor:"#00a878" }
+          : { color:"#d63d3d", borderColor:"#d63d3d", wickColor:"#d63d3d" };
+      }
+      function candleWithVolumeColor(c, i) {
+        const rvol = state.indicators?.volumeStats?.[i]?.rvol;
+        return { ...c, ...candleVolumeStyle(c, rvol) };
+      }
       function addPriceLine(series, title, price, color, style=2, width=1) {
         if (!Number.isFinite(price)) return;
         const line = series.createPriceLine({ price, color, lineWidth:width, lineStyle:style, axisLabelVisible:true, title });
@@ -1422,8 +1445,8 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         chartEl.innerHTML = ""; state.series = {}; state.priceLines = []; state.markerApi = null;
         state.chart = makeChart(chartEl, chartEl.clientHeight || 1000);
         state.indicators = computeIndicators(state.candles);
-        const candleSeries = state.chart.addSeries(CandlestickSeries, { upColor:"#00c087", downColor:"#ff4b4b", borderVisible:false, wickUpColor:"#00c087", wickDownColor:"#ff4b4b" });
-        candleSeries.setData(state.candles); state.series.candle = candleSeries;
+        const candleSeries = state.chart.addSeries(CandlestickSeries, { upColor:"#00a878", downColor:"#d63d3d", borderVisible:true, wickUpColor:"#00a878", wickDownColor:"#d63d3d" });
+        candleSeries.setData(state.candles.map((c, i) => candleWithVolumeColor(c, i))); state.series.candle = candleSeries;
         applyMarkers(candleSeries, state.indicators.signals);
         if (state.toggles.volume) {
           const volumeSeries = state.chart.addSeries(HistogramSeries, { priceFormat:{ type:"volume" }, priceScaleId:"", color:"#334155" });
@@ -1606,7 +1629,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const nowMs = Date.now();
         if (nowMs - state.lastFullRefresh < 1000) {
           const lastQuick = state.candles[state.candles.length - 1];
-          state.series.candle.update(lastQuick);
+          state.series.candle.update(candleWithVolumeColor(lastQuick, state.candles.length - 1));
           if (state.series.volume) state.series.volume.update({ time:lastQuick.time, value:lastQuick.volume, color:lastQuick.close >= lastQuick.open ? "rgba(0,192,135,.32)" : "rgba(255,75,75,.32)" });
           if (!state.liveUpdateQueued) {
             state.liveUpdateQueued = true;
@@ -1617,7 +1640,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         state.lastFullRefresh = nowMs;
         state.indicators = computeIndicators(state.candles);
         const last = state.candles[state.candles.length - 1];
-        state.series.candle.update(last);
+        state.series.candle.update(candleWithVolumeColor(last, state.candles.length - 1));
         if (state.series.volume) {
           const i = state.candles.length - 1;
           const rvol = state.indicators.volumeStats[i]?.rvol;
