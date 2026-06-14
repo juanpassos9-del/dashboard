@@ -372,14 +372,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           rejectionCandle:2,
           impulseCandle:2,
           hvConfluence:2,
-          volumeConfirmation:3,
-          barVolumeConfirmation:3,
-          relativeVolumeConfirmation:2,
-          strongRelativeVolumeConfirmation:2,
-          legVolumeConfirmation:2,
-          volumeExpansion:2,
-          weakPullbackVolume:2,
-          trendVolumeResumption:2,
           previousCandleBreak:1,
           vwapSide:1,
         },
@@ -519,11 +511,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           ["near", "Nivel %", 0.05, 2, 0.05, cfg.reversal.proximityPercent, (v) => { cfg.reversal.proximityPercent = v; }],
           ["hvNear", "HV %", 0.05, 2, 0.05, cfg.reversal.hvProximityPercent, (v) => { cfg.reversal.hvProximityPercent = v; }],
           ["devMin", "Dev REV", 1, 3, 1, cfg.reversal.minStdevMultiplier, (v) => { cfg.reversal.minStdevMultiplier = v; }],
-          ["volLook", "Vol M", 5, 80, 1, cfg.volume.lookback, (v) => { cfg.volume.lookback = v; }],
-          ["rvol", "RVOL min", 0.5, 5, 0.05, cfg.volume.minRelativeVolume ?? cfg.volume.minVolumeMultiplier, (v) => { cfg.volume.minRelativeVolume = v; cfg.volume.minVolumeMultiplier = v; }],
-          ["rvolStrong", "RVOL forte", 1, 8, 0.1, cfg.volume.strongRelativeVolume, (v) => { cfg.volume.strongRelativeVolume = v; }],
-          ["legLook", "Pernada", 2, 20, 1, cfg.volume.legLookback, (v) => { cfg.volume.legLookback = v; }],
-          ["legMin", "Leg RVOL", 0.5, 5, 0.05, cfg.volume.minLegRelativeVolume, (v) => { cfg.volume.minLegRelativeVolume = v; }],
           ["garchSigma", "GARCH σ", 0.5, 3, 0.25, cfg.garch.minSigmaForSignal, (v) => { cfg.garch.minSigmaForSignal = v; }],
         ].forEach((item) => {
           const [, label, min, max, step, value, setter] = item;
@@ -537,13 +524,8 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           box.appendChild(row);
         });
         [
-          ["volOn", "Filtro volume", cfg.volume.enabled, (v) => { cfg.volume.enabled = v; }],
           ["garchOn", "Filtro GARCH", cfg.garch.enabled, (v) => { cfg.garch.enabled = v; }],
           ["revHv", "REV VWAP+HV", cfg.reversal.requireVwapHvConfluence, (v) => { cfg.reversal.requireVwapHvConfluence = v; }],
-          ["volAbove", "Vol > media", cfg.volume.requireBarVolumeAboveAverage, (v) => { cfg.volume.requireBarVolumeAboveAverage = v; }],
-          ["volExp", "Expansao volume", cfg.volume.requireVolumeExpansion, (v) => { cfg.volume.requireVolumeExpansion = v; }],
-          ["volLeg", "Volume pernada", cfg.volume.requireReversalVolumeClimaxOrRejection, (v) => { cfg.volume.requireReversalVolumeClimaxOrRejection = v; }],
-          ["volFall", "Bloquear vol caindo", cfg.volume.blockFallingVolume, (v) => { cfg.volume.blockFallingVolume = v; }],
         ].forEach((item) => {
           const [, label, checked, setter] = item;
           const row = document.createElement("div");
@@ -772,53 +754,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const currentLegVolume = getLegVolume(candles, index, legLookback);
         const avgLegVolume = getAverageLegVolume(candles, index, legLookback, cfg.volume.lookback || 20);
         return avgLegVolume > 0 ? currentLegVolume / avgLegVolume : 0;
-      }
-      function hasRelativeVolumeConfirmation(candles, index, cfg) {
-        if (!cfg.volume.enabled) return true;
-        return getRelativeVolume(candles, index, cfg.volume.lookback || 20) >= (cfg.volume.minRelativeVolume || cfg.volume.minVolumeMultiplier || 1.2);
-      }
-      function hasStrongRelativeVolume(candles, index, cfg) {
-        return getRelativeVolume(candles, index, cfg.volume.lookback || 20) >= (cfg.volume.strongRelativeVolume || 1.5);
-      }
-      function isBarVolumeAboveAverage(candles, index, cfg) {
-        if (!cfg.volume.enabled || !cfg.volume.requireBarVolumeAboveAverage) return true;
-        return Number(candles[index]?.volume || 0) > getAverageVolume(candles, index, cfg.volume.lookback || 20);
-      }
-      function hasVolumeExpansion(candles, index, cfg) {
-        if (!cfg.volume.enabled || !cfg.volume.requireVolumeExpansion) return true;
-        const current = Number(candles[index]?.volume || 0);
-        const previous1 = Number(candles[index - 1]?.volume || 0);
-        const previous2 = Number(candles[index - 2]?.volume || 0);
-        return current > previous1 && current > previous2;
-      }
-      function isVolumeFalling(candles, index, lookback=3) {
-        if (index < lookback) return false;
-        for (let i = index - lookback + 1; i <= index; i += 1) {
-          if (Number(candles[i]?.volume || 0) >= Number(candles[i - 1]?.volume || 0)) return false;
-        }
-        return true;
-      }
-      function hasLegVolumeConfirmation(candles, index, cfg) {
-        if (!cfg.volume.enabled) return true;
-        return getLegRelativeVolume(candles, index, cfg) >= (cfg.volume.minLegRelativeVolume || 1.1);
-      }
-      function hasWeakPullbackVolume(candles, index, cfg) {
-        const lookback = cfg.volume.legLookback || 5;
-        const avgVolume = getAverageVolume(candles, index, cfg.volume.lookback || 20);
-        if (!avgVolume || avgVolume <= 0) return false;
-        let pullbackVolume = 0, count = 0;
-        for (let i = index - lookback; i < index; i += 1) {
-          if (i >= 0) { pullbackVolume += Number(candles[i]?.volume || 0); count += 1; }
-        }
-        return count > 0 && (pullbackVolume / count) < avgVolume;
-      }
-      function hasReversalVolumeClimaxOrRejection(candles, index, cfg) {
-        if (!cfg.volume.enabled || !cfg.volume.requireReversalVolumeClimaxOrRejection) return true;
-        return hasVolumeExpansion(candles, index, cfg) || hasLegVolumeConfirmation(candles, index, cfg) || hasStrongRelativeVolume(candles, index, cfg);
-      }
-      function hasTrendVolumeResumption(candles, index, cfg) {
-        if (!cfg.volume.enabled || !cfg.volume.requireTrendVolumeResumption) return true;
-        return hasRelativeVolumeConfirmation(candles, index, cfg) && hasVolumeExpansion(candles, index, cfg);
       }
       function computeVolumeStats(candles, period=20) {
         const out = []; let sum = 0;
@@ -1233,11 +1168,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           score:parts.score,
           regime,
           vwapDistancePercent:pctDistance(ctx.c.close, ctx.vwap),
-          volume:ctx.c.volume,
-          volumeMA:ctx.volumeMA,
-          relativeVolume:ctx.rvol,
-          legVolume:ctx.legVolume,
-          legRelativeVolume:ctx.legRelativeVolume,
           locationTags:parts.tags,
           reasons:parts.reasons,
           suggestedStop:safe(stop),
@@ -1259,18 +1189,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const hvExtreme = hvLevels.some((level) => isNearLevel(price, level, cfg.reversal.hvProximityPercent) || (side === "buy" ? price <= level : price >= level));
         return { ok:vwapExtreme && hvExtreme, vwapExtreme, hvExtreme };
       }
-      function volumeChecks(candles, i, cfg) {
-        const rvol = getRelativeVolume(candles, i, cfg.volume.lookback || 20);
-        const legRvol = getLegRelativeVolume(candles, i, cfg);
-        const barAbove = isBarVolumeAboveAverage(candles, i, cfg);
-        const relativeOk = hasRelativeVolumeConfirmation(candles, i, cfg);
-        const strong = hasStrongRelativeVolume(candles, i, cfg);
-        const expansion = hasVolumeExpansion(candles, i, cfg);
-        const legOk = hasLegVolumeConfirmation(candles, i, cfg);
-        const weakPullback = hasWeakPullbackVolume(candles, i, cfg);
-        const falling = cfg.volume.blockFallingVolume && isVolumeFalling(candles, i, cfg.volume.fallingVolumeLookback || 3);
-        return { rvol, legRvol, barAbove, relativeOk, strong, expansion, legOk, weakPullback, falling };
-      }
       function scoreCandidate(type, candles, indicators, i, regime) {
         const cfg = state.signalConfig;
         const w = cfg.weights;
@@ -1279,31 +1197,14 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         if (!prev || !Number.isFinite(vwap)) return null;
         const parts = { score:0, reasons:[], tags:[] };
         const dist = pctDistance(c.close, vwap);
-        const vol = volumeChecks(candles, i, cfg);
-        if (cfg.volume.enabled && vol.falling) return null;
         const nearLow = [dayLow, hvLower1, hvLower2].some((level) => isNearLevel(c.low, level, cfg.reversal.proximityPercent));
         const nearHigh = [dayHigh, hvUpper1, hvUpper2].some((level) => isNearLevel(c.high, level, cfg.reversal.proximityPercent));
-        const maBull = ema9 > ema21 && ema21 > ema80;
-        const maBear = ema9 < ema21 && ema21 < ema80;
-        const trendTooFar = Number.isFinite(dist) && Math.abs(dist) > (cfg.trend.maxVWAPDistancePercent || 0.45);
-        const addVolumeScores = () => {
-          addScore(parts, vol.barAbove, w.barVolumeConfirmation || w.volumeConfirmation, "Volume da barra acima da media");
-          addScore(parts, vol.relativeOk, w.relativeVolumeConfirmation || w.volumeConfirmation, `RVOL ${fmt(vol.rvol,2)}x`);
-          addScore(parts, vol.strong, w.strongRelativeVolumeConfirmation || 0, `RVOL forte ${fmt(vol.rvol,2)}x`);
-          addScore(parts, vol.expansion, w.volumeExpansion || 0, "Volume em expansao");
-          addScore(parts, vol.legOk, w.legVolumeConfirmation || 0, `Volume da pernada ${fmt(vol.legRvol,2)}x`);
-          addTag(parts, vol.barAbove, "VOLUME_ABOVE_AVERAGE");
-          addTag(parts, vol.strong, "RELATIVE_VOLUME_STRONG");
-          addTag(parts, vol.expansion, "VOLUME_EXPANSION");
-          addTag(parts, vol.legOk, "LEG_VOLUME_CONFIRMATION");
-        };
         if (type === "REV_BUY") {
           const confluence = reversalConfluence(ctx, "buy", cfg);
           if (cfg.reversal.requireVwapHvConfluence && !confluence.ok) return null;
           if (state.toggles.garch && cfg.garch?.enabled && (!Number.isFinite(garchSigma) || garchSigma > -(cfg.garch.minSigmaForSignal || 1.5))) return null;
           const candleOk = isBullishRejectionCandle(c) || c.close > prev.high || (c.low < prev.low && c.close > prev.close);
-          const volumeOk = vol.relativeOk && (vol.expansion || vol.legOk || vol.strong);
-          if (!candleOk || !volumeOk || Math.abs(dist) < cfg.reversal.minDistanceFromVWAPPercent || isNearLevel(c.close, vwap, cfg.reversal.proximityPercent)) return null;
+          if (!candleOk || Math.abs(dist) < cfg.reversal.minDistanceFromVWAPPercent || isNearLevel(c.close, vwap, cfg.reversal.proximityPercent)) return null;
           addScore(parts, ["range","stretched_down"].includes(regime), w.favorableRegime, `Regime ${regime}`);
           addScore(parts, c.close < vwap, w.vwapSide, "Preco abaixo da VWAP");
           addScore(parts, Number.isFinite(dist) && dist <= -cfg.reversal.minDistanceFromVWAPPercent, w.vwapDistance, `Distancia VWAP ${dist.toFixed(2)}%`);
@@ -1313,7 +1214,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           addScore(parts, nearLow, w.proximityToKeyLevel, "Proximo de minima/HV inferior");
           addScore(parts, candleOk, w.rejectionCandle, "Candle de rejeicao/falha inferior");
           addScore(parts, c.close > prev.close || c.close > prev.high, w.previousCandleBreak, "Virada sobre candle anterior");
-          addVolumeScores();
           addTag(parts, nearLow, "DAY_LOW");
           addTag(parts, confluence.hvExtreme, "HV_LOWER_1");
           addTag(parts, confluence.vwapExtreme, "VWAP_DEV_NEG_1");
@@ -1324,8 +1224,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           if (cfg.reversal.requireVwapHvConfluence && !confluence.ok) return null;
           if (state.toggles.garch && cfg.garch?.enabled && (!Number.isFinite(garchSigma) || garchSigma < (cfg.garch.minSigmaForSignal || 1.5))) return null;
           const candleOk = isBearishRejectionCandle(c) || c.close < prev.low || (c.high > prev.high && c.close < prev.close);
-          const volumeOk = vol.relativeOk && (vol.expansion || vol.legOk || vol.strong);
-          if (!candleOk || !volumeOk || Math.abs(dist) < cfg.reversal.minDistanceFromVWAPPercent || isNearLevel(c.close, vwap, cfg.reversal.proximityPercent)) return null;
+          if (!candleOk || Math.abs(dist) < cfg.reversal.minDistanceFromVWAPPercent || isNearLevel(c.close, vwap, cfg.reversal.proximityPercent)) return null;
           addScore(parts, ["range","stretched_up"].includes(regime), w.favorableRegime, `Regime ${regime}`);
           addScore(parts, c.close > vwap, w.vwapSide, "Preco acima da VWAP");
           addScore(parts, Number.isFinite(dist) && dist >= cfg.reversal.minDistanceFromVWAPPercent, w.vwapDistance, `Distancia VWAP +${dist.toFixed(2)}%`);
@@ -1335,46 +1234,12 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           addScore(parts, nearHigh, w.proximityToKeyLevel, "Proximo de maxima/HV superior");
           addScore(parts, candleOk, w.rejectionCandle, "Candle de rejeicao/falha superior");
           addScore(parts, c.close < prev.close || c.close < prev.low, w.previousCandleBreak, "Virada abaixo do candle anterior");
-          addVolumeScores();
           addTag(parts, nearHigh, "DAY_HIGH");
           addTag(parts, confluence.hvExtreme, "HV_UPPER_1");
           addTag(parts, confluence.vwapExtreme, "VWAP_DEV_POS_1");
           return buildSignal(type, ctx, parts, regime, maxFinite(c.high, dayHigh, hvUpper1), vwap, Number.isFinite(prevClose) ? prevClose : hvLower1);
         }
-        if (type === "TREND_BUY") {
-          const pullbackOk = isPullbackNearEMAOrVWAP(c, [ema9, ema21, vwap], cfg.trend.maxPullbackDistancePercent);
-          const candleOk = isBullishImpulseCandle(c, cfg.trend.minBodyPercent);
-          if (regime !== "uptrend" || !maBull || c.close <= vwap || trendTooFar || !pullbackOk || !candleOk || !vol.relativeOk || !vol.expansion) return null;
-          addScore(parts, regime === "uptrend", w.favorableRegime, "Regime de alta");
-          addScore(parts, c.close > vwap, w.vwapSide, "Preco acima da VWAP");
-          addScore(parts, maBull, w.movingAverageAlignment, "Medias alinhadas para alta");
-          addScore(parts, pullbackOk, w.pullbackLocation || w.proximityToKeyLevel, "Pullback em EMA/VWAP");
-          addScore(parts, candleOk, w.impulseCandle, "Candle de impulso comprador");
-          addScore(parts, c.close > prev.high, w.previousCandleBreak, "Rompimento da maxima anterior");
-          addVolumeScores();
-          addScore(parts, vol.weakPullback, w.weakPullbackVolume || 0, "Pullback anterior com volume fraco");
-          addScore(parts, hasTrendVolumeResumption(candles, i, cfg), w.trendVolumeResumption || 0, "Retomada com volume");
-          addTag(parts, pullbackOk, "EMA21_PULLBACK");
-          addTag(parts, vol.weakPullback, "WEAK_PULLBACK_VOLUME");
-          addTag(parts, hasTrendVolumeResumption(candles, i, cfg), "TREND_VOLUME_RESUMPTION");
-          return buildSignal(type, ctx, parts, regime, minFinite(ema21, vwap, getRecentSwingLow(candles, i, 12)), getRecentSwingHigh(candles, i, 24), Number.isFinite(dayHigh) ? dayHigh : hvUpper1);
-        }
-        const pullbackOk = isPullbackNearEMAOrVWAP(c, [ema9, ema21, vwap], cfg.trend.maxPullbackDistancePercent);
-        const candleOk = isBearishImpulseCandle(c, cfg.trend.minBodyPercent);
-        if (regime !== "downtrend" || !maBear || c.close >= vwap || trendTooFar || !pullbackOk || !candleOk || !vol.relativeOk || !vol.expansion) return null;
-        addScore(parts, regime === "downtrend", w.favorableRegime, "Regime de baixa");
-        addScore(parts, c.close < vwap, w.vwapSide, "Preco abaixo da VWAP");
-        addScore(parts, maBear, w.movingAverageAlignment, "Medias alinhadas para baixa");
-        addScore(parts, pullbackOk, w.pullbackLocation || w.proximityToKeyLevel, "Pullback em EMA/VWAP");
-        addScore(parts, candleOk, w.impulseCandle, "Candle de impulso vendedor");
-        addScore(parts, c.close < prev.low, w.previousCandleBreak, "Rompimento da minima anterior");
-        addVolumeScores();
-        addScore(parts, vol.weakPullback, w.weakPullbackVolume || 0, "Pullback anterior com volume fraco");
-        addScore(parts, hasTrendVolumeResumption(candles, i, cfg), w.trendVolumeResumption || 0, "Retomada com volume");
-        addTag(parts, pullbackOk, "EMA21_PULLBACK");
-        addTag(parts, vol.weakPullback, "WEAK_PULLBACK_VOLUME");
-        addTag(parts, hasTrendVolumeResumption(candles, i, cfg), "TREND_VOLUME_RESUMPTION");
-        return buildSignal(type, ctx, parts, regime, maxFinite(ema21, vwap, getRecentSwingHigh(candles, i, 12)), getRecentSwingLow(candles, i, 24), Number.isFinite(dayLow) ? dayLow : hvLower1);
+        return null;
       }
       function generateSignals(candles, indicators) {
         const cfg = state.signalConfig;
@@ -1696,8 +1561,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
               <div><span>Entrada</span> ${fmt(signal.price,2)} | <span>Stop</span> ${fmt(signal.suggestedStop,2)}</div>
               <div><span>Alvo 1</span> ${fmt(signal.suggestedTarget1,2)} | <span>Alvo 2</span> ${fmt(signal.suggestedTarget2,2)}</div>
               <div><span>Dist VWAP</span> ${Number.isFinite(signal.vwapDistancePercent) ? signal.vwapDistancePercent.toFixed(2) : "---"}% | <span>Regime</span> ${escapeHtml(signal.regime)}</div>
-              <div><span>Vol</span> ${fmt(signal.volume,2)} | <span>M20</span> ${fmt(signal.volumeMA,2)} | <span>RVOL</span> ${fmt(signal.relativeVolume,2)}x</div>
-              <div><span>Pernada</span> ${fmt(signal.legVolume,2)} | <span>Leg RVOL</span> ${fmt(signal.legRelativeVolume,2)}x</div>
               <div style="color:#cbd5e1; margin-top:3px;">${escapeHtml(signal.reasons.slice(0, 5).join(" | "))}</div>
               <div style="color:#94a3b8; margin-top:3px;">${escapeHtml((signal.locationTags || []).slice(0, 6).join(" | "))}</div>
             </div>` : "";
