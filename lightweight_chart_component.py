@@ -386,7 +386,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       const defaultPrefs = {
         symbol:"BTCUSDT",
         timeframe:"1m",
-        toggles:{ ma:true, vwap:true, bandsDay:true, bandsWeek:false, bands:false, stdevBands:false, volume:true, volumeProfile:true, hv252:true, refs:true, signals:true },
+        toggles:{ ma:true, vwap:true, bandsDay:true, bandsWeek:false, bandsWeekVol:false, bands:false, stdevBands:false, volume:true, volumeProfile:true, hv252:true, refs:true, signals:true },
         maType:"SMA",
         ma:[
           { id:"ma9", period:9, enabled:true, color:"#22c55e" },
@@ -458,7 +458,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         actionBox.querySelectorAll("button").forEach((el) => el.remove());
         assets.forEach((asset) => assetBox.appendChild(button(asset.label, state.symbol === asset.symbol, () => loadSymbol(asset.symbol, state.timeframe))));
         timeframes.forEach((tf) => tfBox.appendChild(button(tf, state.timeframe === tf, () => loadSymbol(state.symbol, tf))));
-        [["ma","Medias"],["vwap","VWAP"],["bandsDay","Bandas D"],["bandsWeek","Bandas W"],["stdevBands","Desvios"],["refs","Refs"],["signals","Sinais"],["volume","Volume"],["volumeProfile","Vol Profile"],["hv252","HV 252"]].forEach(([key,label]) => {
+        [["ma","Medias"],["vwap","VWAP"],["bandsDay","Bandas D"],["bandsWeek","Bandas W %"],["bandsWeekVol","Bandas W Vol"],["stdevBands","Desvios"],["refs","Refs"],["signals","Sinais"],["volume","Volume"],["volumeProfile","Vol Profile"],["hv252","HV 252"]].forEach(([key,label]) => {
           toggleBox.appendChild(button(label, state.toggles[key], () => { state.toggles[key] = !state.toggles[key]; savePrefs(); renderControls(); renderCharts(false); }, state.toggles[key] ? "toggle-on" : ""));
         });
         actionBox.appendChild(button("Reset Zoom", false, () => { state.chart?.timeScale().fitContent(); }));
@@ -714,12 +714,12 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           return { time:c.time, value:cumVol ? cumPV / cumVol : c.close };
         });
       }
-      function computeStdevBands(candles, vwap, multiplier) {
-        let sum = 0, sumSq = 0, count = 0, day = "";
+      function computeStdevBands(candles, vwap, multiplier, anchor="day") {
+        let sum = 0, sumSq = 0, count = 0, bucket = "";
         const out = [];
         candles.forEach((c, i) => {
-          const d = anchorKey(c.time, "day");
-          if (d !== day) { day = d; sum = 0; sumSq = 0; count = 0; }
+          const d = anchorKey(c.time, anchor);
+          if (d !== bucket) { bucket = d; sum = 0; sumSq = 0; count = 0; }
           const basis = vwap[i]?.value || c.close;
           const diff = c.close - basis;
           sum += diff; sumSq += diff * diff; count += 1;
@@ -1349,10 +1349,11 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const signalMAs = computeSignalMAs(candles);
         const rsi14 = computeRSI(candles, state.signalConfig.rsi?.length || 14);
         const stdevBands = vwapStdevMultipliers.map((multiplier) => ({ multiplier, data:computeStdevBands(candles, vwapDay, multiplier) }));
+        const weekVolBands = vwapStdevMultipliers.map((multiplier) => ({ multiplier, data:computeStdevBands(candles, vwapWeek, multiplier, "week") }));
         const refs = sessionRefs(candles);
         const volumeProfile = computeSessionVolumeProfile(candles);
         const hv252 = calculateHistoricalVolatility(state.dailyCandles, 252);
-        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, signalMAs, rsi14, stdevBands, refs, volumeProfile, hv252 };
+        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, signalMAs, rsi14, stdevBands, weekVolBands, refs, volumeProfile, hv252 };
         indicators.signals = generateSignals(candles, indicators);
         return indicators;
       }
@@ -1450,6 +1451,15 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         }
         if (state.toggles.bandsWeek) {
           addVWAPPercentBands("vwapWeek", state.indicators.vwapWeek, ["#fbbf24","#f59e0b","#f97316","#ef4444"], 1);
+        }
+        if (state.toggles.bandsWeekVol) {
+          const colors = ["#2dd4bf", "#14b8a6", "#0f766e"];
+          state.indicators.weekVolBands.forEach((band, i) => {
+            const key = String(band.multiplier).replace(".", "_");
+            const color = colors[i] || "#2dd4bf";
+            addLine(`week_vol_${key}_u`, band.data.map((p) => ({ time:p.time, value:p.upper })), color, 1);
+            addLine(`week_vol_${key}_l`, band.data.map((p) => ({ time:p.time, value:p.lower })), color, 1);
+          });
         }
         if (state.toggles.stdevBands) {
           const colors = ["#22c55e", "#f59e0b", "#a78bfa", "#ef4444"];
@@ -1623,6 +1633,11 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         if (state.series.vwapMonth) state.series.vwapMonth.setData(state.indicators.vwapMonth);
         updateVWAPPercentBands("vwap", state.indicators.vwapDay);
         updateVWAPPercentBands("vwapWeek", state.indicators.vwapWeek);
+        state.indicators.weekVolBands.forEach((band) => {
+          const key = String(band.multiplier).replace(".", "_");
+          state.series[`week_vol_${key}_u`]?.setData(band.data.map((p) => ({ time:p.time, value:p.upper })));
+          state.series[`week_vol_${key}_l`]?.setData(band.data.map((p) => ({ time:p.time, value:p.lower })));
+        });
         state.indicators.stdevBands.forEach((band) => {
           const key = String(band.multiplier).replace(".", "_");
           state.series[`stdev_${key}_u`]?.setData(band.data.map((p) => ({ time:p.time, value:p.upper })));
