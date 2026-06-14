@@ -1475,10 +1475,8 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           const refs = state.indicators.refs;
           addPriceLine(candleSeries, "DIA MAX", refs.day?.high, "#22c55e", 0, 2);
           addPriceLine(candleSeries, "DIA MIN", refs.day?.low, "#ef4444", 0, 2);
-          addPriceLine(candleSeries, "ABERT DIA", refs.day?.open, "#38bdf8", 2, 1);
           addPriceLine(candleSeries, "DIA ANT MAX", refs.prevDay?.high, "#60a5fa", 2, 2);
           addPriceLine(candleSeries, "DIA ANT MIN", refs.prevDay?.low, "#f97316", 2, 2);
-          addPriceLine(candleSeries, "FECH ANT", refs.prevDay?.close, "#f59e0b", 2, 1);
           addPriceLine(candleSeries, "SEM ANT MAX", refs.prevWeek?.high, "#a78bfa", 3, 2);
           addPriceLine(candleSeries, "SEM ANT MIN", refs.prevWeek?.low, "#c084fc", 3, 2);
           addPriceLine(candleSeries, "MES ANT MAX", refs.prevMonth?.high, "#f472b6", 1, 2);
