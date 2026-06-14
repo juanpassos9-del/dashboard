@@ -1360,6 +1360,23 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const s = state.chart.addSeries(LineSeries, { color, lineWidth:width, priceLineVisible:false, lastValueVisible:false });
         s.setData(data); state.series[key] = s;
       }
+      function percentBandData(series, pct, side) {
+        const factor = side === "upper" ? 1 + pct : 1 - pct;
+        return (series || []).map((p) => ({ time:p.time, value:p.value * factor }));
+      }
+      function addVWAPPercentBands(prefix, series, colors, width=1) {
+        [0.005,0.01,0.015,0.02].forEach((pct,i) => {
+          const color = colors[i] || "#94a3b8";
+          addLine(`${prefix}_p_${pct}`, percentBandData(series, pct, "upper"), color, width);
+          addLine(`${prefix}_m_${pct}`, percentBandData(series, pct, "lower"), color, width);
+        });
+      }
+      function updateVWAPPercentBands(prefix, series) {
+        [0.005,0.01,0.015,0.02].forEach((pct) => {
+          state.series[`${prefix}_p_${pct}`]?.setData(percentBandData(series, pct, "upper"));
+          state.series[`${prefix}_m_${pct}`]?.setData(percentBandData(series, pct, "lower"));
+        });
+      }
       function addPriceLine(series, title, price, color, style=2, width=1) {
         if (!Number.isFinite(price)) return;
         const line = series.createPriceLine({ price, color, lineWidth:width, lineStyle:style, axisLabelVisible:true, title });
@@ -1429,11 +1446,9 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           addLine("vwapMonth", state.indicators.vwapMonth, "#118ab2", 1);
         }
         if (state.toggles.bands) {
-          [0.005,0.01,0.015,0.02].forEach((pct,i) => {
-            const color = ["#38bdf8","#818cf8","#f472b6","#fb7185"][i];
-            addLine(`vwap_p_${pct}`, vwap.map((p) => ({ time:p.time, value:p.value * (1 + pct) })), color, 1);
-            addLine(`vwap_m_${pct}`, vwap.map((p) => ({ time:p.time, value:p.value * (1 - pct) })), color, 1);
-          });
+          addVWAPPercentBands("vwap", state.indicators.vwapDay, ["#38bdf8","#818cf8","#f472b6","#fb7185"], 1);
+          addVWAPPercentBands("vwapWeek", state.indicators.vwapWeek, ["#34d399","#10b981","#059669","#047857"], 1);
+          addVWAPPercentBands("vwapMonth", state.indicators.vwapMonth, ["#fbbf24","#f59e0b","#d97706","#b45309"], 1);
         }
         if (state.toggles.stdevBands) {
           const colors = ["#22c55e", "#f59e0b", "#a78bfa", "#ef4444"];
@@ -1605,10 +1620,9 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         if (state.series.vwap) state.series.vwap.setData(state.indicators.vwapDay);
         if (state.series.vwapWeek) state.series.vwapWeek.setData(state.indicators.vwapWeek);
         if (state.series.vwapMonth) state.series.vwapMonth.setData(state.indicators.vwapMonth);
-        [0.005,0.01,0.015,0.02].forEach((pct) => {
-          state.series[`vwap_p_${pct}`]?.setData(state.indicators.vwapDay.map((p) => ({ time:p.time, value:p.value * (1 + pct) })));
-          state.series[`vwap_m_${pct}`]?.setData(state.indicators.vwapDay.map((p) => ({ time:p.time, value:p.value * (1 - pct) })));
-        });
+        updateVWAPPercentBands("vwap", state.indicators.vwapDay);
+        updateVWAPPercentBands("vwapWeek", state.indicators.vwapWeek);
+        updateVWAPPercentBands("vwapMonth", state.indicators.vwapMonth);
         state.indicators.stdevBands.forEach((band) => {
           const key = String(band.multiplier).replace(".", "_");
           state.series[`stdev_${key}_u`]?.setData(band.data.map((p) => ({ time:p.time, value:p.upper })));
