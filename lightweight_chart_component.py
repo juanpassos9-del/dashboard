@@ -219,12 +219,11 @@ def load_fred_lightweight_payload():
 
 
 def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_id="main"):
-    signal_mode = signal_mode if signal_mode in {"all", "reversal", "trend"} else "all"
+    signal_mode = signal_mode if signal_mode in {"all", "reversal"} else "reversal"
     instance_id = "".join(ch for ch in str(instance_id or "main") if ch.isalnum() or ch in ("_", "-")) or "main"
     chart_title = chart_title or {
-        "all": "Grafico operacional",
+        "all": "Grafico operacional - Reversao",
         "reversal": "Grafico operacional - Reversao",
-        "trend": "Grafico operacional - Trend Following",
     }[signal_mode]
     yahoo_payload = load_yahoo_lightweight_payload()
     fred_payload = load_fred_lightweight_payload()
@@ -340,20 +339,19 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       const intradayTimeframes = ["30s", "1m", "5m", "h1"];
       const vwapStdevMultipliers = [1, 2, 3];
       const signalModeTypes = {
-        all:["REV_BUY","REV_SELL","TREND_BUY","TREND_SELL"],
+        all:["REV_BUY","REV_SELL"],
         reversal:["REV_BUY","REV_SELL"],
-        trend:["TREND_BUY","TREND_SELL"],
       };
       const allowedSignalTypes = signalModeTypes[signalMode] || signalModeTypes.all;
       const signalStorageKey = `lw_chart_prefs_${signalMode}_${instanceId}`;
       const defaultSignalConfig = {
         enabled:true,
-        signalFamilies:{ reversal:true, trend:true },
+        signalFamilies:{ reversal:true, trend:false },
         enabledSignals:{
           REV_BUY:allowedSignalTypes.includes("REV_BUY"),
           REV_SELL:allowedSignalTypes.includes("REV_SELL"),
-          TREND_BUY:allowedSignalTypes.includes("TREND_BUY"),
-          TREND_SELL:allowedSignalTypes.includes("TREND_SELL"),
+          TREND_BUY:false,
+          TREND_SELL:false,
         },
         minScore:9,
         cooldownCandles:24,
@@ -418,8 +416,10 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       const state = { symbol:prefs.symbol, timeframe:prefs.timeframe, candles:[], dailyCandles:[], indicators:null, chart:null, series:{}, priceLines:[], markerApi:null, socket:null, liveUpdateQueued:false, lastFullRefresh:0, toggles:prefs.toggles, maType:prefs.maType, ma:prefs.ma, signalConfig:prefs.signalConfig };
       allowedSignalTypes.forEach((type) => { state.signalConfig.enabledSignals[type] = state.signalConfig.enabledSignals[type] !== false; });
       Object.keys(state.signalConfig.enabledSignals).forEach((type) => { if (!allowedSignalTypes.includes(type)) state.signalConfig.enabledSignals[type] = false; });
-      if (signalMode === "reversal") state.signalConfig.signalFamilies.trend = false;
-      if (signalMode === "trend") state.signalConfig.signalFamilies.reversal = false;
+      state.signalConfig.signalFamilies.reversal = true;
+      state.signalConfig.signalFamilies.trend = false;
+      state.signalConfig.enabledSignals.TREND_BUY = false;
+      state.signalConfig.enabledSignals.TREND_SELL = false;
       if (!assetRegistry[state.symbol]) state.symbol = "BTCUSDT";
       if (assetRegistry[state.symbol]?.source === "fred" && !fredPayload.enabled) state.symbol = "BTCUSDT";
       if (!timeframes.includes(state.timeframe)) state.timeframe = "1m";
@@ -493,9 +493,8 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         title.style.marginTop = "6px";
         title.textContent = "Motor de sinais";
         box.appendChild(title);
-        const familyChecks = [["family:reversal", "REV"], ["family:trend", "TREND"]].filter(([key]) => {
+        const familyChecks = [["family:reversal", "REV"]].filter(([key]) => {
           if (signalMode === "reversal") return key === "family:reversal";
-          if (signalMode === "trend") return key === "family:trend";
           return true;
         });
         const checks = [["enabled", "Motor"], ...familyChecks, ...allowedSignalTypes.map((type) => [type, type.replace("_", " ")])];
@@ -520,10 +519,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           ["hvNear", "HV %", 0.05, 2, 0.05, cfg.reversal.hvProximityPercent, (v) => { cfg.reversal.hvProximityPercent = v; }],
           ["devMin", "Dev REV", 1, 3, 1, cfg.reversal.minStdevMultiplier, (v) => { cfg.reversal.minStdevMultiplier = v; }],
           ["rsiLen", "RSI len", 2, 50, 1, cfg.rsi.length, (v) => { cfg.rsi.length = v; }],
-          ["rsiBuyMin", "RSI B min", 20, 60, 1, cfg.rsi.trendBuyMin, (v) => { cfg.rsi.trendBuyMin = v; cfg.trend.rsiBuyMin = v; }],
-          ["rsiBuyMax", "RSI B max", 40, 80, 1, cfg.rsi.trendBuyMax, (v) => { cfg.rsi.trendBuyMax = v; cfg.trend.rsiBuyMax = v; }],
-          ["rsiSellMin", "RSI S min", 20, 60, 1, cfg.rsi.trendSellMin, (v) => { cfg.rsi.trendSellMin = v; cfg.trend.rsiSellMin = v; }],
-          ["rsiSellMax", "RSI S max", 40, 80, 1, cfg.rsi.trendSellMax, (v) => { cfg.rsi.trendSellMax = v; cfg.trend.rsiSellMax = v; }],
           ["rsiOS", "RSI Sobrev", 15, 50, 1, cfg.rsi.oversold, (v) => { cfg.rsi.oversold = v; }],
           ["rsiOB", "RSI Sobrecomp", 50, 85, 1, cfg.rsi.overbought, (v) => { cfg.rsi.overbought = v; }],
           ["volLook", "Vol M", 5, 80, 1, cfg.volume.lookback, (v) => { cfg.volume.lookback = v; }],
@@ -545,10 +540,9 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         [
           ["volOn", "Filtro volume", cfg.volume.enabled, (v) => { cfg.volume.enabled = v; }],
           ["revHv", "REV VWAP+HV", cfg.reversal.requireVwapHvConfluence, (v) => { cfg.reversal.requireVwapHvConfluence = v; }],
-          ["trendRsi", "TREND RSI14", cfg.trend.requireRsiPullback, (v) => { cfg.trend.requireRsiPullback = v; }],
           ["volAbove", "Vol > media", cfg.volume.requireBarVolumeAboveAverage, (v) => { cfg.volume.requireBarVolumeAboveAverage = v; }],
           ["volExp", "Expansao volume", cfg.volume.requireVolumeExpansion, (v) => { cfg.volume.requireVolumeExpansion = v; }],
-          ["volLeg", "Volume pernada", cfg.volume.requireReversalVolumeClimaxOrRejection, (v) => { cfg.volume.requireReversalVolumeClimaxOrRejection = v; cfg.volume.requireTrendVolumeResumption = v; }],
+          ["volLeg", "Volume pernada", cfg.volume.requireReversalVolumeClimaxOrRejection, (v) => { cfg.volume.requireReversalVolumeClimaxOrRejection = v; }],
           ["volFall", "Bloquear vol caindo", cfg.volume.blockFallingVolume, (v) => { cfg.volume.blockFallingVolume = v; }],
         ].forEach((item) => {
           const [, label, checked, setter] = item;
@@ -1320,9 +1314,9 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         for (let i = 50; i < candles.length; i += 1) {
           const ctx = signalContext(candles, indicators, i);
           const regime = detectRegime(ctx, cfg);
-          const candidates = ["REV_BUY","REV_SELL","TREND_BUY","TREND_SELL"]
+          const candidates = ["REV_BUY","REV_SELL"]
             .filter((type) => cfg.enabledSignals[type])
-            .filter((type) => type.startsWith("REV_") ? cfg.signalFamilies.reversal : cfg.signalFamilies.trend)
+            .filter((type) => cfg.signalFamilies.reversal)
             .map((type) => scoreCandidate(type, candles, indicators, i, regime))
             .filter((sig) => sig && sig.score >= cfg.minScore);
           if (!candidates.length) continue;
@@ -1340,8 +1334,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const style = {
           REV_BUY:{ position:"belowBar", shape:"arrowUp", color:"#00C853", label:"REV BUY" },
           REV_SELL:{ position:"aboveBar", shape:"arrowDown", color:"#D50000", label:"REV SELL" },
-          TREND_BUY:{ position:"belowBar", shape:"arrowUp", color:"#00B0FF", label:"TREND BUY" },
-          TREND_SELL:{ position:"aboveBar", shape:"arrowDown", color:"#FF6D00", label:"TREND SELL" },
         };
         return (signals || []).map((signal) => {
           const s = style[signal.type] || style.REV_BUY;
