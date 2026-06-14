@@ -294,6 +294,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           <div class="lw-stat"><span>Ultimo</span><strong id="lw-last">---</strong></div>
           <div class="lw-stat"><span>VWAP / distancia</span><strong id="lw-vwap">---</strong><small id="lw-vwap-extra">---</small></div>
           <div class="lw-stat"><span>Volume</span><strong id="lw-volume">---</strong><small id="lw-rvol">RVOL ---</small></div>
+          <div class="lw-stat"><span>Weis Wave</span><strong id="lw-weis-wave">---</strong><small id="lw-weis-extra">---</small></div>
           <div class="lw-stat"><span>Volume Profile</span><strong id="lw-vp-poc">POC ---</strong><small id="lw-vp-value-area">VAH --- | VAL ---</small></div>
           <div class="lw-stat"><span>HV 252</span><strong id="lw-hv252">HV252 ---</strong><small id="lw-hv30">---</small><small id="lw-hv-levels" style="display:none;">---</small></div>
           <div class="lw-stat"><span>Sinal / Candle</span><strong id="lw-hover-title">Passe o mouse</strong><small id="lw-hover-data">OHLC, VWAP e sinal.</small></div>
@@ -386,7 +387,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       const defaultPrefs = {
         symbol:"BTCUSDT",
         timeframe:"1m",
-        toggles:{ ma:true, vwap:true, bandsDay:true, bandsWeek:false, bandsWeekVol:false, bands:false, stdevBands:false, volume:true, volumeProfile:true, hv252:true, refs:true, signals:true },
+        toggles:{ ma:true, vwap:true, bandsDay:true, bandsWeek:false, bandsWeekVol:false, bands:false, stdevBands:false, volume:true, weisWave:true, volumeProfile:true, hv252:true, refs:true, signals:true },
         maType:"SMA",
         ma:[
           { id:"ma9", period:9, enabled:true, color:"#22c55e" },
@@ -458,7 +459,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         actionBox.querySelectorAll("button").forEach((el) => el.remove());
         assets.forEach((asset) => assetBox.appendChild(button(asset.label, state.symbol === asset.symbol, () => loadSymbol(asset.symbol, state.timeframe))));
         timeframes.forEach((tf) => tfBox.appendChild(button(tf, state.timeframe === tf, () => loadSymbol(state.symbol, tf))));
-        [["ma","Medias"],["vwap","VWAP"],["bandsDay","Bandas D"],["bandsWeek","Bandas W %"],["bandsWeekVol","Bandas W Vol"],["stdevBands","Desvios"],["refs","Refs"],["signals","Sinais"],["volume","Volume"],["volumeProfile","Vol Profile"],["hv252","HV 252"]].forEach(([key,label]) => {
+        [["ma","Medias"],["vwap","VWAP"],["bandsDay","Bandas D"],["bandsWeek","Bandas W %"],["bandsWeekVol","Bandas W Vol"],["stdevBands","Desvios"],["refs","Refs"],["signals","Sinais"],["volume","Volume"],["weisWave","Weis Vol"],["volumeProfile","Vol Profile"],["hv252","HV 252"]].forEach(([key,label]) => {
           toggleBox.appendChild(button(label, state.toggles[key], () => { state.toggles[key] = !state.toggles[key]; savePrefs(); renderControls(); renderCharts(false); }, state.toggles[key] ? "toggle-on" : ""));
         });
         actionBox.appendChild(button("Reset Zoom", false, () => { state.chart?.timeScale().fitContent(); }));
@@ -839,6 +840,57 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           });
         });
         return out;
+      }
+      function computeWeisWaveVolume(candles, reversalPercent=0.2) {
+        if (!candles.length) return { points:[], waves:[], current:null };
+        const threshold = Math.max(0.01, reversalPercent) / 100;
+        const points = [];
+        const waves = [];
+        let direction = 0;
+        let waveStart = 0;
+        let extreme = candles[0].close;
+        let volume = 0;
+        const finalizeWave = (endIndex) => {
+          if (endIndex < waveStart) return;
+          waves.push({
+            start:waveStart,
+            end:endIndex,
+            direction,
+            volume,
+            startPrice:candles[waveStart]?.close,
+            endPrice:candles[endIndex]?.close,
+          });
+        };
+        candles.forEach((c, i) => {
+          if (i === 0) {
+            volume = Number(c.volume || 0);
+            points.push({ time:c.time, value:volume, direction:0, waveIndex:0 });
+            return;
+          }
+          const prev = candles[i - 1];
+          if (direction === 0) {
+            direction = c.close >= prev.close ? 1 : -1;
+            extreme = c.close;
+          }
+          const reversalFromHigh = direction === 1 && c.close <= extreme * (1 - threshold);
+          const reversalFromLow = direction === -1 && c.close >= extreme * (1 + threshold);
+          if (reversalFromHigh || reversalFromLow) {
+            finalizeWave(i - 1);
+            direction = reversalFromHigh ? -1 : 1;
+            waveStart = i;
+            volume = Number(c.volume || 0);
+            extreme = c.close;
+          } else {
+            volume += Number(c.volume || 0);
+            if (direction === 1) extreme = Math.max(extreme, c.close);
+            if (direction === -1) extreme = Math.min(extreme, c.close);
+          }
+          points.push({ time:c.time, value:volume, direction, waveIndex:waves.length });
+        });
+        finalizeWave(candles.length - 1);
+        const current = points.length ? points[points.length - 1] : null;
+        const previousSameDirection = [...waves].reverse().find((w) => w.direction === current?.direction && w.end < candles.length - 1);
+        return { points, waves, current, previousSameDirection };
       }
       function computeMA(candles, period, type="SMA") {
         if (type === "EMA") {
@@ -1352,8 +1404,9 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const weekVolBands = vwapStdevMultipliers.map((multiplier) => ({ multiplier, data:computeStdevBands(candles, vwapWeek, multiplier, "week") }));
         const refs = sessionRefs(candles);
         const volumeProfile = computeSessionVolumeProfile(candles);
+        const weisWave = computeWeisWaveVolume(candles, 0.2);
         const hv252 = calculateHistoricalVolatility(state.dailyCandles, 252);
-        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, signalMAs, rsi14, stdevBands, weekVolBands, refs, volumeProfile, hv252 };
+        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, signalMAs, rsi14, stdevBands, weekVolBands, refs, volumeProfile, weisWave, hv252 };
         indicators.signals = generateSignals(candles, indicators);
         return indicators;
       }
@@ -1463,6 +1516,16 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           volAvgSeries.setData(state.indicators.volumeStats.filter((v) => Number.isFinite(v.avg)).map((v) => ({ time:v.time, value:v.avg })));
           state.series.vol20 = volAvgSeries;
         }
+        if (state.toggles.weisWave) {
+          const weisSeries = state.chart.addSeries(HistogramSeries, { priceFormat:{ type:"volume" }, priceScaleId:"weis", color:"#14b8a6" });
+          weisSeries.priceScale().applyOptions({ scaleMargins:{ top:0.72, bottom:0 } });
+          weisSeries.setData((state.indicators.weisWave?.points || []).map((p) => ({
+            time:p.time,
+            value:p.value,
+            color:p.direction >= 0 ? "rgba(20,184,166,.62)" : "rgba(244,63,94,.62)",
+          })));
+          state.series.weisWave = weisSeries;
+        }
         const vwap = state.indicators.vwapDay;
         if (state.toggles.vwap) {
           addLine("vwap", state.indicators.vwapDay, "#ffd166", 2);
@@ -1534,6 +1597,12 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         document.getElementById("lw-vwap-extra").textContent = last && lastVwap ? `Dist ${(((last.close - lastVwap) / lastVwap) * 100).toFixed(2)}%` : "Dist ---";
         document.getElementById("lw-volume").textContent = last ? fmt(last.volume, 4) : "---";
         document.getElementById("lw-rvol").textContent = `RVOL ${fmt(lastVol.rvol, 2)}x | Leg ${fmt(lastVol.legRelativeVolume, 2)}x | M20 ${fmt(lastVol.avg, 2)}`;
+        const weis = indicators.weisWave || {};
+        const currWave = weis.current || {};
+        const prevWave = weis.previousSameDirection || {};
+        const waveRatio = Number.isFinite(currWave.value) && Number.isFinite(prevWave.volume) && prevWave.volume > 0 ? currWave.value / prevWave.volume : NaN;
+        document.getElementById("lw-weis-wave").textContent = currWave.direction > 0 ? "Alta" : currWave.direction < 0 ? "Baixa" : "---";
+        document.getElementById("lw-weis-extra").textContent = `Vol ${fmt(currWave.value, 2)} | vs onda ${fmt(waveRatio, 2)}x`;
         document.getElementById("lw-vp-poc").textContent = `POC ${fmt(indicators.volumeProfile?.poc?.mid, 2)}`;
         document.getElementById("lw-vp-value-area").textContent = `VAH ${fmt(indicators.volumeProfile?.vah?.high, 2)} | VAL ${fmt(indicators.volumeProfile?.val?.low, 2)}`;
         const hv = indicators.hv252 || {};
@@ -1649,6 +1718,13 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           state.series.volume.update({ time:last.time, value:last.volume, color });
         }
         if (state.series.vol20) state.series.vol20.setData(state.indicators.volumeStats.filter((v) => Number.isFinite(v.avg)).map((v) => ({ time:v.time, value:v.avg })));
+        if (state.series.weisWave) {
+          state.series.weisWave.setData((state.indicators.weisWave?.points || []).map((p) => ({
+            time:p.time,
+            value:p.value,
+            color:p.direction >= 0 ? "rgba(20,184,166,.62)" : "rgba(244,63,94,.62)",
+          })));
+        }
         if (state.series.vwap) state.series.vwap.setData(state.indicators.vwapDay);
         if (state.series.vwapWeek) state.series.vwapWeek.setData(state.indicators.vwapWeek);
         if (state.series.vwapMonth) state.series.vwapMonth.setData(state.indicators.vwapMonth);
