@@ -296,7 +296,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           <div class="lw-stat"><span>Volume</span><strong id="lw-volume">---</strong><small id="lw-rvol">RVOL ---</small></div>
           <div class="lw-stat"><span>Weis Wave</span><strong id="lw-weis-wave">---</strong><small id="lw-weis-extra">---</small></div>
           <div class="lw-stat"><span>Volume Profile</span><strong id="lw-vp-poc">POC ---</strong><small id="lw-vp-value-area">VAH --- | VAL ---</small></div>
-          <div class="lw-stat"><span>GARCH(1,1)</span><strong id="lw-garch-zone">---</strong><small id="lw-garch-extra">---</small></div>
+          <div class="lw-stat"><span>TTS GARCH(1,1) + HV252</span><strong id="lw-garch-zone">---</strong><small id="lw-garch-extra">---</small></div>
           <div class="lw-stat"><span>HV 252</span><strong id="lw-hv252">HV252 ---</strong><small id="lw-hv30">---</small><small id="lw-hv-levels" style="display:none;">---</small></div>
           <div class="lw-stat"><span>Sinal / Candle</span><strong id="lw-hover-title">Passe o mouse</strong><small id="lw-hover-data">OHLC, VWAP e sinal.</small></div>
           <div class="lw-settings" id="lw-ma-settings">
@@ -360,7 +360,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         reversal:{ minDistanceFromVWAPPercent:0.5, proximityPercent:0.15, requireVwapHvConfluence:true, minStdevMultiplier:1, hvProximityPercent:0.35 },
         trend:{ maxPullbackDistancePercent:0.15, maxVWAPDistancePercent:0.45, minBodyPercent:0.55 },
         volume:{ enabled:true, lookback:20, minVolumeMultiplier:1.2, minRelativeVolume:1.2, strongRelativeVolume:1.5, blockLowVolumeSignals:true, requireBarVolumeAboveAverage:true, requireVolumeExpansion:true, legLookback:5, minLegRelativeVolume:1.1, requireReversalVolumeClimaxOrRejection:true, requireTrendVolumeResumption:true, blockFallingVolume:true, fallingVolumeLookback:3 },
-        garch:{ enabled:true, omega:0.000001, alpha:0.08, beta:0.90, referenceMode:"previousClose", minSigmaForSignal:1.5 },
+        garch:{ enabled:true, omega:0.000001, alpha:0.08, beta:0.90, referenceMode:"previousClose", adjustment:null, minSigmaForSignal:1.5 },
         sessionFilter:{ enabled:false, blockedTimes:[] },
         weights:{
           favorableRegime:2,
@@ -534,6 +534,35 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           row.querySelector("input").onchange = (e) => { setter(e.target.checked); savePrefs(); renderCharts(false); };
           box.appendChild(row);
         });
+        const garchRefRow = document.createElement("div");
+        garchRefRow.className = "lw-setting-row";
+        garchRefRow.innerHTML = `
+          <span>Ref GARCH</span>
+          <select id="lw-garch-ref">
+            <option value="previousClose">Fech. ant.</option>
+            <option value="sessionOpen">Abertura</option>
+            <option value="vwap">VWAP</option>
+            <option value="lastClose">Ultimo</option>
+            <option value="adjustment">Manual</option>
+          </select>
+          <span></span>`;
+        box.appendChild(garchRefRow);
+        garchRefRow.querySelector("select").value = cfg.garch.referenceMode || "previousClose";
+        garchRefRow.querySelector("select").onchange = (e) => {
+          cfg.garch.referenceMode = e.target.value;
+          savePrefs();
+          renderCharts(false);
+        };
+        const garchAdjustmentRow = document.createElement("div");
+        garchAdjustmentRow.className = "lw-setting-row";
+        garchAdjustmentRow.innerHTML = `<span>Ajuste GARCH</span><input type="number" min="0" step="0.01" value="${Number.isFinite(Number(cfg.garch.adjustment)) ? cfg.garch.adjustment : ""}" placeholder="preco"><span></span>`;
+        box.appendChild(garchAdjustmentRow);
+        garchAdjustmentRow.querySelector("input").onchange = (e) => {
+          const value = Number(e.target.value);
+          cfg.garch.adjustment = Number.isFinite(value) && value > 0 ? value : null;
+          savePrefs();
+          renderCharts(false);
+        };
       }
       function exportPng() {
         try {
@@ -949,6 +978,8 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const last = candles[candles.length - 1];
         if (mode === "vwap" && Number.isFinite(externalData.vwap)) return externalData.vwap;
         if (mode === "adjustment" && Number.isFinite(externalData.adjustment)) return externalData.adjustment;
+        if (mode === "sessionOpen" && Number.isFinite(externalData.sessionOpen)) return externalData.sessionOpen;
+        if (mode === "lastClose" && Number.isFinite(last?.close)) return last.close;
         if (mode === "previousClose" && Number.isFinite(externalData.previousClose)) return externalData.previousClose;
         return Number.isFinite(last?.close) ? last.close : NaN;
       }
@@ -958,8 +989,8 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         multipliers.forEach((m) => {
           if (m === 0) zones.push({ level:referencePrice, label:"GARCH 0", multiplier:0, side:"center" });
           else {
-            zones.push({ level:referencePrice * (1 + volatility * m), label:`GARCH +${m}σ`, multiplier:m, side:"upper" });
-            zones.push({ level:referencePrice * (1 - volatility * m), label:`GARCH -${m}σ`, multiplier:-m, side:"lower" });
+            zones.push({ level:referencePrice * Math.exp(volatility * m), label:`GARCH +${m}σ`, multiplier:m, side:"upper" });
+            zones.push({ level:referencePrice * Math.exp(-volatility * m), label:`GARCH -${m}σ`, multiplier:-m, side:"lower" });
           }
         });
         return zones;
@@ -968,7 +999,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         if (!Number.isFinite(currentPrice) || !Number.isFinite(referencePrice) || !Number.isFinite(volatility) || volatility <= 0) {
           return { zone:"indisponivel", side:"center", sigmaDistance:NaN, message:"GARCH indisponivel." };
         }
-        const sigmaDistance = (currentPrice - referencePrice) / (referencePrice * volatility);
+        const sigmaDistance = Math.log(currentPrice / referencePrice) / volatility;
         const abs = Math.abs(sigmaDistance);
         const side = sigmaDistance > 0 ? "upper" : sigmaDistance < 0 ? "lower" : "center";
         if (abs < 0.5) return { zone:"neutral", side, sigmaDistance, message:"Zona neutra. Evitar reversao." };
@@ -979,16 +1010,19 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       }
       function calculateGarchOverlay(candles, refs, vwapDay) {
         const cfg = state.signalConfig.garch || {};
+        const referenceMode = cfg.referenceMode || "previousClose";
         const garch = calculateGarch11Volatility(candles, { ...cfg, annualizationFactor:annualizationFactorForTimeframe(state.timeframe) });
         if (!garch.ok) return { ...garch, referencePrice:NaN, zones:[], classification:{ zone:"indisponivel", side:"center", sigmaDistance:NaN, message:garch.warning } };
-        const referencePrice = getGarchReferencePrice(candles, cfg.referenceMode || "previousClose", {
+        const referencePrice = getGarchReferencePrice(candles, referenceMode, {
           previousClose:refs?.prevClose,
+          sessionOpen:refs?.open,
+          adjustment:Number(cfg.adjustment),
           vwap:vwapDay?.[vwapDay.length - 1]?.value,
         });
         const zones = calculateGarchVolatilityZones(referencePrice, garch.latestVolatility);
         const current = candles[candles.length - 1]?.close;
         const classification = classifyCurrentGarchZone(current, referencePrice, garch.latestVolatility);
-        return { ...garch, referencePrice, zones, classification };
+        return { ...garch, referencePrice, referenceMode, zones, classification };
       }
       function horizontalSessionLine(candles, value) {
         if (!candles.length || !Number.isFinite(value)) return [];
@@ -1497,9 +1531,10 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         document.getElementById("lw-weis-extra").textContent = `Vol ${fmt(currWave.value, 2)} | vs onda ${fmt(waveRatio, 2)}x`;
         const garch = indicators.garch || {};
         const gClass = garch.classification || {};
+        const garchRefLabels = { previousClose:"Fech. ant.", sessionOpen:"Abertura", vwap:"VWAP", lastClose:"Ultimo", adjustment:"Manual" };
         document.getElementById("lw-garch-zone").textContent = garch.ok ? `${Number.isFinite(gClass.sigmaDistance) ? gClass.sigmaDistance.toFixed(2) : "---"}σ | ${gClass.zone || "---"}` : (garch.warning || "GARCH indisponivel");
         document.getElementById("lw-garch-extra").textContent = garch.ok
-          ? `Vol ${(garch.latestVolatility * 100).toFixed(2)}% | Anual ${(garch.annualizedVolatility * 100).toFixed(2)}% | Ref ${fmt(garch.referencePrice, 2)}`
+          ? `Hull/lognormal | Vol ${(garch.latestVolatility * 100).toFixed(2)}% | Ref ${garchRefLabels[garch.referenceMode] || garch.referenceMode}: ${fmt(garch.referencePrice, 2)}`
           : "Historico insuficiente ou parametro instavel";
         document.getElementById("lw-vp-poc").textContent = `POC ${fmt(indicators.volumeProfile?.poc?.mid, 2)}`;
         document.getElementById("lw-vp-value-area").textContent = `VAH ${fmt(indicators.volumeProfile?.vah?.high, 2)} | VAL ${fmt(indicators.volumeProfile?.val?.low, 2)}`;
