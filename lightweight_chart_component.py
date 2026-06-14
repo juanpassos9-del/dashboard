@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import time
 
@@ -349,32 +349,25 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       const defaultSignalConfig = {
         enabled:true,
         signalFamilies:{ reversal:true, trend:false },
-        enabledSignals:{
-          REV_BUY:allowedSignalTypes.includes("REV_BUY"),
-          REV_SELL:allowedSignalTypes.includes("REV_SELL"),
-          TREND_BUY:false,
-          TREND_SELL:false,
-        },
-        minScore:9,
-        cooldownCandles:24,
-        reversal:{ minDistanceFromVWAPPercent:0.5, proximityPercent:0.15, requireVwapHvConfluence:true, minStdevMultiplier:1, hvProximityPercent:0.35 },
-        trend:{ maxPullbackDistancePercent:0.15, maxVWAPDistancePercent:0.45, minBodyPercent:0.55 },
+        enabledSignals:{ REV_BUY:true, REV_SELL:true, TREND_BUY:false, TREND_SELL:false },
+        minScore:50,
+        cooldownCandles:10,
         volume:{ enabled:true, lookback:20, minVolumeMultiplier:1.2, minRelativeVolume:1.2, strongRelativeVolume:1.5, blockLowVolumeSignals:true, requireBarVolumeAboveAverage:true, requireVolumeExpansion:true, legLookback:5, minLegRelativeVolume:1.1, requireReversalVolumeClimaxOrRejection:true, requireTrendVolumeResumption:true, blockFallingVolume:true, fallingVolumeLookback:3 },
         garch:{ enabled:true, omega:0.000001, alpha:0.08, beta:0.90, garchTimeframe:"D", referenceMode:"previousClose", adjustment:null, minSigmaForSignal:1.5 },
-        sessionFilter:{ enabled:false, blockedTimes:[] },
-        weights:{
-          favorableRegime:2,
-          movingAverageAlignment:2,
-          vwapDistance:2,
-          proximityToKeyLevel:1,
-          extremeLocation:3,
-          pullbackLocation:3,
-          rejectionCandle:2,
-          impulseCandle:2,
-          hvConfluence:2,
-          previousCandleBreak:1,
-          vwapSide:1,
+        signalEngine:{
+          enabled:true,
+          minSigmaForSignal:1.5,
+          preferredSigmaForStrongSignal:2.0,
+          allowedSources:{ garch:true, hv252:true },
+          bandRegion:{ enabled:true, mode:"percent", percentTolerance:0.001, atrMultiplier:0.15, ticksTolerance:20, minRegionWidthTicks:5, closeBackRule:"aboveCenter" },
+          rejection:{ minWickToBodyRatio:1.8, minCloseBackInsidePercent:0.4, requireCloseBackInsideZone:true, allowPinBar:true, allowEngulfing:true, allowFailedBreakout:true, allowCloseBackInside:true, allowImpulseReversal:true },
+          volumeFilter:{ enabled:true, lookback:20, multiplier:1.2 },
+          candleFilter:{ minBodyPercentOfRange:0.15, maxBodyPercentForPinBar:0.45 },
+          cooldown:{ enabled:true, bars:10 },
+          signalSide:{ buy:true, sell:true },
+          visual:{ plotRegionLines:true, plotSignals:true, preserveExistingMarkers:true },
         },
+        sessionFilter:{ enabled:false, blockedTimes:[] },
       };
       const defaultPrefs = {
         symbol:"BTCUSDT",
@@ -403,7 +396,18 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           trend:{ ...defaultSignalConfig.trend, ...((storedPrefs.signalConfig || {}).trend || {}) },
           volume:{ ...defaultSignalConfig.volume, ...((storedPrefs.signalConfig || {}).volume || {}) },
           garch:{ ...defaultSignalConfig.garch, ...((storedPrefs.signalConfig || {}).garch || {}) },
-          weights:{ ...defaultSignalConfig.weights, ...((storedPrefs.signalConfig || {}).weights || {}) },
+          signalEngine:{
+            ...defaultSignalConfig.signalEngine,
+            ...((storedPrefs.signalConfig || {}).signalEngine || {}),
+            allowedSources:{ ...defaultSignalConfig.signalEngine.allowedSources, ...(((storedPrefs.signalConfig || {}).signalEngine || {}).allowedSources || {}) },
+            bandRegion:{ ...defaultSignalConfig.signalEngine.bandRegion, ...(((storedPrefs.signalConfig || {}).signalEngine || {}).bandRegion || {}) },
+            rejection:{ ...defaultSignalConfig.signalEngine.rejection, ...(((storedPrefs.signalConfig || {}).signalEngine || {}).rejection || {}) },
+            volumeFilter:{ ...defaultSignalConfig.signalEngine.volumeFilter, ...(((storedPrefs.signalConfig || {}).signalEngine || {}).volumeFilter || {}) },
+            candleFilter:{ ...defaultSignalConfig.signalEngine.candleFilter, ...(((storedPrefs.signalConfig || {}).signalEngine || {}).candleFilter || {}) },
+            cooldown:{ ...defaultSignalConfig.signalEngine.cooldown, ...(((storedPrefs.signalConfig || {}).signalEngine || {}).cooldown || {}) },
+            signalSide:{ ...defaultSignalConfig.signalEngine.signalSide, ...(((storedPrefs.signalConfig || {}).signalEngine || {}).signalSide || {}) },
+            visual:{ ...defaultSignalConfig.signalEngine.visual, ...(((storedPrefs.signalConfig || {}).signalEngine || {}).visual || {}) },
+          },
         },
       };
       const state = { symbol:prefs.symbol, timeframe:prefs.timeframe, candles:[], dailyCandles:[], indicators:null, chart:null, series:{}, priceLines:[], markerApi:null, socket:null, liveUpdateQueued:false, lastFullRefresh:0, toggles:prefs.toggles, maType:prefs.maType, ma:prefs.ma, signalConfig:prefs.signalConfig };
@@ -481,37 +485,49 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       }
       function renderSignalSettings(box) {
         const cfg = state.signalConfig;
+        const engine = cfg.signalEngine;
         const title = document.createElement("div");
         title.className = "lw-settings-title";
         title.style.marginTop = "6px";
-        title.textContent = "Motor de sinais";
+        title.textContent = "Motor de sinais - zonas";
         box.appendChild(title);
-        const familyChecks = [["family:reversal", "REV"]].filter(([key]) => {
-          if (signalMode === "reversal") return key === "family:reversal";
-          return true;
-        });
-        const checks = [["enabled", "Motor"], ...familyChecks, ...allowedSignalTypes.map((type) => [type, type.replace("_", " ")])];
+        const checks = [["enabled", "Motor"], ["engine", "Zonas volatilidade"], ["buy", "BUY"], ["sell", "SELL"], ["volFilter", "Filtro volume"], ["regionLines", "Linhas regiao"], ["garchSrc", "Fonte GARCH"], ["hvSrc", "Fonte HV252"]];
         checks.forEach(([key, label]) => {
           const row = document.createElement("div");
           row.className = "lw-setting-row";
-          const checked = key === "enabled" ? cfg.enabled : key.startsWith("family:") ? cfg.signalFamilies[key.split(":")[1]] : cfg.enabledSignals[key];
+          const checked =
+            key === "enabled" ? cfg.enabled :
+            key === "engine" ? engine.enabled :
+            key === "buy" ? engine.signalSide.buy :
+            key === "sell" ? engine.signalSide.sell :
+            key === "volFilter" ? engine.volumeFilter.enabled :
+            key === "regionLines" ? engine.visual.plotRegionLines :
+            key === "garchSrc" ? engine.allowedSources.garch :
+            key === "hvSrc" ? engine.allowedSources.hv252 :
+            false;
           row.innerHTML = `<label style="grid-column:1 / 3;"><input type="checkbox" ${checked ? "checked" : ""}> ${label}</label><span></span>`;
           row.querySelector("input").onchange = (e) => {
             if (key === "enabled") cfg.enabled = e.target.checked;
-            else if (key.startsWith("family:")) cfg.signalFamilies[key.split(":")[1]] = e.target.checked;
-            else cfg.enabledSignals[key] = e.target.checked;
+            else if (key === "engine") engine.enabled = e.target.checked;
+            else if (key === "buy") engine.signalSide.buy = e.target.checked;
+            else if (key === "sell") engine.signalSide.sell = e.target.checked;
+            else if (key === "volFilter") engine.volumeFilter.enabled = e.target.checked;
+            else if (key === "regionLines") engine.visual.plotRegionLines = e.target.checked;
+            else if (key === "garchSrc") engine.allowedSources.garch = e.target.checked;
+            else if (key === "hvSrc") engine.allowedSources.hv252 = e.target.checked;
             savePrefs(); renderCharts(false);
           };
           box.appendChild(row);
         });
         [
-          ["minScore", "Score", 1, 20, 1, cfg.minScore, (v) => { cfg.minScore = v; }],
-          ["cooldown", "Cooldown", 0, 80, 1, cfg.cooldownCandles, (v) => { cfg.cooldownCandles = v; }],
-          ["vwapDist", "Dist %", 0.1, 5, 0.1, cfg.reversal.minDistanceFromVWAPPercent, (v) => { cfg.reversal.minDistanceFromVWAPPercent = v; }],
-          ["near", "Nivel %", 0.05, 2, 0.05, cfg.reversal.proximityPercent, (v) => { cfg.reversal.proximityPercent = v; }],
-          ["hvNear", "HV %", 0.05, 2, 0.05, cfg.reversal.hvProximityPercent, (v) => { cfg.reversal.hvProximityPercent = v; }],
-          ["devMin", "Dev REV", 1, 3, 1, cfg.reversal.minStdevMultiplier, (v) => { cfg.reversal.minStdevMultiplier = v; }],
-          ["garchSigma", "GARCH σ", 0.5, 3, 0.25, cfg.garch.minSigmaForSignal, (v) => { cfg.garch.minSigmaForSignal = v; }],
+          ["minScore", "Score", 1, 100, 1, cfg.minScore, (v) => { cfg.minScore = v; }],
+          ["minSigma", "Sigma min", 0.5, 3, 0.25, engine.minSigmaForSignal, (v) => { engine.minSigmaForSignal = v; cfg.garch.minSigmaForSignal = v; }],
+          ["strongSigma", "Sigma forte", 1, 4, 0.25, engine.preferredSigmaForStrongSignal, (v) => { engine.preferredSigmaForStrongSignal = v; }],
+          ["regionPct", "Regiao %", 0.02, 0.5, 0.01, (engine.bandRegion.percentTolerance || 0.001) * 100, (v) => { engine.bandRegion.percentTolerance = v / 100; }],
+          ["wickRatio", "Pavio/body", 0.5, 5, 0.1, engine.rejection.minWickToBodyRatio, (v) => { engine.rejection.minWickToBodyRatio = v; }],
+          ["cooldown", "Cooldown", 0, 80, 1, engine.cooldown.bars, (v) => { engine.cooldown.bars = v; cfg.cooldownCandles = v; }],
+          ["volLook", "Vol M", 5, 80, 1, engine.volumeFilter.lookback, (v) => { engine.volumeFilter.lookback = v; }],
+          ["volMult", "Vol x", 0.5, 5, 0.05, engine.volumeFilter.multiplier, (v) => { engine.volumeFilter.multiplier = v; }],
         ].forEach((item) => {
           const [, label, min, max, step, value, setter] = item;
           const row = document.createElement("div");
@@ -521,17 +537,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
             const v = Math.max(min, Math.min(max, Number(e.target.value) || value));
             setter(v); savePrefs(); renderMASettings(); renderCharts(false);
           };
-          box.appendChild(row);
-        });
-        [
-          ["garchOn", "Filtro GARCH", cfg.garch.enabled, (v) => { cfg.garch.enabled = v; }],
-          ["revHv", "REV VWAP+HV", cfg.reversal.requireVwapHvConfluence, (v) => { cfg.reversal.requireVwapHvConfluence = v; }],
-        ].forEach((item) => {
-          const [, label, checked, setter] = item;
-          const row = document.createElement("div");
-          row.className = "lw-setting-row";
-          row.innerHTML = `<label style="grid-column:1 / 3;"><input type="checkbox" ${checked ? "checked" : ""}> ${label}</label><span></span>`;
-          row.querySelector("input").onchange = (e) => { setter(e.target.checked); savePrefs(); renderCharts(false); };
           box.appendChild(row);
         });
         const garchRefRow = document.createElement("div");
@@ -957,8 +962,8 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         if (!Number.isFinite(prevClose) || !Number.isFinite(dailyVol)) return [];
         const levels = [{ label:"Fech. Ant.", price:prevClose, multiplier:0 }];
         multipliers.forEach((m) => {
-          levels.push({ label:`HV +${m}σ`, price:prevClose * Math.exp(m * dailyVol), multiplier:m });
-          levels.push({ label:`HV -${m}σ`, price:prevClose * Math.exp(-m * dailyVol), multiplier:-m });
+          levels.push({ label:`HV +${m}Ïƒ`, price:prevClose * Math.exp(m * dailyVol), multiplier:m });
+          levels.push({ label:`HV -${m}Ïƒ`, price:prevClose * Math.exp(-m * dailyVol), multiplier:-m });
         });
         return levels;
       }
@@ -1005,8 +1010,8 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         multipliers.forEach((m) => {
           if (m === 0) zones.push({ level:referencePrice, label:"GARCH 0", multiplier:0, side:"center" });
           else {
-            zones.push({ level:referencePrice * Math.exp(volatility * m), label:`GARCH +${m}σ`, multiplier:m, side:"upper" });
-            zones.push({ level:referencePrice * Math.exp(-volatility * m), label:`GARCH -${m}σ`, multiplier:-m, side:"lower" });
+            zones.push({ level:referencePrice * Math.exp(volatility * m), label:`GARCH +${m}Ïƒ`, multiplier:m, side:"upper" });
+            zones.push({ level:referencePrice * Math.exp(-volatility * m), label:`GARCH -${m}Ïƒ`, multiplier:-m, side:"lower" });
           }
         });
         return zones;
@@ -1159,174 +1164,197 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       function isPullbackNearEMAOrVWAP(c, levels, tolerancePercent) {
         return levels.some((level) => Number.isFinite(level) && (isNearLevel(c.low, level, tolerancePercent) || isNearLevel(c.high, level, tolerancePercent) || isNearLevel(c.close, level, tolerancePercent)));
       }
-      function signalContext(candles, indicators, i) {
-        const c = candles[i];
-        const refs = indicators.refs || {};
-        const hv = indicators.hv252 || {};
-        const hvLevel = (mult) => (hv.levels || []).find((item) => item.multiplier === mult)?.price;
-        const stdevLevel = (mult) => bandAt(indicators.stdevBands, mult, c.time);
-        return {
-          c,
-          prev:candles[i - 1],
-          vwap:valueAt(indicators.vwapDay, c.time),
-          ema9:valueAt(indicators.signalMAs.ema9, c.time),
-          ema21:valueAt(indicators.signalMAs.ema21, c.time),
-          ema80:valueAt(indicators.signalMAs.ema80, c.time),
-          ema200:valueAt(indicators.signalMAs.ema200, c.time),
-          ema21Prev:valueAt(indicators.signalMAs.ema21, candles[Math.max(0, i - 5)]?.time),
-          rvol:indicators.volumeStats[i]?.rvol,
-          avgVol:indicators.volumeStats[i]?.avg,
-          volumeMA:indicators.volumeStats[i]?.volumeMA,
-          legVolume:indicators.volumeStats[i]?.legVolume,
-          legRelativeVolume:indicators.volumeStats[i]?.legRelativeVolume,
-          prevClose:refs.prevClose,
-          dayHigh:refs.high,
-          dayLow:refs.low,
-          hvUpper1:hvLevel(1),
-          hvLower1:hvLevel(-1),
-          hvUpper2:hvLevel(2),
-          hvLower2:hvLevel(-2),
-          hvUpper15:hvLevel(1.5),
-          hvLower15:hvLevel(-1.5),
-          garchSigma:indicators.garch?.classification?.sigmaDistance,
-          stdev1:stdevLevel(1),
-          stdev2:stdevLevel(2),
-          stdev3:stdevLevel(3),
-        };
-      }
-      function detectRegime(ctx, cfg) {
-        const { c, vwap, ema9, ema21, ema80, ema200, ema21Prev, dayHigh, dayLow, hvUpper1, hvLower1 } = ctx;
-        const dist = pctDistance(c.close, vwap);
-        const emaSpread = Number.isFinite(ema9) && Number.isFinite(ema21) ? Math.abs(ema9 - ema21) / c.close : Infinity;
-        const slope21 = Number.isFinite(ema21) && Number.isFinite(ema21Prev) ? ema21 - ema21Prev : NaN;
-        if (Number.isFinite(dist) && dist >= cfg.reversal.minDistanceFromVWAPPercent && [dayHigh, hvUpper1].some((level) => isNearLevel(c.close, level, cfg.reversal.proximityPercent * 2))) return "stretched_up";
-        if (Number.isFinite(dist) && dist <= -cfg.reversal.minDistanceFromVWAPPercent && [dayLow, hvLower1].some((level) => isNearLevel(c.close, level, cfg.reversal.proximityPercent * 2))) return "stretched_down";
-        if (Number.isFinite(dist) && Math.abs(dist) < 0.3 && emaSpread < 0.0015) return "range";
-        if (c.close > vwap && ema9 > ema21 && ema21 > ema80 && (ema80 >= ema200 || c.close > ema200 || !Number.isFinite(ema200)) && slope21 > 0) return "uptrend";
-        if (c.close < vwap && ema9 < ema21 && ema21 < ema80 && (ema80 <= ema200 || c.close < ema200 || !Number.isFinite(ema200)) && slope21 < 0) return "downtrend";
-        if (Number.isFinite(dist) && Math.abs(dist) < 0.5) return "range";
-        return dist >= 0 ? "stretched_up" : "stretched_down";
-      }
-      function addScore(parts, ok, weight, reason) {
-        if (ok) { parts.score += weight; parts.reasons.push(reason); }
-      }
-      function addTag(parts, ok, tag) {
-        if (ok && tag && !parts.tags.includes(tag)) parts.tags.push(tag);
-      }
-      function buildSignal(type, ctx, parts, regime, stop, target1, target2) {
-        return {
-          time:ctx.c.time,
-          type,
-          price:ctx.c.close,
-          score:parts.score,
-          regime,
-          vwapDistancePercent:pctDistance(ctx.c.close, ctx.vwap),
-          locationTags:parts.tags,
-          reasons:parts.reasons,
-          suggestedStop:safe(stop),
-          suggestedTarget1:safe(target1),
-          suggestedTarget2:safe(target2),
-        };
-      }
-      function reversalConfluence(ctx, side, cfg) {
-        const minMult = Math.max(1, Math.min(3, Number(cfg.reversal.minStdevMultiplier) || 1));
-        const stdevBands = [ctx.stdev1, ctx.stdev2, ctx.stdev3].filter((band, index) => index + 1 >= minMult);
-        const hvLevels = side === "buy"
-          ? [ctx.hvLower1, ctx.hvLower15, ctx.hvLower2]
-          : [ctx.hvUpper1, ctx.hvUpper15, ctx.hvUpper2];
-        const price = side === "buy" ? ctx.c.low : ctx.c.high;
-        const vwapExtreme = stdevBands.some((band) => {
-          if (!band) return false;
-          return side === "buy" ? ctx.c.low <= band.lower || ctx.c.close <= band.lower : ctx.c.high >= band.upper || ctx.c.close >= band.upper;
+      function collectVolatilityBands(indicators) {
+        const out = [];
+        (indicators.garch?.zones || []).forEach((zone) => {
+          const side = zone.side === "upper" ? "upper" : zone.side === "lower" ? "lower" : "center";
+          out.push({ id:`GARCH_${zone.multiplier}`, label:zone.label, source:zone.multiplier === 0 ? "REFERENCE" : "GARCH", side, multiplier:Math.abs(zone.multiplier), signedMultiplier:zone.multiplier, price:zone.level });
         });
-        const hvExtreme = hvLevels.some((level) => isNearLevel(price, level, cfg.reversal.hvProximityPercent) || (side === "buy" ? price <= level : price >= level));
-        return { ok:vwapExtreme && hvExtreme, vwapExtreme, hvExtreme };
+        (indicators.hv252?.levels || []).forEach((level) => {
+          const side = level.multiplier > 0 ? "upper" : level.multiplier < 0 ? "lower" : "center";
+          out.push({ id:`HV252_${level.multiplier}`, label:level.label, source:level.multiplier === 0 ? "REFERENCE" : "HV252", side, multiplier:Math.abs(level.multiplier), signedMultiplier:level.multiplier, price:level.price });
+        });
+        return out.filter((band) => Number.isFinite(band.price));
       }
-      function scoreCandidate(type, candles, indicators, i, regime) {
-        const cfg = state.signalConfig;
-        const w = cfg.weights;
-        const ctx = signalContext(candles, indicators, i);
-        const { c, prev, vwap, ema9, ema21, ema80, prevClose, dayHigh, dayLow, hvUpper1, hvLower1, hvUpper2, hvLower2, garchSigma } = ctx;
-        if (!prev || !Number.isFinite(vwap)) return null;
-        const parts = { score:0, reasons:[], tags:[] };
-        const dist = pctDistance(c.close, vwap);
-        const nearLow = [dayLow, hvLower1, hvLower2].some((level) => isNearLevel(c.low, level, cfg.reversal.proximityPercent));
-        const nearHigh = [dayHigh, hvUpper1, hvUpper2].some((level) => isNearLevel(c.high, level, cfg.reversal.proximityPercent));
-        if (type === "REV_BUY") {
-          const confluence = reversalConfluence(ctx, "buy", cfg);
-          if (cfg.reversal.requireVwapHvConfluence && !confluence.ok) return null;
-          if (cfg.garch?.enabled && (!Number.isFinite(garchSigma) || garchSigma > -(cfg.garch.minSigmaForSignal || 1.5))) return null;
-          const candleOk = isBullishRejectionCandle(c) || c.close > prev.high || (c.low < prev.low && c.close > prev.close);
-          if (!candleOk || Math.abs(dist) < cfg.reversal.minDistanceFromVWAPPercent || isNearLevel(c.close, vwap, cfg.reversal.proximityPercent)) return null;
-          addScore(parts, ["range","stretched_down"].includes(regime), w.favorableRegime, `Regime ${regime}`);
-          addScore(parts, c.close < vwap, w.vwapSide, "Preco abaixo da VWAP");
-          addScore(parts, Number.isFinite(dist) && dist <= -cfg.reversal.minDistanceFromVWAPPercent, w.vwapDistance, `Distancia VWAP ${dist.toFixed(2)}%`);
-          addScore(parts, confluence.vwapExtreme, w.extremeLocation || w.vwapDistance, `Extremo em desvio VWAP >= ${cfg.reversal.minStdevMultiplier}`);
-          addScore(parts, confluence.hvExtreme, w.hvConfluence, "Confluencia com banda HV252 inferior");
-          addScore(parts, cfg.garch?.enabled && Number.isFinite(garchSigma), w.extremeLocation || 2, `GARCH ${garchSigma.toFixed(2)}σ`);
-          addScore(parts, nearLow, w.proximityToKeyLevel, "Proximo de minima/HV inferior");
-          addScore(parts, candleOk, w.rejectionCandle, "Candle de rejeicao/falha inferior");
-          addScore(parts, c.close > prev.close || c.close > prev.high, w.previousCandleBreak, "Virada sobre candle anterior");
-          addTag(parts, nearLow, "DAY_LOW");
-          addTag(parts, confluence.hvExtreme, "HV_LOWER_1");
-          addTag(parts, confluence.vwapExtreme, "VWAP_DEV_NEG_1");
-          return buildSignal(type, ctx, parts, regime, minFinite(c.low, dayLow, hvLower1), vwap, Number.isFinite(prevClose) ? prevClose : hvUpper1);
-        }
-        if (type === "REV_SELL") {
-          const confluence = reversalConfluence(ctx, "sell", cfg);
-          if (cfg.reversal.requireVwapHvConfluence && !confluence.ok) return null;
-          if (cfg.garch?.enabled && (!Number.isFinite(garchSigma) || garchSigma < (cfg.garch.minSigmaForSignal || 1.5))) return null;
-          const candleOk = isBearishRejectionCandle(c) || c.close < prev.low || (c.high > prev.high && c.close < prev.close);
-          if (!candleOk || Math.abs(dist) < cfg.reversal.minDistanceFromVWAPPercent || isNearLevel(c.close, vwap, cfg.reversal.proximityPercent)) return null;
-          addScore(parts, ["range","stretched_up"].includes(regime), w.favorableRegime, `Regime ${regime}`);
-          addScore(parts, c.close > vwap, w.vwapSide, "Preco acima da VWAP");
-          addScore(parts, Number.isFinite(dist) && dist >= cfg.reversal.minDistanceFromVWAPPercent, w.vwapDistance, `Distancia VWAP +${dist.toFixed(2)}%`);
-          addScore(parts, confluence.vwapExtreme, w.extremeLocation || w.vwapDistance, `Extremo em desvio VWAP >= ${cfg.reversal.minStdevMultiplier}`);
-          addScore(parts, confluence.hvExtreme, w.hvConfluence, "Confluencia com banda HV252 superior");
-          addScore(parts, cfg.garch?.enabled && Number.isFinite(garchSigma), w.extremeLocation || 2, `GARCH +${garchSigma.toFixed(2)}σ`);
-          addScore(parts, nearHigh, w.proximityToKeyLevel, "Proximo de maxima/HV superior");
-          addScore(parts, candleOk, w.rejectionCandle, "Candle de rejeicao/falha superior");
-          addScore(parts, c.close < prev.close || c.close < prev.low, w.previousCandleBreak, "Virada abaixo do candle anterior");
-          addTag(parts, nearHigh, "DAY_HIGH");
-          addTag(parts, confluence.hvExtreme, "HV_UPPER_1");
-          addTag(parts, confluence.vwapExtreme, "VWAP_DEV_POS_1");
-          return buildSignal(type, ctx, parts, regime, maxFinite(c.high, dayHigh, hvUpper1), vwap, Number.isFinite(prevClose) ? prevClose : hvLower1);
-        }
+      function createBandRegion(band, config, atr, tickSize) {
+        if (!band || band.source === "REFERENCE" || band.side === "center") return null;
+        let toleranceValue = 0;
+        if (config.mode === "atr") toleranceValue = Number.isFinite(atr) && atr > 0 ? atr * config.atrMultiplier : 0;
+        else if (config.mode === "ticks") toleranceValue = Number.isFinite(tickSize) && tickSize > 0 ? tickSize * config.ticksTolerance : 0;
+        else toleranceValue = band.price * (config.percentTolerance || 0.001);
+        if (config.minRegionWidthTicks && Number.isFinite(tickSize) && tickSize > 0) toleranceValue = Math.max(toleranceValue, tickSize * config.minRegionWidthTicks);
+        if (!Number.isFinite(toleranceValue) || toleranceValue <= 0) return null;
+        return { bandId:band.id, label:band.label, source:band.source, side:band.side, multiplier:band.multiplier, centerPrice:band.price, lowerBound:band.price - toleranceValue, upperBound:band.price + toleranceValue, toleranceValue, toleranceMode:config.mode };
+      }
+      function createBandRegions(bands, config, atr, tickSize) {
+        if (!config.bandRegion.enabled) return [];
+        return (bands || [])
+          .filter((band) => band.source !== "REFERENCE" && band.side !== "center")
+          .filter((band) => band.multiplier >= config.minSigmaForSignal)
+          .filter((band) => band.source !== "GARCH" || config.allowedSources.garch)
+          .filter((band) => band.source !== "HV252" || config.allowedSources.hv252)
+          .map((band) => createBandRegion(band, config.bandRegion, atr, tickSize))
+          .filter(Boolean);
+      }
+      function candleTouchesBandRegion(candle, region) {
+        return candle.high >= region.lowerBound && candle.low <= region.upperBound;
+      }
+      function getCandleMetrics(candle) {
+        const range = candle.high - candle.low;
+        if (!(range > 0)) return null;
+        const body = Math.abs(candle.close - candle.open);
+        return {
+          range,
+          body,
+          upperWick:candle.high - Math.max(candle.open, candle.close),
+          lowerWick:Math.min(candle.open, candle.close) - candle.low,
+          closePosition:(candle.close - candle.low) / range,
+          bodyPercent:body / range,
+          isBullish:candle.close > candle.open,
+          isBearish:candle.close < candle.open,
+        };
+      }
+      function isBullishRejectionAtLowerRegion(candle, region, config) {
+        if (region.side !== "lower" || !candleTouchesBandRegion(candle, region)) return false;
+        const m = getCandleMetrics(candle); if (!m) return false;
+        const sweptBelow = candle.low < region.lowerBound;
+        const closedAboveCenter = candle.close > region.centerPrice;
+        const closedAboveRegion = candle.close > region.upperBound;
+        const closeBackOk = config.bandRegion.closeBackRule === "outsideRegion" ? closedAboveRegion : config.bandRegion.closeBackRule === "anyRejection" ? (closedAboveCenter || closedAboveRegion || sweptBelow) : closedAboveCenter;
+        return m.lowerWick >= m.body * config.rejection.minWickToBodyRatio && m.closePosition >= 0.6 && m.bodyPercent <= config.candleFilter.maxBodyPercentForPinBar && closeBackOk;
+      }
+      function isBearishRejectionAtUpperRegion(candle, region, config) {
+        if (region.side !== "upper" || !candleTouchesBandRegion(candle, region)) return false;
+        const m = getCandleMetrics(candle); if (!m) return false;
+        const sweptAbove = candle.high > region.upperBound;
+        const closedBelowCenter = candle.close < region.centerPrice;
+        const closedBelowRegion = candle.close < region.lowerBound;
+        const closeBackOk = config.bandRegion.closeBackRule === "outsideRegion" ? closedBelowRegion : config.bandRegion.closeBackRule === "anyRejection" ? (closedBelowCenter || closedBelowRegion || sweptAbove) : closedBelowCenter;
+        return m.upperWick >= m.body * config.rejection.minWickToBodyRatio && m.closePosition <= 0.4 && m.bodyPercent <= config.candleFilter.maxBodyPercentForPinBar && closeBackOk;
+      }
+      function isBullishEngulfingAtLowerRegion(prev, current, region) {
+        return region.side === "lower" && prev?.close < prev?.open && current.close > current.open && current.open <= prev.close && current.close >= prev.open && (candleTouchesBandRegion(prev, region) || candleTouchesBandRegion(current, region)) && current.close > region.centerPrice;
+      }
+      function isBearishEngulfingAtUpperRegion(prev, current, region) {
+        return region.side === "upper" && prev?.close > prev?.open && current.close < current.open && current.open >= prev.close && current.close <= prev.open && (candleTouchesBandRegion(prev, region) || candleTouchesBandRegion(current, region)) && current.close < region.centerPrice;
+      }
+      function isBullishFailedBreakout(candle, region, config) {
+        if (region.side !== "lower") return false;
+        return candle.low < region.lowerBound && (config.bandRegion.closeBackRule === "outsideRegion" ? candle.close > region.upperBound : candle.close > region.centerPrice);
+      }
+      function isBearishFailedBreakout(candle, region, config) {
+        if (region.side !== "upper") return false;
+        return candle.high > region.upperBound && (config.bandRegion.closeBackRule === "outsideRegion" ? candle.close < region.lowerBound : candle.close < region.centerPrice);
+      }
+      function isBullishCloseBackInside(prev, current, region) {
+        return region.side === "lower" && prev && prev.close < region.lowerBound && current.close > region.lowerBound;
+      }
+      function isBearishCloseBackInside(prev, current, region) {
+        return region.side === "upper" && prev && prev.close > region.upperBound && current.close < region.upperBound;
+      }
+      function isBullishImpulseReversal(candle, region) {
+        const m = getCandleMetrics(candle);
+        return region.side === "lower" && m && m.isBullish && candleTouchesBandRegion(candle, region) && m.bodyPercent >= 0.55 && m.closePosition >= 0.75 && candle.close > region.centerPrice;
+      }
+      function isBearishImpulseReversal(candle, region) {
+        const m = getCandleMetrics(candle);
+        return region.side === "upper" && m && m.isBearish && candleTouchesBandRegion(candle, region) && m.bodyPercent >= 0.55 && m.closePosition <= 0.25 && candle.close < region.centerPrice;
+      }
+      function averageVolume(candles, index, lookback) {
+        const slice = candles.slice(Math.max(0, index - lookback), index).filter((c) => typeof c.volume === "number");
+        return slice.length ? slice.reduce((sum, c) => sum + (c.volume || 0), 0) / slice.length : null;
+      }
+      function isVolumeOk(candles, index, config) {
+        if (!config.volumeFilter.enabled) return true;
+        const volume = candles[index]?.volume;
+        if (typeof volume !== "number") return true;
+        const avg = averageVolume(candles, index, config.volumeFilter.lookback);
+        return !avg || avg <= 0 ? true : volume >= avg * config.volumeFilter.multiplier;
+      }
+      function detectBullishPattern(prev, current, region, config) {
+        if (region.side !== "lower") return null;
+        if (config.rejection.allowFailedBreakout && isBullishFailedBreakout(current, region, config)) return "failedBreakout";
+        if (config.rejection.allowPinBar && isBullishRejectionAtLowerRegion(current, region, config)) return "pinBar";
+        if (prev && config.rejection.allowEngulfing && isBullishEngulfingAtLowerRegion(prev, current, region)) return "engulfing";
+        if (prev && config.rejection.allowCloseBackInside && isBullishCloseBackInside(prev, current, region)) return "closeBackInside";
+        if (config.rejection.allowImpulseReversal && isBullishImpulseReversal(current, region)) return "impulseReversal";
         return null;
+      }
+      function detectBearishPattern(prev, current, region, config) {
+        if (region.side !== "upper") return null;
+        if (config.rejection.allowFailedBreakout && isBearishFailedBreakout(current, region, config)) return "failedBreakout";
+        if (config.rejection.allowPinBar && isBearishRejectionAtUpperRegion(current, region, config)) return "pinBar";
+        if (prev && config.rejection.allowEngulfing && isBearishEngulfingAtUpperRegion(prev, current, region)) return "engulfing";
+        if (prev && config.rejection.allowCloseBackInside && isBearishCloseBackInside(prev, current, region)) return "closeBackInside";
+        if (config.rejection.allowImpulseReversal && isBearishImpulseReversal(current, region)) return "impulseReversal";
+        return null;
+      }
+      function calculateSignalScore({ sigmaDistance, bandMultiplier, pattern, volumeOk, source, touchedRegion }) {
+        let score = 40;
+        const absSigma = Math.abs(sigmaDistance || bandMultiplier || 0);
+        if (absSigma >= 1.5) score += 10;
+        if (absSigma >= 2) score += 20;
+        if (absSigma >= 3) score += 30;
+        if (pattern === "failedBreakout" || pattern === "pinBar") score += 15;
+        if (pattern === "engulfing" || pattern === "impulseReversal") score += 20;
+        if (pattern === "closeBackInside") score += 10;
+        if (volumeOk) score += 10;
+        if (source === "GARCH") score += 5;
+        if (touchedRegion) score += 5;
+        return Math.min(100, score);
+      }
+      function classifySignalStrength(score) {
+        return score >= 75 ? "strong" : score >= 50 ? "moderate" : "weak";
       }
       function generateSignals(candles, indicators) {
         const cfg = state.signalConfig;
-        if (!cfg.enabled || candles.length < 50) return [];
-        const out = [];
-        const lastByType = {};
-        for (let i = 50; i < candles.length; i += 1) {
-          const ctx = signalContext(candles, indicators, i);
-          const regime = detectRegime(ctx, cfg);
-          const candidates = ["REV_BUY","REV_SELL"]
-            .filter((type) => cfg.enabledSignals[type])
-            .filter((type) => cfg.signalFamilies.reversal)
-            .map((type) => scoreCandidate(type, candles, indicators, i, regime))
-            .filter((sig) => sig && sig.score >= cfg.minScore);
-          if (!candidates.length) continue;
-          candidates.sort((a,b) => b.score - a.score);
-          const best = candidates[0];
-          if (lastByType[best.type] !== undefined && i - lastByType[best.type] < cfg.cooldownCandles) continue;
-          const lastAny = out[out.length - 1];
-          if (lastAny && i - lastAny.index < Math.max(1, Math.floor(cfg.cooldownCandles / 2)) && lastAny.signal.type === best.type) continue;
-          out.push({ index:i, signal:best });
-          lastByType[best.type] = i;
+        const engine = cfg.signalEngine;
+        if (!cfg.enabled || !engine.enabled || candles.length < 2) return [];
+        const regions = createBandRegions(collectVolatilityBands(indicators), engine, null, null);
+        const signals = [];
+        let lastSignalIndex = null;
+        for (let i = 1; i < candles.length; i += 1) {
+          if (engine.cooldown.enabled && lastSignalIndex !== null && i - lastSignalIndex < engine.cooldown.bars) continue;
+          const prev = candles[i - 1];
+          const current = candles[i];
+          const volumeOk = isVolumeOk(candles, i, engine);
+          if (!volumeOk && engine.volumeFilter.enabled) continue;
+          const touched = regions.filter((region) => candleTouchesBandRegion(current, region));
+          for (const region of touched) {
+            let direction = null, pattern = null;
+            if (region.side === "lower" && engine.signalSide.buy) { pattern = detectBullishPattern(prev, current, region, engine); if (pattern) direction = "buy"; }
+            if (region.side === "upper" && engine.signalSide.sell) { pattern = detectBearishPattern(prev, current, region, engine); if (pattern) direction = "sell"; }
+            if (!direction || !pattern) continue;
+            const sigmaDistance = region.side === "upper" ? region.multiplier : -region.multiplier;
+            const score = calculateSignalScore({ sigmaDistance, bandMultiplier:region.multiplier, pattern, volumeOk, source:region.source, touchedRegion:true });
+            if (score < cfg.minScore) continue;
+            signals.push({
+              time:current.time,
+              type:direction === "buy" ? "VOL_BUY" : "VOL_SELL",
+              direction,
+              price:current.close,
+              score,
+              strength:classifySignalStrength(score),
+              regionLabel:region.label,
+              zoneSource:region.source,
+              sigmaDistance,
+              pattern,
+              reason:direction === "buy" ? `Compra em regiao inferior ${region.label}. Padrao: ${pattern}.` : `Venda em regiao superior ${region.label}. Padrao: ${pattern}.`,
+            });
+            lastSignalIndex = i;
+            break;
+          }
         }
-        return out.map((item) => item.signal);
+        return signals;
       }
       function buildSignalMarkers(signals) {
-        const style = {
-          REV_BUY:{ position:"belowBar", shape:"arrowUp", color:"#00C853", label:"REV BUY" },
-          REV_SELL:{ position:"aboveBar", shape:"arrowDown", color:"#D50000", label:"REV SELL" },
-        };
-        return (signals || []).map((signal) => {
-          const s = style[signal.type] || style.REV_BUY;
-          return { time:signal.time, position:s.position, shape:s.shape, color:s.color, text:`${s.label} ${signal.score}` };
-        });
+        return (signals || []).map((signal) => ({
+          time:signal.time,
+          position:signal.direction === "buy" ? "belowBar" : "aboveBar",
+          shape:signal.direction === "buy" ? "arrowUp" : "arrowDown",
+          color:signal.direction === "buy" ? "#22c55e" : "#ef4444",
+          text:`${signal.direction === "buy" ? "BUY" : "SELL"} ${signal.score}`,
+        }));
       }
       function computeIndicators(candles) {
         const vwapDay = computeVWAP(candles, "day");
@@ -1427,6 +1455,14 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
             const width = abs >= 2 ? 2 : 1;
             addLine(key, horizontalSessionLine(state.candles, level.price), color, width);
             addPriceLine(candleSeries, `BV ${level.label}`, level.price, color, 2, width);
+          });
+        }
+        const engine = state.signalConfig.signalEngine;
+        if (engine?.enabled && engine.visual?.plotRegionLines) {
+          createBandRegions(collectVolatilityBands(state.indicators), engine, null, null).forEach((region) => {
+            const softColor = region.side === "upper" ? "#fca5a5" : "#86efac";
+            addPriceLine(candleSeries, `${region.label} reg sup`, region.upperBound, softColor, 3, 1);
+            addPriceLine(candleSeries, `${region.label} reg inf`, region.lowerBound, softColor, 3, 1);
           });
         }
       }
@@ -1569,7 +1605,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const garch = indicators.garch || {};
         const gClass = garch.classification || {};
         const garchRefLabels = { previousClose:"Fech. ant.", sessionOpen:"Abertura", vwap:"VWAP", lastClose:"Ultimo", adjustment:"Manual" };
-        document.getElementById("lw-garch-zone").textContent = garch.ok ? `${Number.isFinite(gClass.sigmaDistance) ? gClass.sigmaDistance.toFixed(2) : "---"}σ | ${gClass.zone || "---"}` : (garch.warning || "GARCH indisponivel");
+        document.getElementById("lw-garch-zone").textContent = garch.ok ? `${Number.isFinite(gClass.sigmaDistance) ? gClass.sigmaDistance.toFixed(2) : "---"}Ïƒ | ${gClass.zone || "---"}` : (garch.warning || "GARCH indisponivel");
         document.getElementById("lw-garch-extra").textContent = garch.ok
           ? `Hull/lognormal | TF ${garch.garchTimeframe || "D"} | Vol ${(garch.latestVolatility * 100).toFixed(2)}% | Ref ${garchRefLabels[garch.referenceMode] || garch.referenceMode}: ${fmt(garch.referencePrice, 2)}`
           : "Historico insuficiente ou parametro instavel";
@@ -1584,7 +1620,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         document.getElementById("lw-hv252").textContent = hv.ok ? `Fech. ant. ${fmt(hv.prevClose, 2)}` : (hv.warning || "Historico insuficiente para HV 252");
         document.getElementById("lw-hv30").textContent = hv.ok ? `HV diaria ${(hv.dailyVol * 100).toFixed(2)}% | anual ${(hv.annualVol * 100).toFixed(2)}%` : "Use candles diarios suficientes";
         document.getElementById("lw-hv-levels").textContent = hv.ok
-          ? `1σ ${fmt(level(-1),2)} / ${fmt(level(1),2)} | 2σ ${fmt(level(-2),2)} / ${fmt(level(2),2)} | prox ${nearest ? `${nearest.label} (${fmt(nearest.distance,2)})` : "---"}`
+          ? `1Ïƒ ${fmt(level(-1),2)} / ${fmt(level(1),2)} | 2Ïƒ ${fmt(level(-2),2)} / ${fmt(level(2),2)} | prox ${nearest ? `${nearest.label} (${fmt(nearest.distance,2)})` : "---"}`
           : "Historico insuficiente para HV 252";
         renderAlerts(last, lastVwap, lastVol.rvol, indicators.signals);
       }
@@ -1594,14 +1630,14 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const alerts = [];
         if (last && vwap) {
           const dist = (last.close - vwap) / vwap;
-          if (dist >= .01) alerts.push(["Preço em banda +1%", "hot"]);
-          if (dist <= -.01) alerts.push(["Preço em banda -1%", "hot"]);
+          if (dist >= .01) alerts.push(["PreÃ§o em banda +1%", "hot"]);
+          if (dist <= -.01) alerts.push(["PreÃ§o em banda -1%", "hot"]);
         }
         if (Number.isFinite(rvol) && rvol >= 2) alerts.push(["Volume relativo extremo", "hot"]);
         else if (Number.isFinite(rvol) && rvol >= 1.5) alerts.push(["Volume relativo alto", "hot"]);
         const recent = (signals || []).filter((s) => last && s.time >= last.time - (tfSeconds[state.timeframe] || 60) * 3);
-          const buySignal = recent.find((s) => allowedSignalTypes.includes(s.type) && s.type.includes("BUY"));
-          const sellSignal = recent.find((s) => allowedSignalTypes.includes(s.type) && s.type.includes("SELL"));
+          const buySignal = recent.find((s) => s.direction === "buy");
+          const sellSignal = recent.find((s) => s.direction === "sell");
         if (buySignal) alerts.push([`${buySignal.type} score ${buySignal.score}`, "buy"]);
         if (sellSignal) alerts.push([`${sellSignal.type} score ${sellSignal.score}`, "sell"]);
         if (!alerts.length) alerts.push(["Sem alerta operacional ativo", ""]);
@@ -1629,12 +1665,11 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const dist = v ? ((c.close - v) / v) * 100 : NaN;
         const signalHtml = signal ? `
             <div style="grid-column:1 / -1; border-top:1px solid #334155; margin-top:6px; padding-top:6px;">
-              <div style="color:#f8fafc; font-weight:900;">${escapeHtml(signal.type)} | Score ${signal.score} | ${escapeHtml(signal.regime)}</div>
-              <div><span>Entrada</span> ${fmt(signal.price,2)} | <span>Stop</span> ${fmt(signal.suggestedStop,2)}</div>
-              <div><span>Alvo 1</span> ${fmt(signal.suggestedTarget1,2)} | <span>Alvo 2</span> ${fmt(signal.suggestedTarget2,2)}</div>
-              <div><span>Dist VWAP</span> ${Number.isFinite(signal.vwapDistancePercent) ? signal.vwapDistancePercent.toFixed(2) : "---"}% | <span>Regime</span> ${escapeHtml(signal.regime)}</div>
-              <div style="color:#cbd5e1; margin-top:3px;">${escapeHtml(signal.reasons.slice(0, 5).join(" | "))}</div>
-              <div style="color:#94a3b8; margin-top:3px;">${escapeHtml((signal.locationTags || []).slice(0, 6).join(" | "))}</div>
+              <div style="color:#f8fafc; font-weight:900;">${escapeHtml(signal.type)} | Score ${signal.score} | ${escapeHtml(signal.strength || "")}</div>
+              <div><span>Entrada</span> ${fmt(signal.price,2)} | <span>Regiao</span> ${escapeHtml(signal.regionLabel || "---")}</div>
+              <div><span>Fonte</span> ${escapeHtml(signal.zoneSource || "---")} | <span>Sigma</span> ${Number.isFinite(signal.sigmaDistance) ? signal.sigmaDistance.toFixed(2) : "---"}</div>
+              <div><span>Padrao</span> ${escapeHtml(signal.pattern || "---")} | <span>Direcao</span> ${escapeHtml(signal.direction || "---")}</div>
+              <div style="color:#cbd5e1; margin-top:3px;">${escapeHtml(signal.reason || "")}</div>
             </div>` : "";
         const html = `
           <strong>${state.symbol} | ${fmtTime(c.time)}</strong>
@@ -1651,7 +1686,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         crosshairCard.style.top = `${Math.min(y + 16, Math.max(12, chartEl.clientHeight - 160))}px`;
         document.getElementById("lw-hover-title").textContent = `${fmtTime(c.time)}`;
         document.getElementById("lw-hover-data").textContent = signal
-          ? `${signal.type} score ${signal.score} | Stop ${fmt(signal.suggestedStop,2)} | Alvos ${fmt(signal.suggestedTarget1,2)} / ${fmt(signal.suggestedTarget2,2)}`
+          ? `${signal.type} score ${signal.score} | ${signal.regionLabel || "---"} | ${signal.pattern || "---"}`
           : `O ${fmt(c.open,2)} H ${fmt(c.high,2)} L ${fmt(c.low,2)} C ${fmt(c.close,2)} | Vol ${fmt(c.volume,2)} | Dist VWAP ${Number.isFinite(dist) ? dist.toFixed(2) : "---"}%`;
       }
       function setupCrosshair() {
