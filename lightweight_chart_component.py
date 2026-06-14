@@ -296,6 +296,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           <div class="lw-stat"><span>Volume</span><strong id="lw-volume">---</strong><small id="lw-rvol">RVOL ---</small></div>
           <div class="lw-stat"><span>Weis Wave</span><strong id="lw-weis-wave">---</strong><small id="lw-weis-extra">---</small></div>
           <div class="lw-stat"><span>Volume Profile</span><strong id="lw-vp-poc">POC ---</strong><small id="lw-vp-value-area">VAH --- | VAL ---</small></div>
+          <div class="lw-stat"><span>GARCH(1,1)</span><strong id="lw-garch-zone">---</strong><small id="lw-garch-extra">---</small></div>
           <div class="lw-stat"><span>HV 252</span><strong id="lw-hv252">HV252 ---</strong><small id="lw-hv30">---</small><small id="lw-hv-levels" style="display:none;">---</small></div>
           <div class="lw-stat"><span>Sinal / Candle</span><strong id="lw-hover-title">Passe o mouse</strong><small id="lw-hover-data">OHLC, VWAP e sinal.</small></div>
           <div class="lw-settings" id="lw-ma-settings">
@@ -360,6 +361,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         reversal:{ minDistanceFromVWAPPercent:0.5, proximityPercent:0.15, requireVwapHvConfluence:true, minStdevMultiplier:1, hvProximityPercent:0.35 },
         trend:{ maxPullbackDistancePercent:0.15, maxVWAPDistancePercent:0.45, minBodyPercent:0.55, requireRsiPullback:true, rsiPeriod:14, rsiBuyMin:40, rsiBuyMax:55, rsiSellMin:45, rsiSellMax:60 },
         volume:{ enabled:true, lookback:20, minVolumeMultiplier:1.2, minRelativeVolume:1.2, strongRelativeVolume:1.5, blockLowVolumeSignals:true, requireBarVolumeAboveAverage:true, requireVolumeExpansion:true, legLookback:5, minLegRelativeVolume:1.1, requireReversalVolumeClimaxOrRejection:true, requireTrendVolumeResumption:true, blockFallingVolume:true, fallingVolumeLookback:3 },
+        garch:{ enabled:true, omega:0.000001, alpha:0.08, beta:0.90, referenceMode:"previousClose", minSigmaForSignal:1.5 },
         sessionFilter:{ enabled:false, blockedTimes:[] },
         weights:{
           favorableRegime:2,
@@ -387,7 +389,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       const defaultPrefs = {
         symbol:"BTCUSDT",
         timeframe:"1m",
-        toggles:{ ma:true, vwap:true, bandsDay:true, bandsWeek:false, bandsWeekVol:false, bands:false, stdevBands:false, volume:true, weisWave:true, volumeProfile:true, hv252:true, refs:true, signals:true },
+        toggles:{ ma:true, vwap:true, bandsDay:true, bandsWeek:false, bandsWeekVol:false, bands:false, stdevBands:false, volume:true, weisWave:true, garch:true, volumeProfile:true, hv252:true, refs:true, signals:true },
         maType:"SMA",
         ma:[
           { id:"ma9", period:9, enabled:true, color:"#22c55e" },
@@ -411,6 +413,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           reversal:{ ...defaultSignalConfig.reversal, ...((storedPrefs.signalConfig || {}).reversal || {}) },
           trend:{ ...defaultSignalConfig.trend, ...((storedPrefs.signalConfig || {}).trend || {}) },
           volume:{ ...defaultSignalConfig.volume, ...((storedPrefs.signalConfig || {}).volume || {}) },
+          garch:{ ...defaultSignalConfig.garch, ...((storedPrefs.signalConfig || {}).garch || {}) },
           weights:{ ...defaultSignalConfig.weights, ...((storedPrefs.signalConfig || {}).weights || {}) },
         },
       };
@@ -459,7 +462,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         actionBox.querySelectorAll("button").forEach((el) => el.remove());
         assets.forEach((asset) => assetBox.appendChild(button(asset.label, state.symbol === asset.symbol, () => loadSymbol(asset.symbol, state.timeframe))));
         timeframes.forEach((tf) => tfBox.appendChild(button(tf, state.timeframe === tf, () => loadSymbol(state.symbol, tf))));
-        [["ma","Medias"],["vwap","VWAP"],["bandsDay","Bandas D"],["bandsWeek","Bandas W %"],["bandsWeekVol","Bandas W Vol"],["stdevBands","Desvios"],["refs","Refs"],["signals","Sinais"],["volume","Volume"],["weisWave","Weis Vol"],["volumeProfile","Vol Profile"],["hv252","HV 252"]].forEach(([key,label]) => {
+        [["ma","Medias"],["vwap","VWAP"],["bandsDay","Bandas D"],["bandsWeek","Bandas W %"],["bandsWeekVol","Bandas W Vol"],["stdevBands","Desvios"],["refs","Refs"],["signals","Sinais"],["volume","Volume"],["weisWave","Weis Vol"],["garch","GARCH"],["volumeProfile","Vol Profile"],["hv252","HV 252"]].forEach(([key,label]) => {
           toggleBox.appendChild(button(label, state.toggles[key], () => { state.toggles[key] = !state.toggles[key]; savePrefs(); renderControls(); renderCharts(false); }, state.toggles[key] ? "toggle-on" : ""));
         });
         actionBox.appendChild(button("Reset Zoom", false, () => { state.chart?.timeScale().fitContent(); }));
@@ -527,6 +530,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           ["rvolStrong", "RVOL forte", 1, 8, 0.1, cfg.volume.strongRelativeVolume, (v) => { cfg.volume.strongRelativeVolume = v; }],
           ["legLook", "Pernada", 2, 20, 1, cfg.volume.legLookback, (v) => { cfg.volume.legLookback = v; }],
           ["legMin", "Leg RVOL", 0.5, 5, 0.05, cfg.volume.minLegRelativeVolume, (v) => { cfg.volume.minLegRelativeVolume = v; }],
+          ["garchSigma", "GARCH σ", 0.5, 3, 0.25, cfg.garch.minSigmaForSignal, (v) => { cfg.garch.minSigmaForSignal = v; }],
         ].forEach((item) => {
           const [, label, min, max, step, value, setter] = item;
           const row = document.createElement("div");
@@ -540,6 +544,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         });
         [
           ["volOn", "Filtro volume", cfg.volume.enabled, (v) => { cfg.volume.enabled = v; }],
+          ["garchOn", "Filtro GARCH", cfg.garch.enabled, (v) => { cfg.garch.enabled = v; }],
           ["revHv", "REV VWAP+HV", cfg.reversal.requireVwapHvConfluence, (v) => { cfg.reversal.requireVwapHvConfluence = v; }],
           ["volAbove", "Vol > media", cfg.volume.requireBarVolumeAboveAverage, (v) => { cfg.volume.requireBarVolumeAboveAverage = v; }],
           ["volExp", "Expansao volume", cfg.volume.requireVolumeExpansion, (v) => { cfg.volume.requireVolumeExpansion = v; }],
@@ -983,6 +988,79 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         });
         return levels;
       }
+      function annualizationFactorForTimeframe(tf) {
+        if (tf === "1d") return 252;
+        if (tf === "1w") return 52;
+        if (tf === "1month") return 12;
+        if (tf === "h1") return 252 * 6;
+        return 252 * 390;
+      }
+      function calculateGarch11Volatility(candles, options={}) {
+        const omega = Number(options.omega ?? 0.000001);
+        const alpha = Number(options.alpha ?? 0.08);
+        const beta = Number(options.beta ?? 0.90);
+        const annualizationFactor = Number(options.annualizationFactor ?? 252);
+        if (alpha + beta >= 1) return { ok:false, warning:"GARCH instavel: alpha + beta precisa ser menor que 1.", conditionalVariance:[], conditionalVolatility:[], latestVolatility:NaN, annualizedVolatility:NaN };
+        const closes = (candles || []).map((c) => c.close).filter((v) => Number.isFinite(v) && v > 0);
+        const returns = calculateLogReturns(closes);
+        if (returns.length < 30) return { ok:false, warning:"Historico insuficiente para GARCH.", conditionalVariance:[], conditionalVolatility:[], latestVolatility:NaN, annualizedVolatility:NaN };
+        const mean = returns.reduce((a,b) => a + b, 0) / returns.length;
+        const sampleVariance = returns.reduce((sum,r) => sum + Math.pow(r - mean, 2), 0) / Math.max(1, returns.length - 1);
+        const conditionalVariance = [Math.max(sampleVariance, omega)];
+        for (let i = 1; i < returns.length; i += 1) {
+          const prevReturn = returns[i - 1];
+          const prevVariance = conditionalVariance[i - 1];
+          conditionalVariance.push(Math.max(0, omega + alpha * prevReturn * prevReturn + beta * prevVariance));
+        }
+        const conditionalVolatility = conditionalVariance.map((v) => Math.sqrt(v));
+        const latestVolatility = conditionalVolatility[conditionalVolatility.length - 1];
+        return { ok:true, warning:"", conditionalVariance, conditionalVolatility, latestVolatility, annualizedVolatility:latestVolatility * Math.sqrt(annualizationFactor) };
+      }
+      function getGarchReferencePrice(candles, mode, externalData={}) {
+        const last = candles[candles.length - 1];
+        if (mode === "vwap" && Number.isFinite(externalData.vwap)) return externalData.vwap;
+        if (mode === "adjustment" && Number.isFinite(externalData.adjustment)) return externalData.adjustment;
+        if (mode === "previousClose" && Number.isFinite(externalData.previousClose)) return externalData.previousClose;
+        return Number.isFinite(last?.close) ? last.close : NaN;
+      }
+      function calculateGarchVolatilityZones(referencePrice, volatility, multipliers=[0,0.5,1,1.5,2,2.5,3]) {
+        if (!Number.isFinite(referencePrice) || !Number.isFinite(volatility) || volatility <= 0) return [];
+        const zones = [];
+        multipliers.forEach((m) => {
+          if (m === 0) zones.push({ level:referencePrice, label:"GARCH 0", multiplier:0, side:"center" });
+          else {
+            zones.push({ level:referencePrice * (1 + volatility * m), label:`GARCH +${m}σ`, multiplier:m, side:"upper" });
+            zones.push({ level:referencePrice * (1 - volatility * m), label:`GARCH -${m}σ`, multiplier:-m, side:"lower" });
+          }
+        });
+        return zones;
+      }
+      function classifyCurrentGarchZone(currentPrice, referencePrice, volatility) {
+        if (!Number.isFinite(currentPrice) || !Number.isFinite(referencePrice) || !Number.isFinite(volatility) || volatility <= 0) {
+          return { zone:"indisponivel", side:"center", sigmaDistance:NaN, message:"GARCH indisponivel." };
+        }
+        const sigmaDistance = (currentPrice - referencePrice) / (referencePrice * volatility);
+        const abs = Math.abs(sigmaDistance);
+        const side = sigmaDistance > 0 ? "upper" : sigmaDistance < 0 ? "lower" : "center";
+        if (abs < 0.5) return { zone:"neutral", side, sigmaDistance, message:"Zona neutra. Evitar reversao." };
+        if (abs < 1) return { zone:"moderate", side, sigmaDistance, message:"Afastamento moderado. Aguardar confirmacao." };
+        if (abs < 2) return { zone:"attention", side, sigmaDistance, message:"Zona operacional relevante." };
+        if (abs < 3) return { zone:"extreme", side, sigmaDistance, message:"Zona estatisticamente esticada." };
+        return { zone:"anomaly", side, sigmaDistance, message:"Movimento anormal. Exigir confirmacao forte." };
+      }
+      function calculateGarchOverlay(candles, refs, vwapDay) {
+        const cfg = state.signalConfig.garch || {};
+        const garch = calculateGarch11Volatility(candles, { ...cfg, annualizationFactor:annualizationFactorForTimeframe(state.timeframe) });
+        if (!garch.ok) return { ...garch, referencePrice:NaN, zones:[], classification:{ zone:"indisponivel", side:"center", sigmaDistance:NaN, message:garch.warning } };
+        const referencePrice = getGarchReferencePrice(candles, cfg.referenceMode || "previousClose", {
+          previousClose:refs?.prevClose,
+          vwap:vwapDay?.[vwapDay.length - 1]?.value,
+        });
+        const zones = calculateGarchVolatilityZones(referencePrice, garch.latestVolatility);
+        const current = candles[candles.length - 1]?.close;
+        const classification = classifyCurrentGarchZone(current, referencePrice, garch.latestVolatility);
+        return { ...garch, referencePrice, zones, classification };
+      }
       function horizontalSessionLine(candles, value) {
         if (!candles.length || !Number.isFinite(value)) return [];
         const lastDay = anchorKey(candles[candles.length - 1].time, "day");
@@ -1152,6 +1230,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           hvLower2:hvLevel(-2),
           hvUpper15:hvLevel(1.5),
           hvLower15:hvLevel(-1.5),
+          garchSigma:indicators.garch?.classification?.sigmaDistance,
           stdev1:stdevLevel(1),
           stdev2:stdevLevel(2),
           stdev3:stdevLevel(3),
@@ -1251,7 +1330,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const cfg = state.signalConfig;
         const w = cfg.weights;
         const ctx = signalContext(candles, indicators, i);
-        const { c, prev, vwap, ema9, ema21, ema80, prevClose, dayHigh, dayLow, hvUpper1, hvLower1, hvUpper2, hvLower2 } = ctx;
+        const { c, prev, vwap, ema9, ema21, ema80, prevClose, dayHigh, dayLow, hvUpper1, hvLower1, hvUpper2, hvLower2, garchSigma } = ctx;
         if (!prev || !Number.isFinite(vwap)) return null;
         const parts = { score:0, reasons:[], tags:[] };
         const dist = pctDistance(c.close, vwap);
@@ -1276,6 +1355,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         if (type === "REV_BUY") {
           const confluence = reversalConfluence(ctx, "buy", cfg);
           if (cfg.reversal.requireVwapHvConfluence && !confluence.ok) return null;
+          if (state.toggles.garch && cfg.garch?.enabled && (!Number.isFinite(garchSigma) || garchSigma > -(cfg.garch.minSigmaForSignal || 1.5))) return null;
           const rsi = reversalRsiConfirmation(ctx, "buy", cfg);
           const candleOk = isBullishRejectionCandle(c) || c.close > prev.high || (c.low < prev.low && c.close > prev.close);
           const volumeOk = vol.relativeOk && (vol.expansion || vol.legOk || vol.strong);
@@ -1285,6 +1365,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           addScore(parts, Number.isFinite(dist) && dist <= -cfg.reversal.minDistanceFromVWAPPercent, w.vwapDistance, `Distancia VWAP ${dist.toFixed(2)}%`);
           addScore(parts, confluence.vwapExtreme, w.extremeLocation || w.vwapDistance, `Extremo em desvio VWAP >= ${cfg.reversal.minStdevMultiplier}`);
           addScore(parts, confluence.hvExtreme, w.hvConfluence, "Confluencia com banda HV252 inferior");
+          addScore(parts, state.toggles.garch && Number.isFinite(garchSigma), w.extremeLocation || 2, `GARCH ${garchSigma.toFixed(2)}σ`);
           addScore(parts, rsi.ok, w.rsiConfirmation, rsi.reason);
           addScore(parts, nearLow, w.proximityToKeyLevel, "Proximo de minima/HV inferior");
           addScore(parts, candleOk, w.rejectionCandle, "Candle de rejeicao/falha inferior");
@@ -1298,6 +1379,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         if (type === "REV_SELL") {
           const confluence = reversalConfluence(ctx, "sell", cfg);
           if (cfg.reversal.requireVwapHvConfluence && !confluence.ok) return null;
+          if (state.toggles.garch && cfg.garch?.enabled && (!Number.isFinite(garchSigma) || garchSigma < (cfg.garch.minSigmaForSignal || 1.5))) return null;
           const rsi = reversalRsiConfirmation(ctx, "sell", cfg);
           const candleOk = isBearishRejectionCandle(c) || c.close < prev.low || (c.high > prev.high && c.close < prev.close);
           const volumeOk = vol.relativeOk && (vol.expansion || vol.legOk || vol.strong);
@@ -1307,6 +1389,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           addScore(parts, Number.isFinite(dist) && dist >= cfg.reversal.minDistanceFromVWAPPercent, w.vwapDistance, `Distancia VWAP +${dist.toFixed(2)}%`);
           addScore(parts, confluence.vwapExtreme, w.extremeLocation || w.vwapDistance, `Extremo em desvio VWAP >= ${cfg.reversal.minStdevMultiplier}`);
           addScore(parts, confluence.hvExtreme, w.hvConfluence, "Confluencia com banda HV252 superior");
+          addScore(parts, state.toggles.garch && Number.isFinite(garchSigma), w.extremeLocation || 2, `GARCH +${garchSigma.toFixed(2)}σ`);
           addScore(parts, rsi.ok, w.rsiConfirmation, rsi.reason);
           addScore(parts, nearHigh, w.proximityToKeyLevel, "Proximo de maxima/HV superior");
           addScore(parts, candleOk, w.rejectionCandle, "Candle de rejeicao/falha superior");
@@ -1405,8 +1488,9 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const refs = sessionRefs(candles);
         const volumeProfile = computeSessionVolumeProfile(candles);
         const weisWave = computeWeisWaveVolume(candles, 0.2);
+        const garch = calculateGarchOverlay(candles, refs, vwapDay);
         const hv252 = calculateHistoricalVolatility(state.dailyCandles, 252);
-        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, signalMAs, rsi14, stdevBands, weekVolBands, refs, volumeProfile, weisWave, hv252 };
+        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, signalMAs, rsi14, stdevBands, weekVolBands, refs, volumeProfile, weisWave, garch, hv252 };
         indicators.signals = generateSignals(candles, indicators);
         return indicators;
       }
@@ -1582,6 +1666,15 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
             addPriceLine(candleSeries, level.label, level.price, color, level.multiplier === 0 ? 0 : 2);
           });
         }
+        if (state.toggles.garch && state.indicators.garch?.ok) {
+          state.indicators.garch.zones.forEach((zone) => {
+            const abs = Math.abs(zone.multiplier);
+            const key = `garch_${String(zone.multiplier).replace("-", "m").replace(".", "_")}`;
+            const color = zone.side === "upper" ? "#ef4444" : zone.side === "lower" ? "#22c55e" : "#facc15";
+            addLine(key, horizontalSessionLine(state.candles, zone.level), color, abs >= 2 ? 2 : 1);
+            addPriceLine(candleSeries, zone.label, zone.level, color, zone.multiplier === 0 ? 0 : 2, abs >= 2 ? 2 : 1);
+          });
+        }
         if (fit) state.chart.timeScale().fitContent();
         setupCrosshair();
         updateStats();
@@ -1603,6 +1696,12 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const waveRatio = Number.isFinite(currWave.value) && Number.isFinite(prevWave.volume) && prevWave.volume > 0 ? currWave.value / prevWave.volume : NaN;
         document.getElementById("lw-weis-wave").textContent = currWave.direction > 0 ? "Alta" : currWave.direction < 0 ? "Baixa" : "---";
         document.getElementById("lw-weis-extra").textContent = `Vol ${fmt(currWave.value, 2)} | vs onda ${fmt(waveRatio, 2)}x`;
+        const garch = indicators.garch || {};
+        const gClass = garch.classification || {};
+        document.getElementById("lw-garch-zone").textContent = garch.ok ? `${Number.isFinite(gClass.sigmaDistance) ? gClass.sigmaDistance.toFixed(2) : "---"}σ | ${gClass.zone || "---"}` : (garch.warning || "GARCH indisponivel");
+        document.getElementById("lw-garch-extra").textContent = garch.ok
+          ? `Vol ${(garch.latestVolatility * 100).toFixed(2)}% | Anual ${(garch.annualizedVolatility * 100).toFixed(2)}% | Ref ${fmt(garch.referencePrice, 2)}`
+          : "Historico insuficiente ou parametro instavel";
         document.getElementById("lw-vp-poc").textContent = `POC ${fmt(indicators.volumeProfile?.poc?.mid, 2)}`;
         document.getElementById("lw-vp-value-area").textContent = `VAH ${fmt(indicators.volumeProfile?.vah?.high, 2)} | VAL ${fmt(indicators.volumeProfile?.val?.low, 2)}`;
         const hv = indicators.hv252 || {};
@@ -1744,6 +1843,12 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           state.indicators.hv252.levels.forEach((level) => {
             const key = `hv252_${String(level.multiplier).replace("-", "m").replace(".", "_")}`;
             state.series[key]?.setData(horizontalSessionLine(state.candles, level.price));
+          });
+        }
+        if (state.indicators.garch?.ok) {
+          state.indicators.garch.zones.forEach((zone) => {
+            const key = `garch_${String(zone.multiplier).replace("-", "m").replace(".", "_")}`;
+            state.series[key]?.setData(horizontalSessionLine(state.candles, zone.level));
           });
         }
         state.indicators.ma.forEach((m) => state.series[m.id]?.setData(m.data));
