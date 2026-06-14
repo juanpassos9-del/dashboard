@@ -386,7 +386,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       const defaultPrefs = {
         symbol:"BTCUSDT",
         timeframe:"1m",
-        toggles:{ ma:true, vwap:true, bands:true, stdevBands:false, volume:true, volumeProfile:true, hv252:true, refs:true, signals:true },
+        toggles:{ ma:true, vwap:true, bandsDay:true, bandsWeek:false, bands:false, stdevBands:false, volume:true, volumeProfile:true, hv252:true, refs:true, signals:true },
         maType:"SMA",
         ma:[
           { id:"ma9", period:9, enabled:true, color:"#22c55e" },
@@ -458,7 +458,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         actionBox.querySelectorAll("button").forEach((el) => el.remove());
         assets.forEach((asset) => assetBox.appendChild(button(asset.label, state.symbol === asset.symbol, () => loadSymbol(asset.symbol, state.timeframe))));
         timeframes.forEach((tf) => tfBox.appendChild(button(tf, state.timeframe === tf, () => loadSymbol(state.symbol, tf))));
-        [["ma","Medias"],["vwap","VWAP"],["bands","Bandas %"],["stdevBands","Desvios"],["refs","Refs"],["signals","Sinais"],["volume","Volume"],["volumeProfile","Vol Profile"],["hv252","HV 252"]].forEach(([key,label]) => {
+        [["ma","Medias"],["vwap","VWAP"],["bandsDay","Bandas D"],["bandsWeek","Bandas W"],["stdevBands","Desvios"],["refs","Refs"],["signals","Sinais"],["volume","Volume"],["volumeProfile","Vol Profile"],["hv252","HV 252"]].forEach(([key,label]) => {
           toggleBox.appendChild(button(label, state.toggles[key], () => { state.toggles[key] = !state.toggles[key]; savePrefs(); renderControls(); renderCharts(false); }, state.toggles[key] ? "toggle-on" : ""));
         });
         actionBox.appendChild(button("Reset Zoom", false, () => { state.chart?.timeScale().fitContent(); }));
@@ -1445,8 +1445,10 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           addLine("vwapWeek", state.indicators.vwapWeek, "#06d6a0", 1);
           addLine("vwapMonth", state.indicators.vwapMonth, "#118ab2", 1);
         }
-        if (state.toggles.bands) {
+        if (state.toggles.bandsDay || (state.toggles.bands && state.toggles.bandsDay !== false)) {
           addVWAPPercentBands("vwap", state.indicators.vwapDay, ["#38bdf8","#60a5fa","#818cf8","#a78bfa"], 1);
+        }
+        if (state.toggles.bandsWeek) {
           addVWAPPercentBands("vwapWeek", state.indicators.vwapWeek, ["#fbbf24","#f59e0b","#f97316","#ef4444"], 1);
         }
         if (state.toggles.stdevBands) {
