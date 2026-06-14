@@ -1446,9 +1446,8 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           addLine("vwapMonth", state.indicators.vwapMonth, "#118ab2", 1);
         }
         if (state.toggles.bands) {
-          addVWAPPercentBands("vwap", state.indicators.vwapDay, ["#38bdf8","#818cf8","#f472b6","#fb7185"], 1);
-          addVWAPPercentBands("vwapWeek", state.indicators.vwapWeek, ["#34d399","#10b981","#059669","#047857"], 1);
-          addVWAPPercentBands("vwapMonth", state.indicators.vwapMonth, ["#fbbf24","#f59e0b","#d97706","#b45309"], 1);
+          addVWAPPercentBands("vwap", state.indicators.vwapDay, ["#38bdf8","#60a5fa","#818cf8","#a78bfa"], 1);
+          addVWAPPercentBands("vwapWeek", state.indicators.vwapWeek, ["#fbbf24","#f59e0b","#f97316","#ef4444"], 1);
         }
         if (state.toggles.stdevBands) {
           const colors = ["#22c55e", "#f59e0b", "#a78bfa", "#ef4444"];
@@ -1622,7 +1621,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         if (state.series.vwapMonth) state.series.vwapMonth.setData(state.indicators.vwapMonth);
         updateVWAPPercentBands("vwap", state.indicators.vwapDay);
         updateVWAPPercentBands("vwapWeek", state.indicators.vwapWeek);
-        updateVWAPPercentBands("vwapMonth", state.indicators.vwapMonth);
         state.indicators.stdevBands.forEach((band) => {
           const key = String(band.multiplier).replace(".", "_");
           state.series[`stdev_${key}_u`]?.setData(band.data.map((p) => ({ time:p.time, value:p.upper })));
