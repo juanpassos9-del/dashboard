@@ -4147,88 +4147,101 @@ def sidebar_news():
 
 
 def sidebar_clock():
-    now_sp = datetime.now(ZoneInfo("America/Sao_Paulo"))
-    time_text = now_sp.strftime("%H:%M:%S")
-    date_text = now_sp.strftime("%d/%m/%Y")
-    weekday = {
-        0: "Segunda",
-        1: "Terca",
-        2: "Quarta",
-        3: "Quinta",
-        4: "Sexta",
-        5: "Sabado",
-        6: "Domingo",
-    }.get(now_sp.weekday(), "")
-    market_opens = [
-        ("09:00", "Abertura BR"),
-        ("10:00", "Abertura acoes BR"),
-        ("10:30", "Abertura NY"),
-    ]
-    events_html = []
-    next_event_idx = None
-    for idx, (event_time, _label) in enumerate(market_opens):
-        event_dt = datetime.combine(now_sp.date(), datetime.strptime(event_time, "%H:%M").time(), tzinfo=ZoneInfo("America/Sao_Paulo"))
-        if event_dt > now_sp and next_event_idx is None:
-            next_event_idx = idx
-    for idx, (event_time, label) in enumerate(market_opens):
-        event_dt = datetime.combine(now_sp.date(), datetime.strptime(event_time, "%H:%M").time(), tzinfo=ZoneInfo("America/Sao_Paulo"))
-        minutes_from_event = (now_sp - event_dt).total_seconds() / 60
-        if 0 <= minutes_from_event < 30:
-            status = "AGORA"
-            color = "#22C55E"
-            bg = "rgba(34,197,94,.12)"
-            border = "rgba(34,197,94,.50)"
-        elif idx == next_event_idx:
-            status = "PROX"
-            color = "#F59E0B"
-            bg = "rgba(245,158,11,.12)"
-            border = "rgba(245,158,11,.45)"
-        elif event_dt < now_sp:
-            status = "OK"
-            color = "#64748B"
-            bg = "rgba(15,23,42,.45)"
-            border = "rgba(51,65,85,.70)"
-        else:
-            status = "HOJE"
-            color = "#38BDF8"
-            bg = "rgba(56,189,248,.08)"
-            border = "rgba(56,189,248,.28)"
-        events_html.append(
-            f"""
-            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 7px; border:1px solid {border}; border-radius:6px; background:{bg}; margin-top:6px;">
-                <div style="min-width:0;">
-                    <span style="color:#F8FAFC; font-size:.76rem; font-weight:950; font-variant-numeric:tabular-nums;">{event_time}</span>
-                    <span style="color:#CBD5E1; font-size:.70rem; font-weight:800; margin-left:5px;">{label}</span>
-                </div>
-                <span style="color:{color}; font-size:.60rem; font-weight:950; letter-spacing:.04em;">{status}</span>
-            </div>
-            """
-        )
-    events_markup = "".join(events_html)
-    st.markdown(
-        f"""
-        <div style="
-            width:100%;
+    components.html(
+        """
+        <div class="clock-card">
+          <div class="clock-top">
+            <span>Horario Brasilia</span>
+            <i></i>
+          </div>
+          <div id="tts-clock-time" class="clock-time">--:--:--</div>
+          <div id="tts-clock-date" class="clock-date">--</div>
+          <div id="tts-clock-events" class="clock-events"></div>
+        </div>
+        <style>
+          html, body { margin:0; padding:0; background:transparent; overflow:hidden; font-family:Inter, "Segoe UI", Arial, sans-serif; }
+          .clock-card {
             box-sizing:border-box;
+            width:100%;
             border:1px solid rgba(51,65,85,.95);
             border-radius:8px;
             padding:12px 13px;
-            margin:10px 0 14px 0;
             background:linear-gradient(135deg, rgba(15,23,42,.98), rgba(2,8,23,.98));
             box-shadow:inset 0 1px 0 rgba(148,163,184,.10), 0 10px 24px rgba(0,0,0,.22);
-        ">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:7px;">
-                <span style="color:#94A3B8; font-size:.68rem; font-weight:900; letter-spacing:.08em; text-transform:uppercase;">Horario Brasilia</span>
-                <span style="width:8px; height:8px; border-radius:999px; background:#22C55E; box-shadow:0 0 12px rgba(34,197,94,.9); display:inline-block;"></span>
-            </div>
-            <div style="color:#F8FAFC; font-size:2.18rem; line-height:.98; font-weight:950; letter-spacing:.02em; font-variant-numeric:tabular-nums;">{time_text}</div>
-            <div style="color:#38BDF8; font-size:.78rem; font-weight:800; margin-top:7px;">{weekday} | {date_text}</div>
-            <div style="border-top:1px solid rgba(51,65,85,.80); margin-top:10px; padding-top:5px;">
-                {events_markup}
-            </div>
-        </div>
+          }
+          .clock-top { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:7px; }
+          .clock-top span { color:#94A3B8; font-size:.68rem; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
+          .clock-top i { width:8px; height:8px; border-radius:999px; background:#22C55E; box-shadow:0 0 12px rgba(34,197,94,.9); display:inline-block; }
+          .clock-time { color:#F8FAFC; font-size:2.28rem; line-height:.98; font-weight:950; letter-spacing:.02em; font-variant-numeric:tabular-nums; }
+          .clock-date { color:#38BDF8; font-size:.78rem; font-weight:800; margin-top:7px; }
+          .clock-events { border-top:1px solid rgba(51,65,85,.80); margin-top:10px; padding-top:5px; }
+          .clock-event { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 7px; border-radius:6px; margin-top:6px; border:1px solid rgba(51,65,85,.70); background:rgba(15,23,42,.45); }
+          .clock-event-main { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+          .clock-event-time { color:#F8FAFC; font-size:.76rem; font-weight:950; font-variant-numeric:tabular-nums; }
+          .clock-event-label { color:#CBD5E1; font-size:.70rem; font-weight:800; margin-left:5px; }
+          .clock-event-status { font-size:.60rem; font-weight:950; letter-spacing:.04em; }
+        </style>
+        <script>
+          const tz = "America/Sao_Paulo";
+          const sessions = [
+            { time: "09:00", label: "Abertura BR" },
+            { time: "10:00", label: "Abertura acoes BR" },
+            { time: "10:30", label: "Abertura NY" }
+          ];
+          const timeFmt = new Intl.DateTimeFormat("pt-BR", { timeZone: tz, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+          const dateFmt = new Intl.DateTimeFormat("pt-BR", { timeZone: tz, weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
+          function partsInSaoPaulo(date) {
+            const parts = new Intl.DateTimeFormat("en-CA", {
+              timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+              hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
+            }).formatToParts(date).reduce((acc, part) => {
+              acc[part.type] = part.value;
+              return acc;
+            }, {});
+            return {
+              y: Number(parts.year), m: Number(parts.month), d: Number(parts.day),
+              hour: Number(parts.hour), minute: Number(parts.minute), second: Number(parts.second)
+            };
+          }
+          function minutesNow(p) { return p.hour * 60 + p.minute + p.second / 60; }
+          function minutesOf(value) {
+            const [h, m] = value.split(":").map(Number);
+            return h * 60 + m;
+          }
+          function styleFor(status) {
+            if (status === "AGORA") return { color:"#22C55E", bg:"rgba(34,197,94,.12)", border:"rgba(34,197,94,.50)" };
+            if (status === "PROX") return { color:"#F59E0B", bg:"rgba(245,158,11,.12)", border:"rgba(245,158,11,.45)" };
+            if (status === "HOJE") return { color:"#38BDF8", bg:"rgba(56,189,248,.08)", border:"rgba(56,189,248,.28)" };
+            return { color:"#64748B", bg:"rgba(15,23,42,.45)", border:"rgba(51,65,85,.70)" };
+          }
+          function renderEvents(nowMin) {
+            let nextIndex = sessions.findIndex((item) => minutesOf(item.time) > nowMin);
+            return sessions.map((item, index) => {
+              const eventMin = minutesOf(item.time);
+              const diff = nowMin - eventMin;
+              let status = "HOJE";
+              if (diff >= 0 && diff < 30) status = "AGORA";
+              else if (diff >= 30) status = "OK";
+              else if (index === nextIndex) status = "PROX";
+              const st = styleFor(status);
+              return `<div class="clock-event" style="border-color:${st.border}; background:${st.bg};">
+                <div class="clock-event-main"><span class="clock-event-time">${item.time}</span><span class="clock-event-label">${item.label}</span></div>
+                <span class="clock-event-status" style="color:${st.color};">${status}</span>
+              </div>`;
+            }).join("");
+          }
+          function tickClock() {
+            const now = new Date();
+            const p = partsInSaoPaulo(now);
+            document.getElementById("tts-clock-time").textContent = timeFmt.format(now);
+            document.getElementById("tts-clock-date").textContent = dateFmt.format(now).replace(".", "");
+            document.getElementById("tts-clock-events").innerHTML = renderEvents(minutesNow(p));
+          }
+          tickClock();
+          setInterval(tickClock, 1000);
+        </script>
         """,
-        unsafe_allow_html=True,
+        height=226,
     )
 
 
