@@ -54,9 +54,6 @@ BCB_LIGHTWEIGHT_ASSETS = [
 FRED_LIGHTWEIGHT_ASSETS = [
     {"symbol": "FRED_DGS10", "label": "US10Y FRED", "series_id": "DGS10"},
     {"symbol": "FRED_DGS30", "label": "US30Y FRED", "series_id": "DGS30"},
-    {"symbol": "FRED_DFF", "label": "Fed Funds", "series_id": "DFF"},
-    {"symbol": "FRED_CPIAUCSL", "label": "CPI FRED", "series_id": "CPIAUCSL"},
-    {"symbol": "FRED_UNRATE", "label": "Unemp FRED", "series_id": "UNRATE"},
 ]
 
 
