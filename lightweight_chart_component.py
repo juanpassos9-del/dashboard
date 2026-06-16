@@ -1,6 +1,7 @@
 ﻿import json
 import os
 import time
+from datetime import datetime, timedelta
 
 import requests
 import streamlit as st
@@ -19,6 +20,38 @@ YAHOO_LIGHTWEIGHT_ASSETS = [
     {"symbol": "EEM", "label": "EEM", "ticker": "EEM"},
     {"symbol": "EWZ", "label": "EWZ", "ticker": "EWZ"},
     {"symbol": "IBOV", "label": "IBOV", "ticker": "^BVSP"},
+    {"symbol": "BOVA11", "label": "BOVA11", "ticker": "BOVA11.SA"},
+    {"symbol": "SMAL11", "label": "SMAL11", "ticker": "SMAL11.SA"},
+    {"symbol": "IVVB11", "label": "IVVB11", "ticker": "IVVB11.SA"},
+    {"symbol": "PETR4", "label": "PETR4", "ticker": "PETR4.SA"},
+    {"symbol": "PETR3", "label": "PETR3", "ticker": "PETR3.SA"},
+    {"symbol": "VALE3", "label": "VALE3", "ticker": "VALE3.SA"},
+    {"symbol": "ITUB4", "label": "ITUB4", "ticker": "ITUB4.SA"},
+    {"symbol": "BBDC4", "label": "BBDC4", "ticker": "BBDC4.SA"},
+    {"symbol": "BBAS3", "label": "BBAS3", "ticker": "BBAS3.SA"},
+    {"symbol": "B3SA3", "label": "B3SA3", "ticker": "B3SA3.SA"},
+    {"symbol": "WEGE3", "label": "WEGE3", "ticker": "WEGE3.SA"},
+    {"symbol": "ABEV3", "label": "ABEV3", "ticker": "ABEV3.SA"},
+    {"symbol": "MGLU3", "label": "MGLU3", "ticker": "MGLU3.SA"},
+    {"symbol": "RENT3", "label": "RENT3", "ticker": "RENT3.SA"},
+    {"symbol": "PRIO3", "label": "PRIO3", "ticker": "PRIO3.SA"},
+    {"symbol": "SUZB3", "label": "SUZB3", "ticker": "SUZB3.SA"},
+    {"symbol": "BPAC11", "label": "BPAC11", "ticker": "BPAC11.SA"},
+    {"symbol": "RADL3", "label": "RADL3", "ticker": "RADL3.SA"},
+    {"symbol": "LREN3", "label": "LREN3", "ticker": "LREN3.SA"},
+    {"symbol": "GGBR4", "label": "GGBR4", "ticker": "GGBR4.SA"},
+    {"symbol": "CSNA3", "label": "CSNA3", "ticker": "CSNA3.SA"},
+]
+
+BCB_LIGHTWEIGHT_ASSETS = [
+    {"symbol": "BCB_USDBRL", "label": "USD/BRL BCB", "series_id": 1},
+    {"symbol": "BCB_EURBRL", "label": "EUR/BRL BCB", "series_id": 21619},
+    {"symbol": "BCB_GBPBRL", "label": "GBP/BRL BCB", "series_id": 21623},
+    {"symbol": "BCB_JPYBRL", "label": "JPY/BRL BCB", "series_id": 21621},
+    {"symbol": "BCB_CHFBRL", "label": "CHF/BRL BCB", "series_id": 21625},
+    {"symbol": "BCB_SELIC", "label": "Selic BCB", "series_id": 11},
+    {"symbol": "BCB_CDI", "label": "CDI BCB", "series_id": 12},
+    {"symbol": "BCB_IPCA", "label": "IPCA BCB", "series_id": 433},
 ]
 
 FRED_LIGHTWEIGHT_ASSETS = [
@@ -218,6 +251,58 @@ def load_fred_lightweight_payload():
     return {"enabled": True, "assets": FRED_LIGHTWEIGHT_ASSETS, "series": payload, "error": "; ".join(errors) or None}
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def load_bcb_lightweight_payload():
+    payload = {}
+    errors = []
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=365 * 3)
+    date_params = {
+        "dataInicial": start_date.strftime("%d/%m/%Y"),
+        "dataFinal": end_date.strftime("%d/%m/%Y"),
+    }
+    for asset in BCB_LIGHTWEIGHT_ASSETS:
+        series_id = asset["series_id"]
+        try:
+            res = requests.get(
+                f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{series_id}/dados",
+                params={"formato": "json", **date_params},
+                timeout=12,
+            )
+            res.raise_for_status()
+            rows = res.json()
+            candles = []
+            previous = None
+            for item in rows[-750:]:
+                value = item.get("valor")
+                date_text = item.get("data")
+                if value in (None, "") or not date_text:
+                    continue
+                close = float(str(value).replace(",", "."))
+                open_ = previous if previous is not None else close
+                ts = int(time.mktime(time.strptime(date_text, "%d/%m/%Y")))
+                candles.append({
+                    "time": ts,
+                    "open": open_,
+                    "high": max(open_, close),
+                    "low": min(open_, close),
+                    "close": close,
+                    "volume": 0.0,
+                })
+                previous = close
+            if candles:
+                payload[asset["symbol"]] = {
+                    "label": asset["label"],
+                    "series_id": series_id,
+                    "daily": candles[-650:],
+                    "intraday": [],
+                    "sourceLabel": "BCB SGS",
+                }
+        except Exception as e:
+            errors.append(f"{series_id}: {e}")
+    return {"enabled": True, "assets": BCB_LIGHTWEIGHT_ASSETS, "series": payload, "error": "; ".join(errors) or None}
+
+
 def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_id="main"):
     signal_mode = signal_mode if signal_mode in {"all", "reversal"} else "reversal"
     instance_id = "".join(ch for ch in str(instance_id or "main") if ch.isalnum() or ch in ("_", "-")) or "main"
@@ -226,8 +311,10 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         "reversal": "Grafico operacional - Reversao",
     }[signal_mode]
     yahoo_payload = load_yahoo_lightweight_payload()
+    bcb_payload = load_bcb_lightweight_payload()
     fred_payload = load_fred_lightweight_payload()
     yahoo_json = json.dumps(yahoo_payload, ensure_ascii=False)
+    bcb_json = json.dumps(bcb_payload, ensure_ascii=False)
     fred_json = json.dumps(fred_payload, ensure_ascii=False)
     signal_mode_json = json.dumps(signal_mode)
     chart_title_json = json.dumps(chart_title, ensure_ascii=False)
@@ -312,6 +399,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
     (() => {
       const { createChart, CandlestickSeries, HistogramSeries, LineSeries } = LightweightCharts;
       const yahooPayload = __YAHOO_PAYLOAD__;
+      const bcbPayload = __BCB_PAYLOAD__;
       const fredPayload = __FRED_PAYLOAD__;
       const signalMode = __SIGNAL_MODE__;
       const chartTitle = __CHART_TITLE__;
@@ -333,7 +421,13 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         source: "fred",
         seriesId: asset.series_id,
       }));
-      const assets = [...binanceAssets, ...yahooAssets, ...fredAssets];
+      const bcbAssets = (bcbPayload.assets || []).map((asset) => ({
+        symbol: asset.symbol,
+        label: asset.label,
+        source: "bcb",
+        seriesId: asset.series_id,
+      }));
+      const assets = [...binanceAssets, ...yahooAssets, ...bcbAssets, ...fredAssets];
       const assetRegistry = Object.fromEntries(assets.map((asset) => [asset.symbol, asset]));
       const timeframes = ["30s", "1m", "5m", "h1", "1d", "1w", "1month"];
       const tfSeconds = { "30s": 30, "1m": 60, "5m": 300, "h1": 3600, "1d": 86400, "1w": 604800 };
@@ -419,8 +513,10 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       state.signalConfig.enabledSignals.TREND_SELL = false;
       if (!assetRegistry[state.symbol]) state.symbol = "BTCUSDT";
       if (assetRegistry[state.symbol]?.source === "fred" && !fredPayload.enabled) state.symbol = "BTCUSDT";
+      if (assetRegistry[state.symbol]?.source === "bcb" && !bcbPayload.enabled) state.symbol = "BTCUSDT";
       if (!timeframes.includes(state.timeframe)) state.timeframe = "1m";
       if (assetRegistry[state.symbol]?.source === "fred" && intradayTimeframes.includes(state.timeframe)) state.timeframe = "1d";
+      if (assetRegistry[state.symbol]?.source === "bcb" && intradayTimeframes.includes(state.timeframe)) state.timeframe = "1d";
       const chartEl = document.getElementById("lw-chart");
       const statusEl = document.getElementById("lw-status");
       const skeletonEl = document.getElementById("lw-skeleton");
@@ -618,6 +714,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       async function fetchHistorical(symbol, timeframe) {
         const asset = assetRegistry[symbol] || { source: "binance" };
         if (asset.source === "yahoo") return fetchYahooHistorical(symbol, timeframe);
+        if (asset.source === "bcb") return fetchBcbHistorical(symbol, timeframe);
         if (asset.source === "fred") return fetchFredHistorical(symbol, timeframe);
         if (binanceIntervals[timeframe]) {
           const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${binanceIntervals[timeframe]}&limit=600`);
@@ -640,6 +737,10 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           const series = (fredPayload.series && fredPayload.series[symbol]) || {};
           return Array.isArray(series.daily) ? series.daily : [];
         }
+        if (asset.source === "bcb") {
+          const series = (bcbPayload.series && bcbPayload.series[symbol]) || {};
+          return Array.isArray(series.daily) ? series.daily : [];
+        }
         const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1d&limit=300`);
         if (!res.ok) throw new Error(`Binance daily klines ${res.status}`);
         const rows = await res.json();
@@ -652,6 +753,18 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         if (!daily.length) throw new Error(`Sem dados FRED para ${symbol}`);
         if (["30s", "1m", "5m", "h1"].includes(timeframe)) {
           throw new Error("FRED entrega series macro diarias. Use 1d, 1w ou 1month.");
+        }
+        if (timeframe === "1w") return aggregateCalendarCandles(daily, "week");
+        if (timeframe === "1month") return aggregateCalendarCandles(daily, "month");
+        return daily;
+      }
+      function fetchBcbHistorical(symbol, timeframe) {
+        if (!bcbPayload.enabled) throw new Error(bcbPayload.error || "BCB SGS indisponivel.");
+        const series = (bcbPayload.series && bcbPayload.series[symbol]) || {};
+        const daily = series.daily || [];
+        if (!daily.length) throw new Error(`Sem dados BCB para ${symbol}`);
+        if (["30s", "1m", "5m", "h1"].includes(timeframe)) {
+          throw new Error("BCB entrega series diarias. Use 1d, 1w ou 1month.");
         }
         if (timeframe === "1w") return aggregateCalendarCandles(daily, "week");
         if (timeframe === "1month") return aggregateCalendarCandles(daily, "month");
@@ -1765,8 +1878,8 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const asset = assetRegistry[state.symbol] || { source: "binance" };
         if (asset.source !== "binance") {
           state.socket = null;
-          const loadedSeries = asset.source === "fred" ? fredPayload.series?.[state.symbol] : yahooPayload.series?.[state.symbol];
-          const sourceName = loadedSeries?.sourceLabel || (asset.source === "fred" ? "FRED" : "yfinance");
+          const loadedSeries = asset.source === "fred" ? fredPayload.series?.[state.symbol] : asset.source === "bcb" ? bcbPayload.series?.[state.symbol] : yahooPayload.series?.[state.symbol];
+          const sourceName = loadedSeries?.sourceLabel || (asset.source === "fred" ? "FRED" : asset.source === "bcb" ? "BCB SGS" : "yfinance");
           const code = asset.ticker || asset.seriesId || state.symbol;
           setStatus(`Dados ${sourceName} carregados: ${asset.label} (${code}). Sem WebSocket no browser; use Recarregar para atualizar.`);
           return;
@@ -1790,7 +1903,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       async function loadSymbol(symbol, timeframe) {
         const nextAsset = assetRegistry[symbol] || { source: "binance", label: symbol };
         state.symbol = symbol;
-        state.timeframe = nextAsset.source === "fred" && intradayTimeframes.includes(timeframe) ? "1d" : timeframe;
+        state.timeframe = ["fred", "bcb"].includes(nextAsset.source) && intradayTimeframes.includes(timeframe) ? "1d" : timeframe;
         renderControls();
         savePrefs();
         const asset = nextAsset;
@@ -1799,8 +1912,10 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           setStatus(`${asset.label}: yfinance nao possui 30s; usando candles de 1m.`);
         } else if (asset.source === "fred" && state.timeframe !== timeframe) {
           setStatus(`${asset.label}: FRED entrega serie diaria. Ajustei automaticamente para 1d.`);
+        } else if (asset.source === "bcb" && state.timeframe !== timeframe) {
+          setStatus(`${asset.label}: BCB entrega serie diaria. Ajustei automaticamente para 1d.`);
         } else {
-          const sourceName = asset.source === "yahoo" ? "yfinance" : asset.source === "fred" ? "FRED" : "Binance";
+          const sourceName = asset.source === "yahoo" ? "yfinance" : asset.source === "fred" ? "FRED" : asset.source === "bcb" ? "BCB SGS" : "Binance";
           setStatus(`Carregando historico ${sourceName}: ${asset.label || symbol} ${state.timeframe}...`);
         }
         try {
@@ -1834,6 +1949,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
     return (
         html
         .replace("__YAHOO_PAYLOAD__", yahoo_json)
+        .replace("__BCB_PAYLOAD__", bcb_json)
         .replace("__FRED_PAYLOAD__", fred_json)
         .replace("__SIGNAL_MODE__", signal_mode_json)
         .replace("__CHART_TITLE__", chart_title_json)
