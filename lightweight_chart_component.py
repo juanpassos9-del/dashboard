@@ -13,6 +13,7 @@ YAHOO_LIGHTWEIGHT_ASSETS = [
     {"symbol": "NASDAQ", "label": "NASDAQ", "ticker": "^IXIC"},
     {"symbol": "RUSSELL", "label": "RUSSELL", "ticker": "^RUT"},
     {"symbol": "DXY", "label": "DXY", "ticker": "DX-Y.NYB"},
+    {"symbol": "EURUSD", "label": "EURUSD", "ticker": "EURUSD=X"},
     {"symbol": "6L1", "label": "6L1", "ticker": "6L=F"},
     {"symbol": "BRENT", "label": "BRENT", "ticker": "BZ=F"},
     {"symbol": "WTI", "label": "WTI", "ticker": "CL=F"},
