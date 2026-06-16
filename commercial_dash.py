@@ -852,7 +852,6 @@ def secao_market_report_fragment():
         reports = daily_data.get("reports") or []
     if not reports and latest_report:
         reports = [latest_report]
-
     st.markdown("---")
     st.markdown("### Market Report")
     st.caption("Atualizacao automatica: 07:05, 13:05 e 19:05 (Sao Paulo). Os reports ficam registrados ate virar o dia.")
@@ -4147,6 +4146,43 @@ def sidebar_news():
         st.caption(warning)
 
 
+def sidebar_clock():
+    now_sp = datetime.now(ZoneInfo("America/Sao_Paulo"))
+    time_text = now_sp.strftime("%H:%M:%S")
+    date_text = now_sp.strftime("%d/%m/%Y")
+    weekday = {
+        0: "Segunda",
+        1: "Terca",
+        2: "Quarta",
+        3: "Quinta",
+        4: "Sexta",
+        5: "Sabado",
+        6: "Domingo",
+    }.get(now_sp.weekday(), "")
+    st.markdown(
+        f"""
+        <div style="
+            width:100%;
+            box-sizing:border-box;
+            border:1px solid rgba(51,65,85,.95);
+            border-radius:8px;
+            padding:12px 13px;
+            margin:10px 0 14px 0;
+            background:linear-gradient(135deg, rgba(15,23,42,.98), rgba(2,8,23,.98));
+            box-shadow:inset 0 1px 0 rgba(148,163,184,.10), 0 10px 24px rgba(0,0,0,.22);
+        ">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:7px;">
+                <span style="color:#94A3B8; font-size:.68rem; font-weight:900; letter-spacing:.08em; text-transform:uppercase;">Horario Brasilia</span>
+                <span style="width:8px; height:8px; border-radius:999px; background:#22C55E; box-shadow:0 0 12px rgba(34,197,94,.9); display:inline-block;"></span>
+            </div>
+            <div style="color:#F8FAFC; font-size:1.72rem; line-height:1; font-weight:950; letter-spacing:.02em; font-variant-numeric:tabular-nums;">{time_text}</div>
+            <div style="color:#38BDF8; font-size:.78rem; font-weight:800; margin-top:7px;">{weekday} | {date_text}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 with st.sidebar:
     logo_path = os.path.join(os.path.dirname(__file__), "assets", "trading_strategy_logo.png")
     if os.path.exists(logo_path):
@@ -4154,6 +4190,7 @@ with st.sidebar:
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
     st.markdown("### 🧭 Navegação")
     page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📺 Terminal Bloomberg", "📰 Market Report", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
+    sidebar_clock()
     
     st.markdown("---")
     
