@@ -49,9 +49,6 @@ BCB_LIGHTWEIGHT_ASSETS = [
     {"symbol": "BCB_GBPBRL", "label": "GBP/BRL BCB", "series_id": 21623},
     {"symbol": "BCB_JPYBRL", "label": "JPY/BRL BCB", "series_id": 21621},
     {"symbol": "BCB_CHFBRL", "label": "CHF/BRL BCB", "series_id": 21625},
-    {"symbol": "BCB_SELIC", "label": "Selic BCB", "series_id": 11},
-    {"symbol": "BCB_CDI", "label": "CDI BCB", "series_id": 12},
-    {"symbol": "BCB_IPCA", "label": "IPCA BCB", "series_id": 433},
 ]
 
 FRED_LIGHTWEIGHT_ASSETS = [
