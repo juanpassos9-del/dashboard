@@ -4159,6 +4159,52 @@ def sidebar_clock():
         5: "Sabado",
         6: "Domingo",
     }.get(now_sp.weekday(), "")
+    market_opens = [
+        ("09:00", "Abertura BR"),
+        ("10:00", "Abertura acoes BR"),
+        ("10:30", "Abertura NY"),
+    ]
+    events_html = []
+    next_event_idx = None
+    for idx, (event_time, _label) in enumerate(market_opens):
+        event_dt = datetime.combine(now_sp.date(), datetime.strptime(event_time, "%H:%M").time(), tzinfo=ZoneInfo("America/Sao_Paulo"))
+        if event_dt > now_sp and next_event_idx is None:
+            next_event_idx = idx
+    for idx, (event_time, label) in enumerate(market_opens):
+        event_dt = datetime.combine(now_sp.date(), datetime.strptime(event_time, "%H:%M").time(), tzinfo=ZoneInfo("America/Sao_Paulo"))
+        minutes_from_event = (now_sp - event_dt).total_seconds() / 60
+        if 0 <= minutes_from_event < 30:
+            status = "AGORA"
+            color = "#22C55E"
+            bg = "rgba(34,197,94,.12)"
+            border = "rgba(34,197,94,.50)"
+        elif idx == next_event_idx:
+            status = "PROX"
+            color = "#F59E0B"
+            bg = "rgba(245,158,11,.12)"
+            border = "rgba(245,158,11,.45)"
+        elif event_dt < now_sp:
+            status = "OK"
+            color = "#64748B"
+            bg = "rgba(15,23,42,.45)"
+            border = "rgba(51,65,85,.70)"
+        else:
+            status = "HOJE"
+            color = "#38BDF8"
+            bg = "rgba(56,189,248,.08)"
+            border = "rgba(56,189,248,.28)"
+        events_html.append(
+            f"""
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 7px; border:1px solid {border}; border-radius:6px; background:{bg}; margin-top:6px;">
+                <div style="min-width:0;">
+                    <span style="color:#F8FAFC; font-size:.76rem; font-weight:950; font-variant-numeric:tabular-nums;">{event_time}</span>
+                    <span style="color:#CBD5E1; font-size:.70rem; font-weight:800; margin-left:5px;">{label}</span>
+                </div>
+                <span style="color:{color}; font-size:.60rem; font-weight:950; letter-spacing:.04em;">{status}</span>
+            </div>
+            """
+        )
+    events_markup = "".join(events_html)
     st.markdown(
         f"""
         <div style="
@@ -4175,8 +4221,11 @@ def sidebar_clock():
                 <span style="color:#94A3B8; font-size:.68rem; font-weight:900; letter-spacing:.08em; text-transform:uppercase;">Horario Brasilia</span>
                 <span style="width:8px; height:8px; border-radius:999px; background:#22C55E; box-shadow:0 0 12px rgba(34,197,94,.9); display:inline-block;"></span>
             </div>
-            <div style="color:#F8FAFC; font-size:1.72rem; line-height:1; font-weight:950; letter-spacing:.02em; font-variant-numeric:tabular-nums;">{time_text}</div>
+            <div style="color:#F8FAFC; font-size:2.18rem; line-height:.98; font-weight:950; letter-spacing:.02em; font-variant-numeric:tabular-nums;">{time_text}</div>
             <div style="color:#38BDF8; font-size:.78rem; font-weight:800; margin-top:7px;">{weekday} | {date_text}</div>
+            <div style="border-top:1px solid rgba(51,65,85,.80); margin-top:10px; padding-top:5px;">
+                {events_markup}
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
