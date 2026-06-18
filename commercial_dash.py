@@ -106,6 +106,36 @@ def count_registered_auth_users():
     return None
 
 
+def _auth_user_matches_email(user, email: str) -> bool:
+    return _auth_user_email(user).strip().lower() == email.strip().lower()
+
+
+def find_auth_user_by_email(email: str):
+    if not supabase or not email:
+        return None
+    try:
+        users = supabase.auth.admin.list_users(page=1, per_page=1000)
+        for user in users or []:
+            if _auth_user_matches_email(user, email):
+                return user
+    except Exception:
+        return None
+    return None
+
+
+def confirm_auth_user_email(email: str):
+    user = find_auth_user_by_email(email)
+    user_id = _auth_user_id(user)
+    if not user_id:
+        return False, "Nao consegui localizar esse email no Supabase Auth para confirmar."
+    try:
+        response = supabase.auth.admin.update_user_by_id(user_id, {"email_confirm": True})
+        confirmed_user = getattr(response, "user", None) or user
+        return True, confirmed_user
+    except Exception as e:
+        return False, f"Nao consegui confirmar o email automaticamente: {e}"
+
+
 def count_registered_users():
     profile_count = count_registered_profiles()
     if profile_count is not None:
@@ -175,6 +205,25 @@ def auth_sign_in(email: str, password: str):
         st.session_state["auth_role"] = (profile or {}).get("role") or _auth_user_role(user) or "member"
         return profile_warning, None
     except Exception as e:
+        error_text = str(e)
+        if "email not confirmed" in error_text.lower():
+            confirmed, result = confirm_auth_user_email(email)
+            if confirmed:
+                try:
+                    response = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                    user = getattr(response, "user", None)
+                    session = getattr(response, "session", None)
+                    if not user:
+                        return None, "Email confirmado, mas login nao retornou usuario. Tente novamente."
+                    st.session_state["auth_user"] = user
+                    st.session_state["auth_session"] = session
+                    profile_warning = upsert_auth_profile(user)
+                    profile = get_existing_profile(_auth_user_id(user))
+                    st.session_state["auth_role"] = (profile or {}).get("role") or _auth_user_role(user) or "member"
+                    return profile_warning, None
+                except Exception as retry_error:
+                    return None, f"Email confirmado, mas o login ainda falhou: {retry_error}"
+            return None, result
         return None, f"Falha no login: {e}"
 
 
@@ -186,11 +235,27 @@ def auth_sign_up(email: str, password: str, phone: str):
         return None, "Limite de 1000 usuarios atingido."
     role = resolve_new_user_role(total_users)
     try:
-        response = supabase.auth.sign_up({
-            "email": email,
-            "password": password,
-            "options": {"data": {"phone": phone, "celular": phone, "role": role}},
-        })
+        try:
+            response = supabase.auth.admin.create_user({
+                "email": email,
+                "password": password,
+                "email_confirm": True,
+                "user_metadata": {"phone": phone, "celular": phone, "role": role},
+            })
+            user = getattr(response, "user", None)
+            if user:
+                upsert_auth_profile(user, phone, role)
+            return auth_sign_in(email, password)
+        except Exception as admin_error:
+            if "already" in str(admin_error).lower() or "registered" in str(admin_error).lower() or "exists" in str(admin_error).lower():
+                confirmed, result = confirm_auth_user_email(email)
+                if confirmed:
+                    return auth_sign_in(email, password)
+            response = supabase.auth.sign_up({
+                "email": email,
+                "password": password,
+                "options": {"data": {"phone": phone, "celular": phone, "role": role}},
+            })
         user = getattr(response, "user", None)
         session = getattr(response, "session", None)
         if not user:
