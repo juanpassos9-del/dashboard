@@ -599,7 +599,7 @@ def render_auth_screen():
                     if warning:
                         st.warning(warning)
                     st.session_state["auth_loading_message"] = "Carregando dashboard..."
-                    st.session_state["auth_loading_until"] = time.time() + 1.2
+                    st.session_state["auth_loading_until"] = time.time() + 8.0
                     _auth_rerun()
     with tab_signup:
         with st.form("auth_signup_form"):
@@ -623,7 +623,7 @@ def render_auth_screen():
                     st.info(message)
                 else:
                     st.session_state["auth_loading_message"] = "Carregando dashboard..."
-                    st.session_state["auth_loading_until"] = time.time() + 1.2
+                    st.session_state["auth_loading_until"] = time.time() + 8.0
                     _auth_rerun()
     st.markdown("</div></div>", unsafe_allow_html=True)
     st.stop()
@@ -635,17 +635,28 @@ def require_authenticated_user():
         if "auth_role" not in st.session_state:
             profile = get_existing_profile(_auth_user_id(user))
             st.session_state["auth_role"] = (profile or {}).get("role") or _auth_user_role(user) or "member"
-        loading_message = st.session_state.get("auth_loading_message", "")
-        loading_until = float(st.session_state.get("auth_loading_until", 0) or 0)
-        if loading_message and time.time() <= loading_until:
-            placeholder = st.empty()
-            with placeholder:
-                render_auth_top_loading(loading_message)
-        else:
-            st.session_state.pop("auth_loading_message", None)
-            st.session_state.pop("auth_loading_until", None)
         return user
     render_auth_screen()
+
+
+def start_post_auth_loading():
+    loading_message = st.session_state.get("auth_loading_message", "")
+    loading_until = float(st.session_state.get("auth_loading_until", 0) or 0)
+    if not loading_message or time.time() > loading_until:
+        st.session_state.pop("auth_loading_message", None)
+        st.session_state.pop("auth_loading_until", None)
+        return None
+    placeholder = st.empty()
+    with placeholder:
+        render_auth_top_loading(loading_message)
+    return placeholder
+
+
+def stop_post_auth_loading(placeholder):
+    if placeholder is not None:
+        placeholder.empty()
+    st.session_state.pop("auth_loading_message", None)
+    st.session_state.pop("auth_loading_until", None)
 
 
 def fetch_app_state(key: str):
@@ -4879,6 +4890,7 @@ def sidebar_clock():
 auth_user = require_authenticated_user()
 auth_role = st.session_state.get("auth_role", "member")
 auth_role_label = "Administrador" if auth_role == "admin" else "Membro"
+post_auth_loading_placeholder = start_post_auth_loading()
 
 
 with st.sidebar:
@@ -4936,6 +4948,8 @@ elif page == "🛡️ Gestão de Risco":
     pagina_gestao_risco()
 elif page == "⚙️ Painel de Controle":
     pagina_painel_controle()
+
+stop_post_auth_loading(post_auth_loading_placeholder)
 
 
 
