@@ -64,6 +64,13 @@ def _auth_user_phone(user) -> str:
     return metadata.get("phone", "") or metadata.get("celular", "") or ""
 
 
+def _auth_user_role(user) -> str:
+    if not user:
+        return ""
+    metadata = user.get("user_metadata", {}) if isinstance(user, dict) else getattr(user, "user_metadata", {}) or {}
+    return metadata.get("role", "") or ""
+
+
 def count_registered_profiles():
     if not supabase:
         return None
@@ -74,7 +81,55 @@ def count_registered_profiles():
         return None
 
 
-def upsert_auth_profile(user, phone: str = ""):
+def count_admin_profiles():
+    if not supabase:
+        return None
+    try:
+        response = supabase.table("profiles").select("id", count="exact").eq("role", "admin").limit(1).execute()
+        return getattr(response, "count", None)
+    except Exception:
+        return None
+
+
+def count_registered_auth_users():
+    if not supabase:
+        return None
+    try:
+        response = supabase.auth.admin.list_users()
+        users = getattr(response, "users", None)
+        if users is not None:
+            return len(users)
+        if isinstance(response, list):
+            return len(response)
+    except Exception:
+        return None
+    return None
+
+
+def count_registered_users():
+    profile_count = count_registered_profiles()
+    if profile_count is not None:
+        return profile_count
+    return count_registered_auth_users()
+
+
+def get_existing_profile(user_id: str):
+    if not supabase or not user_id:
+        return None
+    try:
+        response = supabase.table("profiles").select("role").eq("user_id", user_id).limit(1).execute()
+        if response.data:
+            return response.data[0]
+    except Exception:
+        return None
+    return None
+
+
+def resolve_new_user_role(total_profiles):
+    return "admin" if total_profiles == 0 else "member"
+
+
+def upsert_auth_profile(user, phone: str = "", role: str = ""):
     if not supabase or not user:
         return None
     user_id = _auth_user_id(user)
@@ -82,10 +137,18 @@ def upsert_auth_profile(user, phone: str = ""):
     if not user_id or not email:
         return None
     try:
+        existing_profile = get_existing_profile(user_id)
+        existing_role = (existing_profile or {}).get("role")
+        admin_count = count_admin_profiles()
+        if admin_count == 0 and existing_role != "admin":
+            resolved_role = "admin"
+        else:
+            resolved_role = existing_role or role or _auth_user_role(user) or "member"
         payload = {
             "user_id": user_id,
             "email": email,
             "phone": phone or _auth_user_phone(user),
+            "role": resolved_role,
             "is_active": True,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -107,6 +170,9 @@ def auth_sign_in(email: str, password: str):
         st.session_state["auth_user"] = user
         st.session_state["auth_session"] = session
         profile_warning = upsert_auth_profile(user)
+        user_id = _auth_user_id(user)
+        profile = get_existing_profile(user_id)
+        st.session_state["auth_role"] = (profile or {}).get("role") or _auth_user_role(user) or "member"
         return profile_warning, None
     except Exception as e:
         return None, f"Falha no login: {e}"
@@ -115,14 +181,15 @@ def auth_sign_in(email: str, password: str):
 def auth_sign_up(email: str, password: str, phone: str):
     if not supabase:
         return None, "Conexao Supabase indisponivel."
-    total_profiles = count_registered_profiles()
-    if total_profiles is not None and total_profiles >= MAX_AUTH_USERS:
+    total_users = count_registered_users()
+    if total_users is not None and total_users >= MAX_AUTH_USERS:
         return None, "Limite de 1000 usuarios atingido."
+    role = resolve_new_user_role(total_users)
     try:
         response = supabase.auth.sign_up({
             "email": email,
             "password": password,
-            "options": {"data": {"phone": phone, "celular": phone}},
+            "options": {"data": {"phone": phone, "celular": phone, "role": role}},
         })
         user = getattr(response, "user", None)
         session = getattr(response, "session", None)
@@ -130,7 +197,8 @@ def auth_sign_up(email: str, password: str, phone: str):
             return None, "Cadastro nao retornou usuario. Verifique os dados."
         st.session_state["auth_user"] = user
         st.session_state["auth_session"] = session
-        profile_warning = upsert_auth_profile(user, phone)
+        profile_warning = upsert_auth_profile(user, phone, role)
+        st.session_state["auth_role"] = role
         if session:
             return profile_warning, None
         return profile_warning, "Cadastro criado. Se a confirmacao por email estiver ativa no Supabase, confirme o email antes de entrar."
@@ -236,6 +304,9 @@ def render_auth_screen():
 def require_authenticated_user():
     user = st.session_state.get("auth_user")
     if user:
+        if "auth_role" not in st.session_state:
+            profile = get_existing_profile(_auth_user_id(user))
+            st.session_state["auth_role"] = (profile or {}).get("role") or _auth_user_role(user) or "member"
         return user
     render_auth_screen()
 
@@ -4455,6 +4526,8 @@ def sidebar_clock():
     )
 
 auth_user = require_authenticated_user()
+auth_role = st.session_state.get("auth_role", "member")
+auth_role_label = "Administrador" if auth_role == "admin" else "Membro"
 
 
 with st.sidebar:
@@ -4464,10 +4537,11 @@ with st.sidebar:
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
     st.markdown(
         f"""
-        <div style="border:1px solid #263244; border-radius:8px; padding:10px 11px; background:#0B1220; margin-bottom:12px;">
-            <div style="color:#94A3B8; font-size:.68rem; font-weight:900; letter-spacing:.06em; text-transform:uppercase;">Usuario</div>
-            <div style="color:#F8FAFC; font-size:.78rem; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{html.escape(_auth_user_email(auth_user))}</div>
-        </div>
+            <div style="border:1px solid #263244; border-radius:8px; padding:10px 11px; background:#0B1220; margin-bottom:12px;">
+                <div style="color:#94A3B8; font-size:.68rem; font-weight:900; letter-spacing:.06em; text-transform:uppercase;">Usuario</div>
+                <div style="color:#F8FAFC; font-size:.78rem; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{html.escape(_auth_user_email(auth_user))}</div>
+                <div style="color:#38BDF8; font-size:.70rem; font-weight:900; margin-top:4px;">{html.escape(auth_role_label)}</div>
+            </div>
         """,
         unsafe_allow_html=True,
     )
@@ -4479,6 +4553,7 @@ with st.sidebar:
             pass
         st.session_state.pop("auth_user", None)
         st.session_state.pop("auth_session", None)
+        st.session_state.pop("auth_role", None)
         _auth_rerun()
     st.markdown("### 🧭 Navegação")
     page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📺 Terminal Bloomberg", "📰 Market Report", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
