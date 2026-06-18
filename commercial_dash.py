@@ -2,6 +2,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 import os
+import base64
 import html
 import pandas as pd
 from datetime import datetime, timedelta, timezone
@@ -274,41 +275,105 @@ def auth_sign_up(email: str, password: str, phone: str):
         return None, f"Falha no cadastro: {e}"
 
 
+@st.cache_data(show_spinner=False)
+def load_asset_data_uri(path: str) -> str:
+    try:
+        if not os.path.exists(path):
+            return ""
+        ext = os.path.splitext(path)[1].lower().lstrip(".") or "png"
+        mime = "jpeg" if ext in {"jpg", "jpeg"} else ext
+        with open(path, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode("ascii")
+        return f"data:image/{mime};base64,{encoded}"
+    except Exception:
+        return ""
+
+
 def render_auth_screen():
+    logo_path = os.path.join(os.path.dirname(__file__), "assets", "trading_strategy_logo_login.png")
+    logo_data_uri = load_asset_data_uri(logo_path)
+    logo_html = (
+        f'<img class="tts-auth-logo" src="{logo_data_uri}" alt="Trading Strategy">'
+        if logo_data_uri else
+        '<div class="tts-auth-logo-fallback">TTS</div>'
+    )
     st.markdown(
-        """
+        f"""
         <style>
           [data-testid="stSidebar"] { display:none; }
+          .stApp {{
+            background:
+              radial-gradient(circle at 50% 18%, rgba(148,163,184,.12), transparent 28rem),
+              linear-gradient(135deg, #151522 0%, #080b13 58%, #05070d 100%);
+          }}
           .tts-auth-wrap {
-            min-height: 78vh;
+            min-height: 82vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 28px 0;
+            padding: 34px 0;
           }
           .tts-auth-card {
-            width: min(520px, 100%);
-            border: 1px solid #1f2937;
-            border-radius: 10px;
-            background: linear-gradient(135deg, #0f172a 0%, #050914 100%);
-            box-shadow: 0 24px 60px rgba(0,0,0,.34), inset 0 1px 0 rgba(148,163,184,.08);
-            padding: 28px;
+            width: min(560px, 100%);
+            border: 1px solid rgba(148,163,184,.18);
+            border-radius: 14px;
+            background:
+              linear-gradient(180deg, rgba(31,31,45,.96) 0%, rgba(10,14,25,.98) 100%);
+            box-shadow: 0 30px 80px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.07);
+            padding: 30px;
+          }
+          .tts-auth-logo-box {
+            display:flex;
+            justify-content:center;
+            align-items:center;
+            margin:0 auto 20px;
+            width:178px;
+            height:178px;
+            border:1px solid rgba(183,186,183,.22);
+            border-radius:999px;
+            background:#1b1b29;
+            box-shadow:
+              0 20px 50px rgba(0,0,0,.32),
+              inset 0 1px 0 rgba(255,255,255,.06);
+            overflow:hidden;
+          }
+          .tts-auth-logo {
+            width:100%;
+            height:100%;
+            object-fit:cover;
+            display:block;
+          }
+          .tts-auth-logo-fallback {
+            width:112px;
+            height:112px;
+            border-radius:999px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            border:2px solid #b7bab7;
+            color:#b7bab7;
+            font-size:1.6rem;
+            font-weight:950;
           }
           .tts-auth-brand {
             color:#f8fafc;
-            font-size:1.5rem;
+            font-size:1.65rem;
             font-weight:950;
             letter-spacing:.02em;
             margin-bottom:4px;
+            text-align:center;
           }
           .tts-auth-sub {
             color:#94a3b8;
             font-size:.9rem;
             font-weight:700;
             margin-bottom:20px;
+            text-align:center;
           }
           .tts-auth-pill {
-            display:inline-flex;
+            display:flex;
+            width:max-content;
+            margin:0 auto 14px;
             color:#38bdf8;
             background:rgba(56,189,248,.09);
             border:1px solid rgba(56,189,248,.22);
@@ -318,14 +383,31 @@ def render_auth_screen():
             font-weight:900;
             letter-spacing:.05em;
             text-transform:uppercase;
-            margin-bottom:14px;
+          }
+          div[data-testid="stForm"] {
+            border:1px solid rgba(148,163,184,.14);
+            background:rgba(2,6,23,.24);
+            border-radius:10px;
+            padding:14px;
+          }
+          .stTabs [data-baseweb="tab-list"] { gap:8px; justify-content:center; }
+          .stTabs [data-baseweb="tab"] {
+            border-radius:8px;
+            padding:8px 16px;
+            color:#CBD5E1;
+            font-weight:900;
+          }
+          .stButton > button, .stFormSubmitButton > button {
+            border-radius:8px;
+            font-weight:950;
           }
         </style>
         <div class="tts-auth-wrap">
           <div class="tts-auth-card">
+            <div class="tts-auth-logo-box">{logo_html}</div>
             <div class="tts-auth-pill">Acesso restrito</div>
             <div class="tts-auth-brand">Terminal TTS</div>
-            <div class="tts-auth-sub">Entre ou crie sua conta para acessar o dashboard.</div>
+            <div class="tts-auth-sub">Trading Strategy | Mercado como voce nunca viu</div>
         """,
         unsafe_allow_html=True,
     )
