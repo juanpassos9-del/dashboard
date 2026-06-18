@@ -4,6 +4,7 @@ import streamlit.components.v1 as components
 import os
 import base64
 import html
+import time
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -537,6 +538,7 @@ def render_auth_screen():
                     if warning:
                         st.warning(warning)
                     st.session_state["auth_loading_message"] = "Acesso liberado. Carregando dashboard..."
+                    st.session_state["auth_loading_until"] = time.time() + 2.5
                     _auth_rerun()
     with tab_signup:
         with st.form("auth_signup_form"):
@@ -560,6 +562,7 @@ def render_auth_screen():
                     st.info(message)
                 else:
                     st.session_state["auth_loading_message"] = "Conta criada. Carregando dashboard..."
+                    st.session_state["auth_loading_until"] = time.time() + 2.5
                     _auth_rerun()
     st.markdown("</div></div>", unsafe_allow_html=True)
     st.stop()
@@ -571,10 +574,15 @@ def require_authenticated_user():
         if "auth_role" not in st.session_state:
             profile = get_existing_profile(_auth_user_id(user))
             st.session_state["auth_role"] = (profile or {}).get("role") or _auth_user_role(user) or "member"
-        loading_message = st.session_state.pop("auth_loading_message", "")
-        if loading_message:
-            with st.empty():
+        loading_message = st.session_state.get("auth_loading_message", "")
+        loading_until = float(st.session_state.get("auth_loading_until", 0) or 0)
+        if loading_message and time.time() <= loading_until:
+            placeholder = st.empty()
+            with placeholder:
                 render_auth_loading(loading_message, "Organizando graficos, noticias e dados de mercado.")
+        else:
+            st.session_state.pop("auth_loading_message", None)
+            st.session_state.pop("auth_loading_until", None)
         return user
     render_auth_screen()
 
@@ -4837,6 +4845,7 @@ with st.sidebar:
         st.session_state.pop("auth_session", None)
         st.session_state.pop("auth_role", None)
         st.session_state.pop("auth_loading_message", None)
+        st.session_state.pop("auth_loading_until", None)
         _auth_rerun()
     st.markdown("### 🧭 Navegação")
     page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📺 Terminal Bloomberg", "📰 Market Report", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
