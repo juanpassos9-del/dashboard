@@ -30,6 +30,216 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
+
+MAX_AUTH_USERS = 1000
+
+
+def _auth_rerun():
+    try:
+        st.rerun()
+    except Exception:
+        st.experimental_rerun()
+
+
+def _auth_user_email(user) -> str:
+    if not user:
+        return ""
+    if isinstance(user, dict):
+        return user.get("email", "") or ""
+    return getattr(user, "email", "") or ""
+
+
+def _auth_user_id(user) -> str:
+    if not user:
+        return ""
+    if isinstance(user, dict):
+        return user.get("id", "") or ""
+    return getattr(user, "id", "") or ""
+
+
+def _auth_user_phone(user) -> str:
+    if not user:
+        return ""
+    metadata = user.get("user_metadata", {}) if isinstance(user, dict) else getattr(user, "user_metadata", {}) or {}
+    return metadata.get("phone", "") or metadata.get("celular", "") or ""
+
+
+def count_registered_profiles():
+    if not supabase:
+        return None
+    try:
+        response = supabase.table("profiles").select("id", count="exact").limit(1).execute()
+        return getattr(response, "count", None)
+    except Exception:
+        return None
+
+
+def upsert_auth_profile(user, phone: str = ""):
+    if not supabase or not user:
+        return None
+    user_id = _auth_user_id(user)
+    email = _auth_user_email(user)
+    if not user_id or not email:
+        return None
+    try:
+        payload = {
+            "user_id": user_id,
+            "email": email,
+            "phone": phone or _auth_user_phone(user),
+            "is_active": True,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        response = supabase.table("profiles").upsert(payload, on_conflict="user_id").execute()
+        return response
+    except Exception as e:
+        return f"Tabela profiles indisponivel: {e}"
+
+
+def auth_sign_in(email: str, password: str):
+    if not supabase:
+        return None, "Conexao Supabase indisponivel."
+    try:
+        response = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        user = getattr(response, "user", None)
+        session = getattr(response, "session", None)
+        if not user:
+            return None, "Login nao retornou usuario. Verifique email/senha."
+        st.session_state["auth_user"] = user
+        st.session_state["auth_session"] = session
+        profile_warning = upsert_auth_profile(user)
+        return profile_warning, None
+    except Exception as e:
+        return None, f"Falha no login: {e}"
+
+
+def auth_sign_up(email: str, password: str, phone: str):
+    if not supabase:
+        return None, "Conexao Supabase indisponivel."
+    total_profiles = count_registered_profiles()
+    if total_profiles is not None and total_profiles >= MAX_AUTH_USERS:
+        return None, "Limite de 1000 usuarios atingido."
+    try:
+        response = supabase.auth.sign_up({
+            "email": email,
+            "password": password,
+            "options": {"data": {"phone": phone, "celular": phone}},
+        })
+        user = getattr(response, "user", None)
+        session = getattr(response, "session", None)
+        if not user:
+            return None, "Cadastro nao retornou usuario. Verifique os dados."
+        st.session_state["auth_user"] = user
+        st.session_state["auth_session"] = session
+        profile_warning = upsert_auth_profile(user, phone)
+        if session:
+            return profile_warning, None
+        return profile_warning, "Cadastro criado. Se a confirmacao por email estiver ativa no Supabase, confirme o email antes de entrar."
+    except Exception as e:
+        return None, f"Falha no cadastro: {e}"
+
+
+def render_auth_screen():
+    st.markdown(
+        """
+        <style>
+          [data-testid="stSidebar"] { display:none; }
+          .tts-auth-wrap {
+            min-height: 78vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 28px 0;
+          }
+          .tts-auth-card {
+            width: min(520px, 100%);
+            border: 1px solid #1f2937;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #0f172a 0%, #050914 100%);
+            box-shadow: 0 24px 60px rgba(0,0,0,.34), inset 0 1px 0 rgba(148,163,184,.08);
+            padding: 28px;
+          }
+          .tts-auth-brand {
+            color:#f8fafc;
+            font-size:1.5rem;
+            font-weight:950;
+            letter-spacing:.02em;
+            margin-bottom:4px;
+          }
+          .tts-auth-sub {
+            color:#94a3b8;
+            font-size:.9rem;
+            font-weight:700;
+            margin-bottom:20px;
+          }
+          .tts-auth-pill {
+            display:inline-flex;
+            color:#38bdf8;
+            background:rgba(56,189,248,.09);
+            border:1px solid rgba(56,189,248,.22);
+            border-radius:999px;
+            padding:5px 9px;
+            font-size:.72rem;
+            font-weight:900;
+            letter-spacing:.05em;
+            text-transform:uppercase;
+            margin-bottom:14px;
+          }
+        </style>
+        <div class="tts-auth-wrap">
+          <div class="tts-auth-card">
+            <div class="tts-auth-pill">Acesso restrito</div>
+            <div class="tts-auth-brand">Terminal TTS</div>
+            <div class="tts-auth-sub">Entre ou crie sua conta para acessar o dashboard.</div>
+        """,
+        unsafe_allow_html=True,
+    )
+    tab_login, tab_signup = st.tabs(["Entrar", "Criar conta"])
+    with tab_login:
+        with st.form("auth_login_form"):
+            email = st.text_input("Email", key="auth_login_email").strip().lower()
+            password = st.text_input("Senha", type="password", key="auth_login_password")
+            submitted = st.form_submit_button("Entrar", use_container_width=True)
+        if submitted:
+            if not email or not password:
+                st.error("Informe email e senha.")
+            else:
+                warning, error = auth_sign_in(email, password)
+                if error:
+                    st.error(error)
+                else:
+                    if warning:
+                        st.warning(warning)
+                    _auth_rerun()
+    with tab_signup:
+        with st.form("auth_signup_form"):
+            email = st.text_input("Email", key="auth_signup_email").strip().lower()
+            phone = st.text_input("Celular", key="auth_signup_phone").strip()
+            password = st.text_input("Senha", type="password", key="auth_signup_password")
+            submitted = st.form_submit_button("Criar conta", use_container_width=True)
+        if submitted:
+            if not email or not phone or not password:
+                st.error("Informe email, celular e senha.")
+            elif len(password) < 6:
+                st.error("Use uma senha com pelo menos 6 caracteres.")
+            else:
+                warning, message = auth_sign_up(email, password, phone)
+                if warning:
+                    st.warning(warning)
+                if message:
+                    st.info(message)
+                else:
+                    _auth_rerun()
+    st.markdown("</div></div>", unsafe_allow_html=True)
+    st.stop()
+
+
+def require_authenticated_user():
+    user = st.session_state.get("auth_user")
+    if user:
+        return user
+    render_auth_screen()
+
+
 def fetch_app_state(key: str):
     """Busca dados no Supabase com tratamento de erro e redundância."""
     if not supabase: return None
@@ -4244,12 +4454,32 @@ def sidebar_clock():
         height=226,
     )
 
+auth_user = require_authenticated_user()
+
 
 with st.sidebar:
     logo_path = os.path.join(os.path.dirname(__file__), "assets", "trading_strategy_logo.png")
     if os.path.exists(logo_path):
         st.image(logo_path, use_container_width=True)
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div style="border:1px solid #263244; border-radius:8px; padding:10px 11px; background:#0B1220; margin-bottom:12px;">
+            <div style="color:#94A3B8; font-size:.68rem; font-weight:900; letter-spacing:.06em; text-transform:uppercase;">Usuario</div>
+            <div style="color:#F8FAFC; font-size:.78rem; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{html.escape(_auth_user_email(auth_user))}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if st.button("Sair", use_container_width=True, key="auth_logout_btn"):
+        try:
+            if supabase:
+                supabase.auth.sign_out()
+        except Exception:
+            pass
+        st.session_state.pop("auth_user", None)
+        st.session_state.pop("auth_session", None)
+        _auth_rerun()
     st.markdown("### 🧭 Navegação")
     page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📺 Terminal Bloomberg", "📰 Market Report", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
     sidebar_clock()
