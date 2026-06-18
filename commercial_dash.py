@@ -298,14 +298,14 @@ def render_auth_screen():
         '<div class="tts-auth-logo-fallback">TTS</div>'
     )
     st.markdown(
-        f"""
+        """
         <style>
           [data-testid="stSidebar"] { display:none; }
-          .stApp {{
+          .stApp {
             background:
               radial-gradient(circle at 50% 18%, rgba(148,163,184,.12), transparent 28rem),
               linear-gradient(135deg, #151522 0%, #080b13 58%, #05070d 100%);
-          }}
+          }
           .tts-auth-wrap {
             min-height: 82vh;
             display: flex;
@@ -404,11 +404,11 @@ def render_auth_screen():
         </style>
         <div class="tts-auth-wrap">
           <div class="tts-auth-card">
-            <div class="tts-auth-logo-box">{logo_html}</div>
+            <div class="tts-auth-logo-box">__LOGO_HTML__</div>
             <div class="tts-auth-pill">Acesso restrito</div>
             <div class="tts-auth-brand">Terminal TTS</div>
             <div class="tts-auth-sub">Trading Strategy | Mercado como voce nunca viu</div>
-        """,
+        """.replace("__LOGO_HTML__", logo_html),
         unsafe_allow_html=True,
     )
     tab_login, tab_signup = st.tabs(["Entrar", "Criar conta"])
