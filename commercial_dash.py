@@ -396,6 +396,67 @@ def render_auth_loading(message: str = "Validando acesso...", submessage: str = 
     )
 
 
+def render_auth_top_loading(message: str = "Carregando dashboard..."):
+    st.markdown(
+        """
+        <style>
+          .tts-top-loading {
+            margin: 0 0 8px;
+            border: 1px solid rgba(56,189,248,.16);
+            border-radius: 8px;
+            background: rgba(15,23,42,.72);
+            padding: 8px 10px;
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            color: #CBD5E1;
+            font-size: .76rem;
+            font-weight: 850;
+          }
+          .tts-top-loading-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: #22C55E;
+            box-shadow: 0 0 10px rgba(34,197,94,.75);
+            flex: 0 0 auto;
+            animation: tts-top-pulse 1s ease-in-out infinite;
+          }
+          .tts-top-loading-bar {
+            width: 80px;
+            height: 3px;
+            border-radius: 999px;
+            overflow: hidden;
+            background: rgba(148,163,184,.16);
+            margin-left: auto;
+          }
+          .tts-top-loading-bar span {
+            display: block;
+            width: 45%;
+            height: 100%;
+            border-radius: 999px;
+            background: #38BDF8;
+            animation: tts-top-slide 1s ease-in-out infinite;
+          }
+          @keyframes tts-top-pulse {
+            0%, 100% { opacity: .45; transform: scale(.9); }
+            50% { opacity: 1; transform: scale(1.08); }
+          }
+          @keyframes tts-top-slide {
+            0% { transform: translateX(-110%); }
+            100% { transform: translateX(230%); }
+          }
+        </style>
+        <div class="tts-top-loading">
+          <span class="tts-top-loading-dot"></span>
+          <span>__MESSAGE__</span>
+          <span class="tts-top-loading-bar"><span></span></span>
+        </div>
+        """.replace("__MESSAGE__", html.escape(message)),
+        unsafe_allow_html=True,
+    )
+
+
 def render_auth_screen():
     logo_path = os.path.join(os.path.dirname(__file__), "assets", "trading_strategy_logo_login.png")
     logo_data_uri = load_asset_data_uri(logo_path)
@@ -537,8 +598,8 @@ def render_auth_screen():
                 else:
                     if warning:
                         st.warning(warning)
-                    st.session_state["auth_loading_message"] = "Acesso liberado. Carregando dashboard..."
-                    st.session_state["auth_loading_until"] = time.time() + 2.5
+                    st.session_state["auth_loading_message"] = "Carregando dashboard..."
+                    st.session_state["auth_loading_until"] = time.time() + 1.2
                     _auth_rerun()
     with tab_signup:
         with st.form("auth_signup_form"):
@@ -561,8 +622,8 @@ def render_auth_screen():
                     st.session_state.pop("auth_loading_message", None)
                     st.info(message)
                 else:
-                    st.session_state["auth_loading_message"] = "Conta criada. Carregando dashboard..."
-                    st.session_state["auth_loading_until"] = time.time() + 2.5
+                    st.session_state["auth_loading_message"] = "Carregando dashboard..."
+                    st.session_state["auth_loading_until"] = time.time() + 1.2
                     _auth_rerun()
     st.markdown("</div></div>", unsafe_allow_html=True)
     st.stop()
@@ -579,7 +640,7 @@ def require_authenticated_user():
         if loading_message and time.time() <= loading_until:
             placeholder = st.empty()
             with placeholder:
-                render_auth_loading(loading_message, "Organizando graficos, noticias e dados de mercado.")
+                render_auth_top_loading(loading_message)
         else:
             st.session_state.pop("auth_loading_message", None)
             st.session_state.pop("auth_loading_until", None)
