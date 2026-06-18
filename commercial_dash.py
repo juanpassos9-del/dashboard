@@ -114,7 +114,10 @@ def find_auth_user_by_email(email: str):
     if not supabase or not email:
         return None
     try:
-        users = supabase.auth.admin.list_users(page=1, per_page=1000)
+        response = supabase.auth.admin.list_users(page=1, per_page=1000)
+        users = getattr(response, "users", None)
+        if users is None:
+            users = response if isinstance(response, list) else []
         for user in users or []:
             if _auth_user_matches_email(user, email):
                 return user
@@ -515,6 +518,8 @@ def render_bloomberg_news_feed_fragment():
         st.session_state.bb_translate_news_fast = False
     if "bb_translation_cache" not in st.session_state:
         st.session_state.bb_translation_cache = {}
+    if "bb_news_history" not in st.session_state:
+        st.session_state.bb_news_history = []
 
     def esc(value) -> str:
         return html.escape(str(value or ""), quote=True)
@@ -641,6 +646,11 @@ def render_bloomberg_news_feed_fragment():
     ).strip()
 
     news_list, news_sources, news_warnings, feed_loaded_at = load_bloomberg_news_feed(0)
+    if news_list:
+        st.session_state.bb_news_history = news_list[:10]
+    elif st.session_state.bb_news_history:
+        news_list = st.session_state.bb_news_history
+        news_warnings = ["Fonte ao vivo carregando; exibindo historico da sessao."]
     for warning in news_warnings[:2]:
         st.warning(warning)
     if news_list:
@@ -4360,6 +4370,8 @@ def sidebar_news():
         st.session_state.sidebar_news_zoom = 1.0
     if "bb_translation_cache" not in st.session_state:
         st.session_state.bb_translation_cache = {}
+    if "sidebar_news_history" not in st.session_state:
+        st.session_state.sidebar_news_history = []
 
     refresh_col, translate_col, zoom_out_col, zoom_in_col = st.columns([1.35, 1.35, 0.55, 0.55])
     with refresh_col:
@@ -4380,6 +4392,11 @@ def sidebar_news():
     news_list, news_sources, news_warnings, feed_loaded_at = load_bloomberg_news_feed(
         st.session_state.sidebar_news_refresh_nonce
     )
+    if news_list:
+        st.session_state.sidebar_news_history = news_list[:10]
+    elif st.session_state.sidebar_news_history:
+        news_list = st.session_state.sidebar_news_history
+        news_warnings = ["Fonte ao vivo carregando; exibindo historico da sessao."]
     if not news_list:
         st.info("Carregando noticias...")
         return

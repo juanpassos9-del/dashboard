@@ -57,6 +57,9 @@ FRED_LIGHTWEIGHT_ASSETS = [
     {"symbol": "FRED_DGS30", "label": "US30Y FRED", "series_id": "DGS30"},
 ]
 
+LIGHTWEIGHT_CACHE_DIR = os.path.join(os.path.dirname(__file__), ".tmp")
+YAHOO_PAYLOAD_CACHE = os.path.join(LIGHTWEIGHT_CACHE_DIR, "lightweight_yahoo_payload.json")
+
 
 def _clean_secret(value) -> str:
     return str(value or "").strip().strip('"').strip("'")
@@ -104,8 +107,31 @@ def _rows_to_candles(rows, limit=650):
     return candles
 
 
+def _read_json_cache(path: str, max_age_seconds: int):
+    try:
+        if not os.path.exists(path):
+            return None
+        age = time.time() - os.path.getmtime(path)
+        if age > max_age_seconds:
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _write_json_cache(path: str, payload):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
 @st.cache_data(ttl=60, show_spinner=False)
 def load_yahoo_lightweight_payload():
+    cached_payload = _read_json_cache(YAHOO_PAYLOAD_CACHE, max_age_seconds=900)
     tickers = [asset["ticker"] for asset in YAHOO_LIGHTWEIGHT_ASSETS]
     payload = {}
     errors = []
@@ -118,7 +144,7 @@ def load_yahoo_lightweight_payload():
             group_by="ticker",
             progress=False,
             threads=False,
-            timeout=20,
+            timeout=12,
         )
     except Exception as e:
         intraday_data = None
@@ -133,13 +159,17 @@ def load_yahoo_lightweight_payload():
             group_by="ticker",
             progress=False,
             threads=False,
-            timeout=20,
+            timeout=12,
         )
     except Exception as e:
         daily_data = None
         errors.append(f"daily: {e}")
 
     if (intraday_data is None or intraday_data.empty) and (daily_data is None or daily_data.empty):
+        if cached_payload:
+            cached_payload["stale"] = True
+            cached_payload["error"] = "; ".join(errors) or "Yahoo Finance retornou vazio; usando cache local."
+            return cached_payload
         return {
             "assets": YAHOO_LIGHTWEIGHT_ASSETS,
             "series": {},
@@ -184,7 +214,14 @@ def load_yahoo_lightweight_payload():
                 }
         except Exception:
             continue
-    return {"assets": YAHOO_LIGHTWEIGHT_ASSETS, "series": payload, "error": "; ".join(errors) or None}
+    result = {"assets": YAHOO_LIGHTWEIGHT_ASSETS, "series": payload, "error": "; ".join(errors) or None}
+    if payload:
+        _write_json_cache(YAHOO_PAYLOAD_CACHE, result)
+    elif cached_payload:
+        cached_payload["stale"] = True
+        cached_payload["error"] = "; ".join(errors) or "Yahoo Finance retornou vazio; usando cache local."
+        return cached_payload
+    return result
 
 
 @st.cache_data(ttl=900, show_spinner=False)
