@@ -289,6 +289,112 @@ def load_asset_data_uri(path: str) -> str:
         return ""
 
 
+def render_auth_loading(message: str = "Validando acesso...", submessage: str = "Carregando Terminal Global"):
+    logo_path = os.path.join(os.path.dirname(__file__), "assets", "trading_strategy_logo_login.png")
+    logo_data_uri = load_asset_data_uri(logo_path)
+    logo_html = (
+        f'<img class="tts-loading-logo" src="{logo_data_uri}" alt="Trading Strategy">'
+        if logo_data_uri else
+        '<div class="tts-loading-logo-fallback">TTS</div>'
+    )
+    st.markdown(
+        """
+        <style>
+          .tts-loading-box {
+            margin: 14px 0 4px;
+            border: 1px solid rgba(56,189,248,.24);
+            border-radius: 12px;
+            background: linear-gradient(135deg, rgba(15,23,42,.96), rgba(2,8,23,.96));
+            padding: 16px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 12px 28px rgba(0,0,0,.24);
+          }
+          .tts-loading-mark {
+            width: 58px;
+            height: 58px;
+            border-radius: 999px;
+            overflow: hidden;
+            border: 1px solid rgba(183,186,183,.25);
+            background: #1b1b29;
+            position: relative;
+            flex: 0 0 auto;
+          }
+          .tts-loading-mark::after {
+            content: "";
+            position: absolute;
+            inset: -2px;
+            border-radius: 999px;
+            border: 2px solid transparent;
+            border-top-color: #38BDF8;
+            border-right-color: rgba(56,189,248,.38);
+            animation: tts-spin .9s linear infinite;
+          }
+          .tts-loading-logo {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+          }
+          .tts-loading-logo-fallback {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #CBD5E1;
+            font-weight: 950;
+          }
+          .tts-loading-title {
+            color: #F8FAFC;
+            font-size: .92rem;
+            font-weight: 950;
+          }
+          .tts-loading-sub {
+            color: #94A3B8;
+            font-size: .76rem;
+            font-weight: 750;
+            margin-top: 3px;
+          }
+          .tts-loading-bar {
+            margin-top: 9px;
+            width: 100%;
+            height: 4px;
+            border-radius: 999px;
+            overflow: hidden;
+            background: rgba(148,163,184,.16);
+          }
+          .tts-loading-bar span {
+            display: block;
+            height: 100%;
+            width: 42%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #38BDF8, #22C55E);
+            animation: tts-slide 1.2s ease-in-out infinite;
+          }
+          @keyframes tts-spin { to { transform: rotate(360deg); } }
+          @keyframes tts-slide {
+            0% { transform: translateX(-115%); }
+            55% { transform: translateX(95%); }
+            100% { transform: translateX(245%); }
+          }
+        </style>
+        <div class="tts-loading-box">
+          <div class="tts-loading-mark">__LOGO_HTML__</div>
+          <div style="min-width:0; flex:1;">
+            <div class="tts-loading-title">__MESSAGE__</div>
+            <div class="tts-loading-sub">__SUBMESSAGE__</div>
+            <div class="tts-loading-bar"><span></span></div>
+          </div>
+        </div>
+        """.replace("__LOGO_HTML__", logo_html)
+        .replace("__MESSAGE__", html.escape(message))
+        .replace("__SUBMESSAGE__", html.escape(submessage)),
+        unsafe_allow_html=True,
+    )
+
+
 def render_auth_screen():
     logo_path = os.path.join(os.path.dirname(__file__), "assets", "trading_strategy_logo_login.png")
     logo_data_uri = load_asset_data_uri(logo_path)
@@ -421,12 +527,16 @@ def render_auth_screen():
             if not email or not password:
                 st.error("Informe email e senha.")
             else:
-                warning, error = auth_sign_in(email, password)
+                render_auth_loading("Validando acesso...", "Conectando ao Supabase e preparando seu terminal.")
+                with st.spinner("Abrindo dashboard..."):
+                    warning, error = auth_sign_in(email, password)
                 if error:
+                    st.session_state.pop("auth_loading_message", None)
                     st.error(error)
                 else:
                     if warning:
                         st.warning(warning)
+                    st.session_state["auth_loading_message"] = "Acesso liberado. Carregando dashboard..."
                     _auth_rerun()
     with tab_signup:
         with st.form("auth_signup_form"):
@@ -440,12 +550,16 @@ def render_auth_screen():
             elif len(password) < 6:
                 st.error("Use uma senha com pelo menos 6 caracteres.")
             else:
-                warning, message = auth_sign_up(email, password, phone)
+                render_auth_loading("Criando acesso...", "Registrando usuario e preparando seu terminal.")
+                with st.spinner("Criando conta..."):
+                    warning, message = auth_sign_up(email, password, phone)
                 if warning:
                     st.warning(warning)
                 if message:
+                    st.session_state.pop("auth_loading_message", None)
                     st.info(message)
                 else:
+                    st.session_state["auth_loading_message"] = "Conta criada. Carregando dashboard..."
                     _auth_rerun()
     st.markdown("</div></div>", unsafe_allow_html=True)
     st.stop()
@@ -457,6 +571,10 @@ def require_authenticated_user():
         if "auth_role" not in st.session_state:
             profile = get_existing_profile(_auth_user_id(user))
             st.session_state["auth_role"] = (profile or {}).get("role") or _auth_user_role(user) or "member"
+        loading_message = st.session_state.pop("auth_loading_message", "")
+        if loading_message:
+            with st.empty():
+                render_auth_loading(loading_message, "Organizando graficos, noticias e dados de mercado.")
         return user
     render_auth_screen()
 
@@ -4718,6 +4836,7 @@ with st.sidebar:
         st.session_state.pop("auth_user", None)
         st.session_state.pop("auth_session", None)
         st.session_state.pop("auth_role", None)
+        st.session_state.pop("auth_loading_message", None)
         _auth_rerun()
     st.markdown("### 🧭 Navegação")
     page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📺 Terminal Bloomberg", "📰 Market Report", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
