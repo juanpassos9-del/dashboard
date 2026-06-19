@@ -670,6 +670,34 @@ def fetch_app_state(key: str):
         print(f"[ERROR] Fetch {key}: {e}")
     return None
 
+
+def has_supabase_service_role() -> bool:
+    try:
+        return bool(st.secrets.get("SUPABASE_SERVICE_ROLE", os.environ.get("SUPABASE_SERVICE_ROLE", "")))
+    except Exception:
+        return bool(os.environ.get("SUPABASE_SERVICE_ROLE", ""))
+
+
+def sync_app_state_value(key: str, value) -> tuple[bool, str]:
+    """Sincroniza app_state sem derrubar a UI quando o Supabase bloquear RLS."""
+    if not supabase:
+        return False, "Supabase indisponivel."
+    try:
+        supabase.table("app_state").upsert({
+            "key": key,
+            "value": value,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+        return True, ""
+    except Exception as e:
+        message = str(e)
+        if "row-level security" in message.lower() or "42501" in message:
+            if not has_supabase_service_role():
+                return False, "RLS bloqueou o salvamento online. Configure SUPABASE_SERVICE_ROLE no Streamlit Secrets ou aplique a policy de app_state."
+            return False, "RLS bloqueou o salvamento online mesmo com Supabase configurado. Verifique policies da tabela app_state."
+        return False, message
+
+
 @st.cache_data(ttl=2, show_spinner=False)
 def fetch_app_state_fast(key: str):
     """Cache curto para dados RTD usados por mais de um fragmento."""
@@ -1539,6 +1567,8 @@ def secao_market_report_fragment():
                     st.warning("Nao foi possivel gerar uma nova analise agora. O fallback local tambem falhou; verifique os logs do Streamlit e as fontes de dados.")
                 else:
                     st.session_state["market_report_last_generated"] = generated
+                    sync_warnings = []
+                    saved_online = False
                     if supabase:
                         for key, paths in {
                             "market_report": ["market_report.json", "execution/market_report.json"],
@@ -1547,18 +1577,30 @@ def secao_market_report_fragment():
                             for path in paths:
                                 if os.path.exists(path):
                                     with open(path, "r", encoding="utf-8") as f:
-                                        supabase.table("app_state").upsert({
-                                            "key": key,
-                                            "value": _json.load(f),
-                                            "updated_at": "now()",
-                                        }).execute()
+                                        ok, warning = sync_app_state_value(key, _json.load(f))
+                                        saved_online = saved_online or ok
+                                        if warning:
+                                            sync_warnings.append(f"{key}: {warning}")
                                     break
-                        st.success("Analise atualizada e salva.")
+                        fetch_app_state_cached.clear()
+                        fetch_app_state_fast.clear()
+                        if sync_warnings:
+                            st.session_state["market_report_sync_warning"] = "Analise gerada e exibida, mas nao foi possivel salvar tudo no historico online: " + " | ".join(sync_warnings[:2])
+                        elif saved_online:
+                            st.session_state["market_report_sync_success"] = "Analise atualizada e salva."
+                        else:
+                            st.session_state["market_report_sync_warning"] = "Analise gerada e exibida nesta sessao, mas nao foi salva no historico online."
                     else:
-                        st.warning("Analise gerada, mas Supabase esta indisponivel para salvar no historico online.")
+                        st.session_state["market_report_sync_warning"] = "Analise gerada, mas Supabase esta indisponivel para salvar no historico online."
                     st.rerun()
             except Exception as e:
                 st.error(f"Erro ao atualizar Market Report: {e}")
+
+    if st.session_state.pop("market_report_sync_success", ""):
+        st.success("Analise atualizada e salva.")
+    sync_warning = st.session_state.pop("market_report_sync_warning", "")
+    if sync_warning:
+        st.warning(sync_warning)
 
     if st.session_state.get("market_report_last_generated"):
         generated = st.session_state["market_report_last_generated"]
