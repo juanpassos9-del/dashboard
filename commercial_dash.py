@@ -34,6 +34,7 @@ supabase = init_supabase()
 
 
 MAX_AUTH_USERS = 1000
+AUTH_REQUIRED = False
 
 
 def _auth_rerun():
@@ -630,6 +631,10 @@ def render_auth_screen():
 
 
 def require_authenticated_user():
+    if not AUTH_REQUIRED:
+        st.session_state.pop("auth_loading_message", None)
+        st.session_state.pop("auth_loading_until", None)
+        return {"id": "public", "email": "acesso.publico@tts.local", "user_metadata": {"role": "public"}}
     user = st.session_state.get("auth_user")
     if user:
         if "auth_role" not in st.session_state:
@@ -4951,7 +4956,7 @@ def sidebar_clock():
 
 auth_user = require_authenticated_user()
 auth_role = st.session_state.get("auth_role", "member")
-auth_role_label = "Administrador" if auth_role == "admin" else "Membro"
+auth_role_label = "Acesso publico" if not AUTH_REQUIRED else ("Administrador" if auth_role == "admin" else "Membro")
 post_auth_loading_placeholder = start_post_auth_loading()
 
 
@@ -4963,14 +4968,14 @@ with st.sidebar:
     st.markdown(
         f"""
             <div style="border:1px solid #263244; border-radius:8px; padding:10px 11px; background:#0B1220; margin-bottom:12px;">
-                <div style="color:#94A3B8; font-size:.68rem; font-weight:900; letter-spacing:.06em; text-transform:uppercase;">Usuario</div>
-                <div style="color:#F8FAFC; font-size:.78rem; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{html.escape(_auth_user_email(auth_user))}</div>
+                <div style="color:#94A3B8; font-size:.68rem; font-weight:900; letter-spacing:.06em; text-transform:uppercase;">Acesso</div>
+                <div style="color:#F8FAFC; font-size:.78rem; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{"Dashboard liberado" if not AUTH_REQUIRED else html.escape(_auth_user_email(auth_user))}</div>
                 <div style="color:#38BDF8; font-size:.70rem; font-weight:900; margin-top:4px;">{html.escape(auth_role_label)}</div>
             </div>
         """,
         unsafe_allow_html=True,
     )
-    if st.button("Sair", use_container_width=True, key="auth_logout_btn"):
+    if AUTH_REQUIRED and st.button("Sair", use_container_width=True, key="auth_logout_btn"):
         try:
             if supabase:
                 supabase.auth.sign_out()
