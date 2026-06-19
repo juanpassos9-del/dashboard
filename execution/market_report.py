@@ -280,6 +280,119 @@ def _score_from_asset(item, positive_when_up=True):
     return 1 if change < 0 else -1
 
 
+def _asset_snapshot(global_data):
+    return {
+        "spx": _find_asset(global_data, "s&p 500", "sp 500", "^gspc", "spy", "usa500"),
+        "nasdaq": _find_asset(global_data, "nasdaq", "^ixic", "nas100", "usatec"),
+        "dow": _find_asset(global_data, "dow", "djia", "^dji"),
+        "russell": _find_asset(global_data, "russell", "rty", "iwm"),
+        "vix": _find_asset(global_data, "vix", "^vix", "vxx"),
+        "dxy": _find_asset(global_data, "dxy", "dolar index", "dollar index", "dx-y"),
+        "us10y": _find_asset(global_data, "us10y", "us 10y", "10 year", "^tnx"),
+        "us30y": _find_asset(global_data, "us30y", "us 30y", "30 year", "^tyx"),
+        "brent": _find_asset(global_data, "brent", "bz=f", "ukoil"),
+        "wti": _find_asset(global_data, "wti", "cl=f", "crude oil"),
+        "gold": _find_asset(global_data, "gold", "ouro", "xau", "gc=f"),
+        "ibov": _find_asset(global_data, "ibov", "bovespa", "^bvsp"),
+        "ewz": _find_asset(global_data, "ewz"),
+        "usbrl": _find_asset(global_data, "usdbrl", "brl=x", "usdb"),
+    }
+
+
+def _direction_word(item, positive_when_up=True):
+    if not _has_asset(item):
+        return "sem dado"
+    change = _change(item)
+    if abs(change) < 0.05:
+        return "estavel"
+    if positive_when_up:
+        return "alta" if change > 0 else "queda"
+    return "queda favoravel" if change < 0 else "alta desfavoravel"
+
+
+def _market_regime(snapshot):
+    score = 0
+    components = []
+    checks = [
+        ("S&P 500", snapshot.get("spx"), True),
+        ("Nasdaq", snapshot.get("nasdaq"), True),
+        ("Dow", snapshot.get("dow"), True),
+        ("VIX", snapshot.get("vix"), False),
+        ("DXY", snapshot.get("dxy"), False),
+        ("US10Y", snapshot.get("us10y"), False),
+        ("US30Y", snapshot.get("us30y"), False),
+    ]
+    for label, item, positive_when_up in checks:
+        if not _has_asset(item):
+            continue
+        point = _score_from_asset(item, positive_when_up=positive_when_up)
+        score += point
+        if point:
+            components.append(f"{label} {_direction_word(item, positive_when_up)}")
+
+    if score >= 3:
+        label = "Risk-on"
+        tone = "apetite a risco dominante, desde que juros e DXY nao acelerem contra o movimento."
+    elif score <= -3:
+        label = "Risk-off"
+        tone = "defensivo, com pressao de juros/dolar/volatilidade ou perda de tracao dos indices."
+    else:
+        label = "Neutro/seletivo"
+        tone = "sinais mistos; operar com confirmacao entre juros, DXY, petroleo e indices."
+    return {"score": score, "label": label, "tone": tone, "components": components[:6]}
+
+
+def _market_context_lines(snapshot, regime):
+    groups = [
+        ("Indices EUA", [snapshot.get("spx"), snapshot.get("nasdaq"), snapshot.get("dow"), snapshot.get("russell"), snapshot.get("vix")]),
+        ("Juros e dolar", [snapshot.get("us10y"), snapshot.get("us30y"), snapshot.get("dxy"), snapshot.get("usbrl")]),
+        ("Commodities", [snapshot.get("brent"), snapshot.get("wti"), snapshot.get("gold")]),
+        ("Brasil/EM", [snapshot.get("ibov"), snapshot.get("ewz")]),
+    ]
+    lines = [f"- Regime calculado: {regime['label']} (score {regime['score']}). {regime['tone']}"]
+    if regime["components"]:
+        lines.append("- Sinais dominantes: " + "; ".join(regime["components"]) + ".")
+    for label, items in groups:
+        lines.append(f"- {label}: {_asset_line(*items)}")
+    return lines
+
+
+def _market_implications(snapshot, regime):
+    dxy = _change(snapshot.get("dxy"))
+    us10y = _change(snapshot.get("us10y"))
+    us30y = _change(snapshot.get("us30y"))
+    vix = _change(snapshot.get("vix"))
+    nasdaq = _change(snapshot.get("nasdaq"))
+    brent = _change(snapshot.get("brent"))
+    usbrl = _change(snapshot.get("usbrl"))
+
+    implications = []
+    if us10y > 0.05 or us30y > 0.05:
+        implications.append("Juros longos em alta reduzem conforto para duration e pressionam Nasdaq/multiplos.")
+    elif us10y < -0.05 or us30y < -0.05:
+        implications.append("Juros longos cedendo aliviam duration e favorecem tecnologia/ativos de risco.")
+    else:
+        implications.append("Juros longos sem direcao forte deixam o foco em DXY, petroleo e agenda.")
+
+    if dxy > 0.05:
+        implications.append("DXY firme encarece emergentes e pode limitar fluxo para Brasil.")
+    elif dxy < -0.05:
+        implications.append("DXY fraco melhora liquidez para emergentes e reduz pressao em USDBRL.")
+
+    if brent > 0.4:
+        implications.append("Petroleo em alta adiciona risco inflacionario; se vier com yields altos, leitura fica menos construtiva.")
+    elif brent < -0.4:
+        implications.append("Petroleo em queda alivia inflacao esperada, mas pode sinalizar preocupacao com crescimento.")
+
+    if vix > 0.5 and nasdaq < 0:
+        implications.append("VIX subindo com Nasdaq negativo reforca protecao e menor apetite a risco.")
+    if usbrl > 0.2:
+        implications.append("USDBRL em alta exige cautela com Brasil, mesmo que indices externos tentem recuperar.")
+
+    implications.append(f"Leitura final do painel: {regime['label']}.")
+    return implications
+
+
 def _dominant_news_theme(news):
     text = " ".join(f"{item.get('title', '')} {item.get('summary', '')}" for item in news).lower()
     themes = [
@@ -366,6 +479,82 @@ def _event_scenario(event):
     if any(k in name for k in oil_keys):
         return f"{base} Estoques menores: suporte ao petroleo e risco inflacionario. Estoques maiores: pesa no petroleo e alivia inflacao."
     return f"{base} Acima tende a fortalecer moeda/atividade local; abaixo tende a aliviar juros, mas pode pesar em risco se confirmar perda de crescimento."
+
+
+def _event_category(event):
+    name = str(event.get("event", "")).lower()
+    buckets = [
+        ("inflacao", ["cpi", "pce", "ppi", "inflation", "price", "prices", "precos", "inflacao"]),
+        ("salarios", ["wage", "wages", "earnings", "salario", "ganho medio", "remuneracao"]),
+        ("emprego", ["payroll", "employment", "emprego", "adp", "nonfarm", "jolts", "vagas", "jobless", "claims", "unemployment", "desemprego"]),
+        ("atividade", ["gdp", "pib", "pmi", "ism", "retail", "sales", "vendas", "confidence", "confianca", "industrial production", "producao industrial", "durable goods"]),
+        ("banco central", ["rate", "fomc", "fed", "ecb", "boe", "boj", "speaks", "statement", "minutes", "discurso", "fala", "ata", "decisao", "juros", "banco central"]),
+        ("petroleo", ["oil", "crude", "inventories", "gasoline", "storage", "petroleo", "estoques", "eia"]),
+    ]
+    for category, keys in buckets:
+        if any(key in name for key in keys):
+            return category
+    return "macro"
+
+
+def _event_surprise_label(event, lower_is_better=False):
+    actual_num = _parse_event_number(event.get("actual"))
+    forecast_num = _parse_event_number(event.get("forecast"))
+    previous_num = _parse_event_number(event.get("previous"))
+    if actual_num is None:
+        if forecast_num is not None and previous_num is not None:
+            diff = forecast_num - previous_num
+            tolerance = max(abs(previous_num) * 0.01, 0.0001)
+            if abs(diff) <= tolerance:
+                return "projecao em linha com anterior"
+            if lower_is_better:
+                return "projecao abaixo do anterior" if diff < 0 else "projecao acima do anterior"
+            return "projecao acima do anterior" if diff > 0 else "projecao abaixo do anterior"
+        return "aguardando atual"
+    if forecast_num is None:
+        if previous_num is None:
+            return "divulgado sem base comparativa"
+        diff = actual_num - previous_num
+        tolerance = max(abs(previous_num) * 0.01, 0.0001)
+        if abs(diff) <= tolerance:
+            return "em linha com anterior"
+        if lower_is_better:
+            return "abaixo do anterior" if diff < 0 else "acima do anterior"
+        return "acima do anterior" if diff > 0 else "abaixo do anterior"
+    diff = actual_num - forecast_num
+    tolerance = max(abs(forecast_num) * 0.01, 0.0001)
+    if abs(diff) <= tolerance:
+        return "em linha com projecao"
+    if lower_is_better:
+        return "abaixo da projecao" if diff < 0 else "acima da projecao"
+    return "acima da projecao" if diff > 0 else "abaixo da projecao"
+
+
+def _event_scenario(event):
+    category = _event_category(event)
+    currency = event.get("currency", "---")
+    lower_is_better = category in {"inflacao", "salarios", "petroleo"}
+    surprise = _event_surprise_label(event, lower_is_better=lower_is_better)
+    base = (
+        f"Atual {_event_value(event, 'actual')} | "
+        f"Projecao {_event_value(event, 'forecast')} | "
+        f"Anterior {_event_value(event, 'previous')} | "
+        f"Leitura: {surprise}."
+    )
+
+    if category == "inflacao":
+        return f"{base} Acima: hawkish, juros/DXY para cima e pressao em Nasdaq/S&P. Abaixo: dovish, alivia yields e favorece duration/indices."
+    if category == "salarios":
+        return f"{base} Salarios fortes elevam risco de inflacao de servicos e Fed mais duro; salarios fracos aliviam juros longos."
+    if category == "emprego":
+        return f"{base} Forte sustenta crescimento, mas pode reduzir aposta de corte; fraco derruba yields, porem aumenta medo de desaceleracao."
+    if category == "atividade":
+        return f"{base} Acima favorece crescimento e risco; abaixo pesa em ciclicos, salvo se queda de yields dominar."
+    if category == "banco central":
+        return f"{base} Tom hawkish tende a fortalecer {currency}, DXY/yields e pesar em indices; tom dovish faz o inverso."
+    if category == "petroleo":
+        return f"{base} Estoques menores sustentam petroleo e inflacao; estoques maiores aliviam energia e expectativas inflacionarias."
+    return f"{base} Surpresa positiva favorece moeda/atividade local; surpresa negativa tende a reduzir juros, mas pode pesar em risco."
 
 
 def _select_calendar_events(calendar_data, date_str, limit=7):
@@ -509,6 +698,48 @@ def _generate_local_report_text(slot_meta, date_str, local_data, global_data, ne
 """
 
 
+def _generate_local_report_text(slot_meta, date_str, local_data, global_data, news, previous_reports, calendar_events, calendar_source):
+    snapshot = _asset_snapshot(global_data)
+    regime = _market_regime(snapshot)
+    dominant_theme = _dominant_news_theme(news)
+    context_lines = _market_context_lines(snapshot, regime)
+    implication_lines = _market_implications(snapshot, regime)
+
+    news_lines = []
+    for item in news[:5]:
+        source = item.get("source", "Fonte")
+        title = item.get("title", "")
+        summary = item.get("summary", "")
+        if title:
+            suffix = f" - {summary}" if summary else ""
+            news_lines.append(f"- [{source}] {title}{suffix}")
+    if not news_lines:
+        news_lines.append("- Sem manchetes novas relevantes no feed RSS no momento.")
+
+    return f"""### Drivers do momento
+
+- **Regime:** {regime['label']} ({regime['score']}). {regime['tone']}
+- **Tema dominante:** {dominant_theme}. O mercado deve precificar primeiro juros/Fed, depois DXY, commodities e indices.
+{chr(10).join(context_lines[1:])}
+
+### Global vs Brasil
+
+{chr(10).join(f"- {line}" for line in implication_lines)}
+- **Brasil:** avaliar IBOV/EWZ, USDBRL e commodities em conjunto. Sem confirmacao nesses tres eixos, evitar leitura direcional agressiva.
+
+### Calendario economico e cenarios
+
+- **Fonte:** {calendar_source}.
+{chr(10).join(_calendar_scenario_lines(calendar_events))}
+
+### Riscos radar
+
+{chr(10).join(news_lines)}
+
+**Vies tatico:** {regime['label']}. Confirmar pelo comportamento conjunto de DXY, US10Y/US30Y, petroleo, S&P 500, Nasdaq e Dow Jones.
+"""
+
+
 def generate_market_report(slot=None, force=False):
     now = _now_local()
     date_str = now.strftime("%Y-%m-%d")
@@ -543,6 +774,10 @@ def generate_market_report(slot=None, force=False):
         )
         calendar_events, calendar_source = _load_calendar_events_for_report(date_str)
         calendar_context = "\n".join(_calendar_context_lines(calendar_events))
+        market_snapshot = _asset_snapshot(global_data)
+        market_regime = _market_regime(market_snapshot)
+        market_context = "\n".join(_market_context_lines(market_snapshot, market_regime))
+        market_implications = "\n".join(f"- {line}" for line in _market_implications(market_snapshot, market_regime))
 
         slot_meta = REPORT_SLOTS[slot]
         previous_reports = "\n\n".join(
@@ -585,6 +820,49 @@ INSTRUCOES:
    - RISCOS RADAR
 5. Na secao de calendario, destaque os principais eventos do dia, informe Atual/Projecao/Anterior quando houver e descreva cenarios breves: acima da projecao, abaixo da projecao, hawkish/dovish e impactos em juros, DXY, petroleo, S&P 500, Nasdaq e Dow Jones.
 6. Termine com uma linha "Viés tatico:".
+
+Use Markdown compacto. Evite texto longo.
+"""
+
+        prompt = f"""
+Voce e um Estrategista-Chefe de uma Mesa de Operacoes Institucional.
+Crie o MARKET REPORT {slot_meta['label'].upper()} de {date_str} em portugues do Brasil.
+
+FOCO DO SLOT:
+{slot_meta['focus']}
+
+PAINEL MACRO JA PROCESSADO:
+{market_context}
+
+IMPLICACOES INTERMERCADOS:
+{market_implications}
+
+DADOS BRUTOS DE APOIO:
+- LOCAL: {json.dumps(local_data, ensure_ascii=False)}
+- GLOBAL: {json.dumps(global_data, ensure_ascii=False)}
+
+PRINCIPAIS NOTICIAS DO MOMENTO:
+{news_context}
+
+CALENDARIO ECONOMICO DE HOJE (HORARIO DE BRASILIA):
+Fonte: {calendar_source}
+{calendar_context}
+
+REPORTS JA REGISTRADOS HOJE:
+{previous_reports}
+
+INSTRUCOES:
+1. Conecte noticias, calendario e movimentos de preco em uma leitura unica de mesa.
+2. Seja direto, profissional e operacional; evite frases genericas.
+3. Nao repita mecanicamente reports anteriores; atualize a leitura do dia e destaque mudancas de regime.
+4. Divida em 4 secoes curtas:
+   - DRIVERS DO MOMENTO
+   - GLOBAL VS BRASIL
+   - CALENDARIO ECONOMICO E CENARIOS
+   - RISCOS RADAR
+5. Na secao de calendario, destaque os principais eventos do dia, informe Atual/Projecao/Anterior quando houver e descreva cenarios breves: acima da projecao, abaixo da projecao, hawkish/dovish e impactos em juros, DXY, petroleo, S&P 500, Nasdaq e Dow Jones.
+6. Classifique o vies como Risk-on, Risk-off ou Neutro/seletivo. Nao cite WIN nem recomendacao de day trade.
+7. Termine com uma linha "Vies tatico:".
 
 Use Markdown compacto. Evite texto longo.
 """
