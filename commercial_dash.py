@@ -837,6 +837,169 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
 
     return unique_news, news_sources, warnings, datetime.now().strftime("%H:%M:%S")
 
+
+def news_ticker_impact(item):
+    text = " ".join([
+        str(item.get("title_en") or item.get("title") or item.get("title_pt") or ""),
+        str(item.get("summary") or item.get("description") or ""),
+        str(item.get("source") or ""),
+    ]).lower()
+    score = 0
+    rules = [
+        (5, ["fed", "fomc", "powell", "ecb", "boj", "boe", "copom", "bcb", "interest rate", "juros"]),
+        (5, ["cpi", "pce", "ppi", "inflation", "inflacao", "inflação"]),
+        (4, ["treasury", "treasuries", "yield", "yields", "dxy", "dollar", "oil", "crude", "brent", "wti"]),
+        (4, ["payroll", "jobs", "jobless", "gdp", "retail sales", "pmi", "ism"]),
+        (4, ["iran", "israel", "china", "russia", "war", "guerra", "sanctions", "attack", "ataque"]),
+        (3, ["s&p", "nasdaq", "dow", "stocks", "futures", "bitcoin", "crypto", "ibovespa", "ewz"]),
+    ]
+    for weight, keywords in rules:
+        if any(keyword in text for keyword in keywords):
+            score += weight
+    if any(word in text for word in ["breaking", "urgent", "alert", "unexpected", "surprise"]):
+        score += 3
+    if score >= 12:
+        return "URGENTE", "#FF2D20", score
+    if score >= 8:
+        return "ALTO", "#FF4B4B", score
+    if score >= 4:
+        return "MEDIO", "#FF9800", score
+    return "BAIXO", "#94A3B8", score
+
+
+def render_high_impact_news_ticker():
+    try:
+        news_list, _, _, feed_loaded_at = load_bloomberg_news_feed(0)
+    except Exception as e:
+        print(f"[WARN] High impact news ticker unavailable: {e}")
+        return
+    if not news_list:
+        return
+
+    high_impact = []
+    for item in news_list:
+        label, color, score = news_ticker_impact(item)
+        if label not in {"URGENTE", "ALTO"}:
+            continue
+        title = item.get("title_en") or item.get("title") or item.get("title_pt") or ""
+        if not title:
+            continue
+        high_impact.append({
+            "label": label,
+            "color": color,
+            "score": score,
+            "title": html.escape(str(title)),
+            "time": html.escape(str(item.get("published_str") or item.get("time") or "")),
+        })
+        if len(high_impact) >= 8:
+            break
+
+    if not high_impact:
+        return
+
+    ticker_items = []
+    for item in high_impact:
+        time_part = f"<span class='tts-news-time'>{item['time']}</span>" if item["time"] else ""
+        ticker_items.append(
+            f"<span class='tts-news-item'><span class='tts-news-badge' style='border-color:{item['color']}66;color:{item['color']};'>{item['label']}</span>{time_part}<span>{item['title']}</span></span>"
+        )
+    ticker_html = "<span class='tts-news-seq'>" + "<span class='tts-news-dot'>•</span>".join(ticker_items) + "</span>"
+    st.markdown(
+        f"""
+        <style>
+          .tts-news-ticker-wrap {{
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            margin: 0 0 10px;
+            border: 1px solid rgba(255,75,75,.28);
+            border-left: 4px solid #FF4B4B;
+            border-radius: 8px;
+            background: linear-gradient(90deg, rgba(17,24,39,.96), rgba(8,13,20,.96));
+            box-shadow: 0 8px 20px rgba(0,0,0,.20);
+            overflow: hidden;
+          }}
+          .tts-news-ticker-head {{
+            display:flex;
+            align-items:center;
+            gap:8px;
+            padding:7px 10px 0;
+            color:#F8FAFC;
+            font-size:.70rem;
+            font-weight:950;
+            letter-spacing:.06em;
+            text-transform:uppercase;
+          }}
+          .tts-news-live {{
+            width:7px;
+            height:7px;
+            border-radius:999px;
+            background:#FF4B4B;
+            box-shadow:0 0 11px rgba(255,75,75,.90);
+          }}
+          .tts-news-loaded {{
+            margin-left:auto;
+            color:#64748B;
+            font-size:.62rem;
+            font-weight:800;
+          }}
+          .tts-news-marquee {{
+            white-space:nowrap;
+            overflow:hidden;
+            padding:7px 0 9px;
+          }}
+          .tts-news-track {{
+            display:inline-block;
+            min-width:100%;
+            animation: tts-news-scroll 38s linear infinite;
+          }}
+          .tts-news-marquee:hover .tts-news-track {{
+            animation-play-state: paused;
+          }}
+          .tts-news-item {{
+            display:inline-flex;
+            align-items:center;
+            gap:8px;
+            margin:0 18px;
+            color:#E5E7EB;
+            font-size:.78rem;
+            font-weight:800;
+          }}
+          .tts-news-badge {{
+            border:1px solid;
+            border-radius:5px;
+            padding:1px 5px;
+            font-size:.62rem;
+            font-weight:950;
+          }}
+          .tts-news-time {{
+            color:#94A3B8;
+            font-size:.68rem;
+          }}
+          .tts-news-dot {{
+            color:#475569;
+            font-weight:950;
+          }}
+          @keyframes tts-news-scroll {{
+            0% {{ transform: translateX(12%); }}
+            100% {{ transform: translateX(-100%); }}
+          }}
+        </style>
+        <div class="tts-news-ticker-wrap">
+          <div class="tts-news-ticker-head">
+            <span class="tts-news-live"></span>
+            <span>NEWS High Impact</span>
+            <span class="tts-news-loaded">Atualizado {html.escape(str(feed_loaded_at))}</span>
+          </div>
+          <div class="tts-news-marquee">
+            <div class="tts-news-track">{ticker_html}{ticker_html}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 @st.fragment(run_every=30)
 def render_bloomberg_news_feed_fragment():
     """Atualiza somente o feed de noticias, sem redesenhar o terminal inteiro."""
@@ -4997,6 +5160,8 @@ with st.sidebar:
     with tab1: sidebar_mercados()
     with tab2: sidebar_calendario()
     with tab3: sidebar_news()
+
+render_high_impact_news_ticker()
 
 # Roteamento de Páginas
 if page == "📉 Terminal de Trading":
