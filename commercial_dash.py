@@ -717,6 +717,19 @@ def get_calendar_data():
     live_events = fetch_investing_calendar_live()
     if live_events:
         return live_events
+    for path in [
+        os.path.join(os.path.dirname(__file__), "calendario_economico.json"),
+        os.path.join(os.path.dirname(__file__), "execution", "calendario_economico.json"),
+    ]:
+        try:
+            if os.path.exists(path):
+                import json as _json
+                with open(path, "r", encoding="utf-8") as f:
+                    local_events = _json.load(f)
+                if local_events:
+                    return local_events
+        except Exception as e:
+            print(f"[WARN] Local calendar unavailable: {e}")
     return None
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -3080,9 +3093,7 @@ def sidebar_calendario():
 @st.fragment(run_every=1800)
 def secao_calendario_global_fragment():
     """Calendario economico compacto dentro do Terminal Global."""
-    calendar_data = get_calendar_data()
-    if not calendar_data:
-        return
+    calendar_data = get_calendar_data() or []
 
     now_br = datetime.now(ZoneInfo("America/Sao_Paulo"))
     today_str = now_br.strftime("%Y-%m-%d")
@@ -3100,10 +3111,6 @@ def secao_calendario_global_fragment():
     st.markdown("#### Calendario Economico")
     source_label = next((event.get("source") for event in events if event.get("source")), "Supabase")
     st.caption(f"Eventos de hoje ({today_str}) | Horario de Brasilia | Fonte: {source_label}")
-
-    if not events:
-        st.info("Nenhum evento economico relevante para hoje.")
-        return
 
     def event_datetime(event):
         try:
@@ -3152,6 +3159,19 @@ def secao_calendario_global_fragment():
     analysis_col, widget_col = st.columns([1.05, 1], gap="large")
 
     with analysis_col:
+            if not events:
+                st.info("Calendario economico temporariamente sem eventos carregados. O widget Investing continua disponivel ao lado.")
+                st.markdown(
+                    """
+                    <div style="border:1px solid #334155; border-left:5px solid #64748B; border-radius:8px; padding:16px 18px; margin:10px 0 16px 0; background:#0b1220;">
+                        <div style="font-size:0.72rem; color:#94A3B8; font-weight:800; text-transform:uppercase;">IA Macro TTS</div>
+                        <div style="font-size:1rem; color:#F8FAFC; font-weight:900; margin-top:6px;">Aguardando dados do calendario</div>
+                        <div style="font-size:0.88rem; color:#CBD5E1; margin-top:8px; line-height:1.5;">Assim que Supabase, Investing ou cache local retornar eventos do dia, a leitura macro volta a analisar surpresa, juros, inflacao, DXY, petroleo e indices americanos.</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
             next_event_key = None
             if next_event or analysis_event:
                 if upcoming_events:
