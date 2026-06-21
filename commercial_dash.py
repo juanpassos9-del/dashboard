@@ -1824,18 +1824,15 @@ def secao_market_report_fragment():
                 h_sent = sanitize_text(str(item.get("sentiment", "NEUTRO")))
                 h_time = sanitize_text(str(item.get("updated_at", "---")))
                 h_regime = sanitize_text(str(item.get("macro_regime", "")))
-                h_insight = sanitize_text(str(item.get("insight", ""))).replace(chr(10), " ")
-                if len(h_insight) > 170:
-                    h_insight = h_insight[:170].rstrip() + "..."
                 h_color = "#00FFA3" if h_sent == "COMPRA" else ("#FF4B4B" if h_sent == "VENDA" else "#FFD166")
-                subtitle = f"<small style='display:block; color:#94A3B8; margin-top:2px; font-size:0.62rem;'>{h_regime}</small>" if h_regime else ""
-                insight_line = f"<small style='display:block; color:#CBD5E1; margin-top:5px; font-size:0.64rem; line-height:1.25; font-weight:700; text-align:left;'>{h_insight}</small>" if h_insight else "<small style='display:block; color:#64748B; margin-top:5px; font-size:0.64rem; line-height:1.25; font-weight:700; text-align:left;'>sem texto salvo nesta analise antiga</small>"
+                display_regime = h_regime or ("Risk-on" if h_sent == "COMPRA" else ("Risk-off" if h_sent == "VENDA" else "Neutro"))
+                subtitle = f"<small style='display:block; color:#CBD5E1; margin-top:2px; font-size:0.66rem;'>{display_regime}</small>"
                 history_items.append(
-                    f"<span style='width:100%; border:1px solid {h_color}55; color:{h_color}; background:#0B0F16; border-radius:5px; padding:7px 9px; font-size:0.72rem; font-weight:900; text-align:left;'>{h_time} {h_sent}{subtitle}{insight_line}</span>"
+                    f"<span style='min-width:128px; border:1px solid {h_color}55; color:{h_color}; background:#0B0F16; border-radius:5px; padding:7px 9px; font-size:0.72rem; font-weight:900; text-align:center;'>{h_time} {h_sent}{subtitle}</span>"
                 )
             else:
                 history_items.append(
-                    "<span style='width:100%; border:1px dashed #334155; color:#64748B; background:#0B0F16; border-radius:5px; padding:7px 9px; font-size:0.72rem; font-weight:850; text-align:left;'>aguardando<small style='display:block; color:#475569; margin-top:2px; font-size:0.62rem;'>proxima analise do Analista IA</small></span>"
+                    "<span style='min-width:128px; border:1px dashed #334155; color:#64748B; background:#0B0F16; border-radius:5px; padding:7px 9px; font-size:0.72rem; font-weight:850; text-align:center;'>aguardando<small style='display:block; color:#475569; margin-top:2px; font-size:0.66rem;'>regime</small></span>"
                 )
         meta_chips = []
         for label, value in [
