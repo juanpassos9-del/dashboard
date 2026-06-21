@@ -1770,6 +1770,7 @@ def secao_market_report_fragment():
     if sync_warning:
         st.warning(sync_warning)
 
+    ai_card_html = ""
     ai_data = fetch_app_state_cached("ai_insight")
     ai_history = fetch_app_state_cached("ai_insight_history") or []
     if ai_data:
@@ -1813,8 +1814,7 @@ def secao_market_report_fragment():
                     f"<span style='border:1px solid #334155; background:#0B0F16; color:#CBD5E1; border-radius:5px; padding:5px 7px; font-size:0.72rem; font-weight:850;'><b style='color:#94A3B8;'>{sanitize_text(str(label))}</b> {sanitize_text(str(value))}</span>"
                 )
 
-        st.markdown(
-            f"""
+        ai_card_html = f"""
             <section style="background:{ai_bg}; border:1px solid {ai_color}55; border-left:7px solid {ai_color}; border-radius:8px; padding:18px 20px; margin:16px 0 18px;">
                 <div style="display:flex; justify-content:space-between; gap:14px; align-items:flex-start; flex-wrap:wrap;">
                     <div>
@@ -1828,9 +1828,7 @@ def secao_market_report_fragment():
                 <div style="color:#94A3B8; font-size:0.7rem; font-weight:900; text-transform:uppercase; letter-spacing:.04em; margin-top:14px;">Historico das ultimas 5 analises</div>
                 <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:7px;">{''.join(history_items)}</div>
             </section>
-            """,
-            unsafe_allow_html=True,
-        )
+        """
 
     if st.session_state.get("market_report_last_generated"):
         generated = st.session_state["market_report_last_generated"]
@@ -1838,6 +1836,8 @@ def secao_market_report_fragment():
             reports.append(generated)
 
     if not reports:
+        if ai_card_html:
+            st.markdown(ai_card_html, unsafe_allow_html=True)
         st.info("Nenhum Market Report registrado para hoje ainda.")
         return
 
@@ -1845,16 +1845,30 @@ def secao_market_report_fragment():
     reports = sorted(reports, key=lambda item: slot_order.get(item.get("slot"), 99))
     latest = reports[-1]
 
-    st.markdown(f"""
-        <div style="background: #0A0A0A; border: 1px solid #1a1a1a; border-top: 4px solid #FF9800; padding: 22px; border-radius: 8px; margin: 15px 0;">
-            <div style="display: flex; justify-content: space-between; gap: 15px; align-items: center; margin-bottom: 12px;">
-                <h3 style="margin: 0; color: #FF9800; font-family: 'Inter', sans-serif;">ULTIMO REPORT: {sanitize_text(latest.get('slot_label', 'Market Report')).upper()}</h3>
-                <span style="color: #777; font-size: 0.75rem; font-family: 'Roboto Mono', monospace;">{latest.get('updated_at', '---')} | {sanitize_text(latest.get('provider', 'IA'))}</span>
+    report_header_html = f"""
+        <div style="background:#0A0A0A; border:1px solid #1a1a1a; border-top:4px solid #FF9800; padding:18px 20px; border-radius:8px; margin:16px 0 18px;">
+            <div style="display:flex; justify-content:space-between; gap:15px; align-items:flex-start; margin-bottom:12px; flex-wrap:wrap;">
+                <div>
+                    <div style="color:#94A3B8; font-size:0.72rem; font-weight:900; text-transform:uppercase; letter-spacing:.04em;">Ultimo report</div>
+                    <h3 style="margin:3px 0 0; color:#FF9800; font-family:'Inter', sans-serif;">{sanitize_text(latest.get('slot_label', 'Market Report')).upper()}</h3>
+                </div>
+                <span style="color:#777; font-size:0.75rem; font-family:'Roboto Mono', monospace;">{latest.get('updated_at', '---')} | {sanitize_text(latest.get('provider', 'IA'))}</span>
             </div>
         </div>
-    """, unsafe_allow_html=True)
-    with st.container():
-        st.markdown(latest.get("report", ""))
+    """
+
+    if ai_card_html:
+        ai_col, report_col = st.columns([0.48, 0.52], gap="medium")
+        with ai_col:
+            st.markdown(ai_card_html, unsafe_allow_html=True)
+        with report_col:
+            st.markdown(report_header_html, unsafe_allow_html=True)
+            with st.container(height=520):
+                st.markdown(latest.get("report", ""))
+    else:
+        st.markdown(report_header_html, unsafe_allow_html=True)
+        with st.container():
+            st.markdown(latest.get("report", ""))
 
     tab_labels = [
         f"{report.get('slot_label', report.get('slot', 'Report'))} - {report.get('updated_at', '---')[-8:-3]}"
