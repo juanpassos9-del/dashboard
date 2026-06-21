@@ -440,6 +440,17 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         { symbol: "BTCUSDT", label: "BTC", source: "binance" },
         { symbol: "ETHUSDT", label: "ETH", source: "binance" },
         { symbol: "SOLUSDT", label: "SOL", source: "binance" },
+        { symbol: "LINKUSDT", label: "LINK", source: "binance" },
+        { symbol: "BNBUSDT", label: "BNB", source: "binance" },
+        { symbol: "DYDXUSDT", label: "DYDX", source: "binance" },
+        { symbol: "ENAUSDT", label: "ENA", source: "binance" },
+        { symbol: "LDOUSDT", label: "LDO", source: "binance" },
+        { symbol: "ARKMUSDT", label: "ARKM", source: "binance" },
+        { symbol: "PENDLEUSDT", label: "PENDLE", source: "binance" },
+        { symbol: "AAVEUSDT", label: "AAVE", source: "binance" },
+        { symbol: "XAUTUSDT", label: "XAUT", source: "binance" },
+        { symbol: "PAXGUSDT", label: "PAXG", source: "binance" },
+        { symbol: "ONDOUSDT", label: "ONDO", source: "binance" },
       ];
       const yahooAssets = (yahooPayload.assets || []).map((asset) => ({
         symbol: asset.symbol,
