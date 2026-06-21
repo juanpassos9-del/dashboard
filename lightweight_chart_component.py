@@ -410,13 +410,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           <div id="lw-chart"></div>
         </div>
         <aside class="lw-side">
-          <div class="lw-stat"><span>Ultimo</span><strong id="lw-last">---</strong></div>
-          <div class="lw-stat"><span>VWAP / distancia</span><strong id="lw-vwap">---</strong><small id="lw-vwap-extra">---</small></div>
-          <div class="lw-stat"><span>Volume</span><strong id="lw-volume">---</strong><small id="lw-rvol">RVOL ---</small></div>
-          <div class="lw-stat"><span>Weis Wave</span><strong id="lw-weis-wave">---</strong><small id="lw-weis-extra">---</small></div>
-          <div class="lw-stat"><span>Volume Profile</span><strong id="lw-vp-poc">POC ---</strong><small id="lw-vp-value-area">VAH --- | VAL ---</small></div>
-          <div class="lw-stat"><span>TTS GARCH(1,1) + HV252</span><strong id="lw-garch-zone">---</strong><small id="lw-garch-extra">---</small></div>
-          <div class="lw-stat"><span>HV 252</span><strong id="lw-hv252">HV252 ---</strong><small id="lw-hv30">---</small><small id="lw-hv-levels" style="display:none;">---</small></div>
           <div class="lw-stat"><span>Sinal / Candle</span><strong id="lw-hover-title">Passe o mouse</strong><small id="lw-hover-data">OHLC, VWAP e sinal.</small></div>
           <div class="lw-settings" id="lw-ma-settings">
             <div class="lw-settings-title">Medias moveis</div>
@@ -1747,37 +1740,6 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const vwap = indicators.vwapDay;
         const last = state.candles[state.candles.length - 1], lastVwap = vwap[vwap.length - 1]?.value;
         const lastVol = indicators.volumeStats[indicators.volumeStats.length - 1] || {};
-        document.getElementById("lw-last").textContent = last ? fmt(last.close, 2) : "---";
-        document.getElementById("lw-vwap").textContent = lastVwap ? fmt(lastVwap, 2) : "---";
-        document.getElementById("lw-vwap-extra").textContent = last && lastVwap ? `Dist ${(((last.close - lastVwap) / lastVwap) * 100).toFixed(2)}%` : "Dist ---";
-        document.getElementById("lw-volume").textContent = last ? fmt(last.volume, 4) : "---";
-        document.getElementById("lw-rvol").textContent = `RVOL ${fmt(lastVol.rvol, 2)}x | Leg ${fmt(lastVol.legRelativeVolume, 2)}x | M20 ${fmt(lastVol.avg, 2)}`;
-        const weis = indicators.weisWave || {};
-        const currWave = weis.current || {};
-        const prevWave = weis.previousSameDirection || {};
-        const waveRatio = Number.isFinite(currWave.value) && Number.isFinite(prevWave.volume) && prevWave.volume > 0 ? currWave.value / prevWave.volume : NaN;
-        document.getElementById("lw-weis-wave").textContent = currWave.direction > 0 ? "Alta" : currWave.direction < 0 ? "Baixa" : "---";
-        document.getElementById("lw-weis-extra").textContent = `Vol ${fmt(currWave.value, 2)} | vs onda ${fmt(waveRatio, 2)}x`;
-        const garch = indicators.garch || {};
-        const gClass = garch.classification || {};
-        const garchRefLabels = { previousClose:"Fech. ant.", sessionOpen:"Abertura", vwap:"VWAP", lastClose:"Ultimo", adjustment:"Manual" };
-        document.getElementById("lw-garch-zone").textContent = garch.ok ? `${Number.isFinite(gClass.sigmaDistance) ? gClass.sigmaDistance.toFixed(2) : "---"}Ïƒ | ${gClass.zone || "---"}` : (garch.warning || "GARCH indisponivel");
-        document.getElementById("lw-garch-extra").textContent = garch.ok
-          ? `Hull/lognormal | TF ${garch.garchTimeframe || "D"} | Vol ${(garch.latestVolatility * 100).toFixed(2)}% | Ref ${garchRefLabels[garch.referenceMode] || garch.referenceMode}: ${fmt(garch.referencePrice, 2)}`
-          : "Historico insuficiente ou parametro instavel";
-        document.getElementById("lw-vp-poc").textContent = `POC ${fmt(indicators.volumeProfile?.poc?.mid, 2)}`;
-        document.getElementById("lw-vp-value-area").textContent = `VAH ${fmt(indicators.volumeProfile?.vah?.high, 2)} | VAL ${fmt(indicators.volumeProfile?.val?.low, 2)}`;
-        const hv = indicators.hv252 || {};
-        const level = (mult) => (hv.levels || []).find((item) => item.multiplier === mult)?.price;
-        const nearest = last && hv.ok ? hv.levels.filter((item) => item.multiplier !== 0).reduce((best, item) => {
-          const distance = Math.abs(last.close - item.price);
-          return !best || distance < best.distance ? { ...item, distance } : best;
-        }, null) : null;
-        document.getElementById("lw-hv252").textContent = hv.ok ? `Fech. ant. ${fmt(hv.prevClose, 2)}` : (hv.warning || "Historico insuficiente para HV 252");
-        document.getElementById("lw-hv30").textContent = hv.ok ? `HV diaria ${(hv.dailyVol * 100).toFixed(2)}% | anual ${(hv.annualVol * 100).toFixed(2)}%` : "Use candles diarios suficientes";
-        document.getElementById("lw-hv-levels").textContent = hv.ok
-          ? `1Ïƒ ${fmt(level(-1),2)} / ${fmt(level(1),2)} | 2Ïƒ ${fmt(level(-2),2)} / ${fmt(level(2),2)} | prox ${nearest ? `${nearest.label} (${fmt(nearest.distance,2)})` : "---"}`
-          : "Historico insuficiente para HV 252";
         renderAlerts(last, lastVwap, lastVol.rvol, indicators.signals);
       }
       function renderAlerts(last, vwap, rvol, signals) {
