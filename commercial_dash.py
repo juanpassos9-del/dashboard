@@ -1716,10 +1716,9 @@ def secao_market_report_fragment():
                     print(f"[WARN] Falha ao preparar {path} para Market Report: {e}")
 
     if st.button("Atualizar analise agora", type="primary", use_container_width=True, key="market_report_refresh_now"):
-        with st.spinner("Atualizando Analista IA Macro e Market Report..."):
+        with st.spinner("Atualizando Market Report..."):
             try:
                 import json as _json
-                from execution.ai_analyst import generate_macro_insight
                 from execution.market_report import generate_market_report
 
                 try:
@@ -1731,7 +1730,6 @@ def secao_market_report_fragment():
                     pass
 
                 prime_market_report_files()
-                generate_macro_insight()
                 generated = generate_market_report(force=True)
                 if not generated:
                     st.warning("Nao foi possivel gerar uma nova analise agora. O fallback local tambem falhou; verifique os logs do Streamlit e as fontes de dados.")
@@ -1740,36 +1738,6 @@ def secao_market_report_fragment():
                     sync_warnings = []
                     saved_online = False
                     if supabase:
-                        for path in ["ai_insight.json", "execution/ai_insight.json"]:
-                            if os.path.exists(path):
-                                with open(path, "r", encoding="utf-8") as f:
-                                    new_insight = _json.load(f)
-                                ok, warning = sync_app_state_value("ai_insight", new_insight)
-                                saved_online = saved_online or ok
-                                if warning:
-                                    sync_warnings.append(f"ai_insight: {warning}")
-                                try:
-                                    history = fetch_app_state("ai_insight_history") or []
-                                    if not isinstance(history, list):
-                                        history = []
-                                    history.append({
-                                        "sentiment": new_insight.get("sentiment", "NEUTRO"),
-                                        "updated_at": new_insight.get("updated_at", ""),
-                                        "insight": new_insight.get("insight", ""),
-                                        "macro_regime": new_insight.get("macro_regime", ""),
-                                        "confidence": new_insight.get("confidence", ""),
-                                        "macro_score": new_insight.get("macro_score", 0),
-                                        "curve_regime": new_insight.get("curve_regime", ""),
-                                        "curve_bias": new_insight.get("curve_bias", ""),
-                                        "id": int(time.time())
-                                    })
-                                    ok, warning = sync_app_state_value("ai_insight_history", history[-5:])
-                                    saved_online = saved_online or ok
-                                    if warning:
-                                        sync_warnings.append(f"ai_insight_history: {warning}")
-                                except Exception as hist_error:
-                                    sync_warnings.append(f"ai_insight_history: {hist_error}")
-                                break
                         for key, paths in {
                             "market_report": ["market_report.json", "execution/market_report.json"],
                             "market_report_daily": ["market_report_daily.json", "execution/market_report_daily.json"],
