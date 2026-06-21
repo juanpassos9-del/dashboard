@@ -2070,6 +2070,196 @@ def painel_topo_global():
         unsafe_allow_html=True,
     )
 
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_yield_curve_regime_cached(global_data):
+    from execution.yield_curve_regime import analyze_yield_curve_regime
+
+    return analyze_yield_curve_regime(global_data)
+
+
+def render_yield_curve_regime_panel():
+    """Painel local de interpretacao da curva de juros americana."""
+    global_data = get_global_markets_data()
+    if not global_data:
+        return
+
+    try:
+        analysis = get_yield_curve_regime_cached(global_data)
+    except Exception as exc:
+        st.info(f"Curva de juros americana indisponivel no momento: {exc}")
+        return
+
+    data = analysis.get("data", {})
+    regime = analysis.get("regime", "Neutro")
+    confidence = analysis.get("confidence", "Baixo")
+    bias = analysis.get("operational_bias", "Neutro")
+    impacts = analysis.get("impacts", {})
+    esc = html.escape
+
+    regime_class = "neutral"
+    if "Bear" in regime or "Parallel Up" in regime or "Risk-off" in bias:
+        regime_class = "off"
+    elif "Bull" in regime or "Parallel Down" in regime or "Risk-on" in bias:
+        regime_class = "on"
+
+    def fmt_yield(key):
+        val = data.get(key)
+        chg = data.get(f"{key}_change_bps")
+        if val is None:
+            return "---", "---"
+        chg_txt = "---" if chg is None else f"{float(chg):+.1f} bps"
+        return f"{float(val):.2f}%", chg_txt
+
+    def fmt_spread(key):
+        val = data.get(key)
+        chg = data.get(f"{key}_change_bps")
+        if val is None:
+            return "---", "---"
+        chg_txt = "---" if chg is None else f"{float(chg):+.1f} bps"
+        return f"{float(val):+.2f} pp", chg_txt
+
+    yield_cards = []
+    for label, key in [("2Y", "us02y"), ("5Y", "us05y"), ("10Y", "us10y"), ("30Y", "us30y")]:
+        value, change = fmt_yield(key)
+        yield_cards.append(
+            f"<div class='yc-mini'><span>{label}</span><strong>{value}</strong><small>{change}</small></div>"
+        )
+
+    spread_10_2, spread_10_2_chg = fmt_spread("spread_10y_2y")
+    spread_30_5, spread_30_5_chg = fmt_spread("spread_30y_5y")
+    impact_html = "".join(
+        f"<span class='yc-chip'><b>{esc(str(asset))}</b> {esc(str(view))}</span>"
+        for asset, view in impacts.items()
+    )
+
+    st.markdown(
+        f"""
+        <style>
+            .yc-panel {{
+                border: 1px solid #263247;
+                background: linear-gradient(180deg, #0b1220 0%, #090d14 100%);
+                border-radius: 8px;
+                padding: 14px 16px;
+                margin: 2px 0 18px;
+                color: #E5E7EB;
+                box-shadow: 0 10px 28px rgba(0,0,0,0.22);
+            }}
+            .yc-head {{
+                display: flex;
+                justify-content: space-between;
+                gap: 12px;
+                align-items: flex-start;
+                flex-wrap: wrap;
+                margin-bottom: 12px;
+            }}
+            .yc-kicker {{
+                color: #93A4B8;
+                font: 800 0.72rem "Roboto Mono", monospace;
+                text-transform: uppercase;
+                letter-spacing: .03em;
+            }}
+            .yc-title {{
+                font-size: 1.25rem;
+                font-weight: 950;
+                color: #F8FAFC;
+                margin-top: 2px;
+            }}
+            .yc-badge {{
+                border-radius: 6px;
+                padding: 8px 10px;
+                font-weight: 950;
+                text-align: right;
+                min-width: 170px;
+                border: 1px solid #334155;
+                background: #111827;
+            }}
+            .yc-badge.on {{ color: #00FFA3; border-color: rgba(0,255,163,.35); }}
+            .yc-badge.off {{ color: #FF4B4B; border-color: rgba(255,75,75,.45); }}
+            .yc-badge.neutral {{ color: #FFD166; border-color: rgba(255,209,102,.45); }}
+            .yc-grid {{
+                display: grid;
+                grid-template-columns: repeat(6, minmax(0, 1fr));
+                gap: 8px;
+                margin: 10px 0 12px;
+            }}
+            .yc-mini {{
+                border: 1px solid #1f2a3a;
+                background: #0f1724;
+                border-radius: 7px;
+                padding: 8px 10px;
+                min-height: 72px;
+            }}
+            .yc-mini span, .yc-mini small {{
+                display:block;
+                color:#94A3B8;
+                font-size:.72rem;
+                font-weight:800;
+            }}
+            .yc-mini strong {{
+                display:block;
+                color:#F8FAFC;
+                font-size:1.08rem;
+                margin:4px 0 2px;
+            }}
+            .yc-reading {{
+                color: #CBD5E1;
+                line-height: 1.45;
+                font-size: 0.9rem;
+                margin: 8px 0 10px;
+            }}
+            .yc-chips {{
+                display:flex;
+                flex-wrap:wrap;
+                gap:6px;
+                margin-top: 10px;
+            }}
+            .yc-chip {{
+                border:1px solid #2b3b52;
+                background:#111827;
+                color:#CBD5E1;
+                border-radius:5px;
+                padding:5px 7px;
+                font-size:.75rem;
+                font-weight:800;
+            }}
+            .yc-footer {{
+                margin-top: 10px;
+                border-top: 1px solid #1f2a3a;
+                padding-top: 9px;
+                color:#F8FAFC;
+                font-size:.86rem;
+                font-weight:800;
+            }}
+            @media (max-width: 980px) {{
+                .yc-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+            }}
+        </style>
+        <section class="yc-panel">
+            <div class="yc-head">
+                <div>
+                    <div class="yc-kicker">Curva de juros americana | IA local TTS</div>
+                    <div class="yc-title">{esc(regime)}</div>
+                    <div style="color:#94A3B8; font-size:.78rem; margin-top:3px;">Fonte: {esc(str(analysis.get('source', '---')))} | confianca {esc(confidence)}</div>
+                </div>
+                <div class="yc-badge {regime_class}">
+                    <div style="font-size:.72rem; color:#94A3B8;">Vies operacional</div>
+                    <div>{esc(bias)}</div>
+                </div>
+            </div>
+            <div class="yc-grid">
+                {''.join(yield_cards)}
+                <div class="yc-mini"><span>10Y - 2Y</span><strong>{spread_10_2}</strong><small>{spread_10_2_chg}</small></div>
+                <div class="yc-mini"><span>30Y - 5Y</span><strong>{spread_30_5}</strong><small>{spread_30_5_chg}</small></div>
+            </div>
+            <div class="yc-reading">{esc(str(analysis.get('macro_reading', '')))}</div>
+            <div class="yc-chips">{impact_html}</div>
+            <div class="yc-footer">{esc(str(analysis.get('trader_sentence', '')))}</div>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+
 @st.fragment(run_every=30)
 def painel_corpo_global():
     """Tabelas detalhadas de mercados globais."""
@@ -2968,6 +3158,7 @@ def pagina_terminal_global():
     render_terminal_global_layout_css()
     st.markdown("<div id='tg-top'></div>", unsafe_allow_html=True)
     painel_topo_global()
+    render_yield_curve_regime_panel()
     
     body_col, corr_col = st.columns([0.74, 0.26], gap="medium")
 
