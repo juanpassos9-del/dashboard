@@ -2140,7 +2140,7 @@ def render_yield_curve_regime_panel():
                 border: 1px solid #263247;
                 background: linear-gradient(180deg, #0b1220 0%, #090d14 100%);
                 border-radius: 8px;
-                padding: 14px 16px;
+                padding: 16px 18px;
                 margin: 2px 0 18px;
                 color: #E5E7EB;
                 box-shadow: 0 10px 28px rgba(0,0,0,0.22);
@@ -2160,23 +2160,46 @@ def render_yield_curve_regime_panel():
                 letter-spacing: .03em;
             }}
             .yc-title {{
-                font-size: 1.25rem;
+                font-size: 2rem;
+                line-height: 1.02;
                 font-weight: 950;
                 color: #F8FAFC;
-                margin-top: 2px;
+                margin-top: 5px;
+                text-transform: uppercase;
+                letter-spacing: 0;
+                text-shadow: 0 0 22px rgba(96,165,250,.22);
             }}
             .yc-badge {{
-                border-radius: 6px;
-                padding: 8px 10px;
+                border-radius: 8px;
+                padding: 11px 14px;
                 font-weight: 950;
                 text-align: right;
-                min-width: 170px;
-                border: 1px solid #334155;
+                min-width: 230px;
+                border: 2px solid #334155;
                 background: #111827;
+                box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 0 22px rgba(0,0,0,.20);
             }}
-            .yc-badge.on {{ color: #00FFA3; border-color: rgba(0,255,163,.35); }}
-            .yc-badge.off {{ color: #FF4B4B; border-color: rgba(255,75,75,.45); }}
-            .yc-badge.neutral {{ color: #FFD166; border-color: rgba(255,209,102,.45); }}
+            .yc-badge.on {{
+                color: #00FFA3;
+                border-color: rgba(0,255,163,.72);
+                background: linear-gradient(180deg, rgba(0,255,163,.16), #0f1724);
+            }}
+            .yc-badge.off {{
+                color: #FF4B4B;
+                border-color: rgba(255,75,75,.8);
+                background: linear-gradient(180deg, rgba(255,75,75,.18), #0f1724);
+            }}
+            .yc-badge.neutral {{
+                color: #FFD166;
+                border-color: rgba(255,209,102,.75);
+                background: linear-gradient(180deg, rgba(255,209,102,.16), #0f1724);
+            }}
+            .yc-badge-main {{
+                font-size: 1.45rem;
+                line-height: 1.1;
+                margin-top: 3px;
+                text-transform: uppercase;
+            }}
             .yc-grid {{
                 display: grid;
                 grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -2205,8 +2228,12 @@ def render_yield_curve_regime_panel():
             .yc-reading {{
                 color: #CBD5E1;
                 line-height: 1.45;
-                font-size: 0.9rem;
-                margin: 8px 0 10px;
+                font-size: 1rem;
+                margin: 10px 0 12px;
+                border-left: 4px solid #60A5FA;
+                padding: 9px 12px;
+                background: rgba(15,23,36,.78);
+                border-radius: 6px;
             }}
             .yc-chips {{
                 display:flex;
@@ -2244,7 +2271,7 @@ def render_yield_curve_regime_panel():
                 </div>
                 <div class="yc-badge {regime_class}">
                     <div style="font-size:.72rem; color:#94A3B8;">Vies operacional</div>
-                    <div>{esc(bias)}</div>
+                    <div class="yc-badge-main">{esc(bias)}</div>
                 </div>
             </div>
             <div class="yc-grid">
