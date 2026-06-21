@@ -1789,6 +1789,18 @@ def secao_market_report_fragment():
                 history_items.append(
                     f"<span style='border:1px solid {h_color}55; color:{h_color}; background:#0B0F16; border-radius:5px; padding:5px 7px; font-size:0.72rem; font-weight:900;'>{h_time} {h_sent}</span>"
                 )
+        meta_chips = []
+        for label, value in [
+            ("Regime", ai_data.get("macro_regime")),
+            ("Confianca", ai_data.get("confidence")),
+            ("Score", ai_data.get("macro_score")),
+            ("Curva", ai_data.get("curve_regime")),
+            ("Curva vies", ai_data.get("curve_bias")),
+        ]:
+            if value not in (None, "", "---"):
+                meta_chips.append(
+                    f"<span style='border:1px solid #334155; background:#0B0F16; color:#CBD5E1; border-radius:5px; padding:5px 7px; font-size:0.72rem; font-weight:850;'><b style='color:#94A3B8;'>{sanitize_text(str(label))}</b> {sanitize_text(str(value))}</span>"
+                )
 
         st.markdown(
             f"""
@@ -1800,6 +1812,7 @@ def secao_market_report_fragment():
                     </div>
                     <div style="text-align:right; color:#94A3B8; font-size:0.75rem;">{sanitize_text(str(ai_data.get('updated_at', '---')))}</div>
                 </div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;">{''.join(meta_chips)}</div>
                 <div style="color:#E5E7EB; font-size:0.94rem; line-height:1.52; margin-top:12px;">{sanitize_text(ai_data.get('insight', '')).replace(chr(10), '<br>')}</div>
                 <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:14px;">{''.join(history_items)}</div>
             </section>
@@ -4496,6 +4509,11 @@ def pagina_painel_controle():
                                     history.append({
                                         "sentiment": new_insight.get("sentiment", "NEUTRO"),
                                         "updated_at": new_insight.get("updated_at", ""),
+                                        "macro_regime": new_insight.get("macro_regime", ""),
+                                        "confidence": new_insight.get("confidence", ""),
+                                        "macro_score": new_insight.get("macro_score", 0),
+                                        "curve_regime": new_insight.get("curve_regime", ""),
+                                        "curve_bias": new_insight.get("curve_bias", ""),
                                         "id": int(time.time())
                                     })
                                     history = history[-5:]
@@ -4595,6 +4613,11 @@ def pagina_painel_controle():
                                     history.append({
                                         "sentiment": new_insight.get("sentiment", "NEUTRO"),
                                         "updated_at": new_insight.get("updated_at", ""),
+                                        "macro_regime": new_insight.get("macro_regime", ""),
+                                        "confidence": new_insight.get("confidence", ""),
+                                        "macro_score": new_insight.get("macro_score", 0),
+                                        "curve_regime": new_insight.get("curve_regime", ""),
+                                        "curve_bias": new_insight.get("curve_bias", ""),
                                         "id": int(time.time())
                                     })
                                     history = history[-5:]
