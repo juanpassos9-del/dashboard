@@ -784,7 +784,6 @@ def generate_market_report(slot=None, force=False):
             curve_context = analyze_yield_curve_regime(global_data)
         except Exception as curve_error:
             curve_context = {"regime": "Neutro", "operational_bias": "Neutro", "macro_reading": f"Curva indisponivel: {curve_error}"}
-        ai_macro_context = _load_json_file("ai_insight.json", {}) or _load_app_state_value("ai_insight", {})
 
         slot_meta = REPORT_SLOTS[slot]
         previous_reports = "\n\n".join(
@@ -901,9 +900,6 @@ IMPLICACOES INTERMERCADOS:
 
 REGIME DA CURVA AMERICANA:
 {json.dumps(curve_context, ensure_ascii=False)}
-
-ULTIMA LEITURA DO ANALISTA IA MACRO GLOBAL:
-{json.dumps(ai_macro_context, ensure_ascii=False)}
 
 DADOS BRUTOS DE APOIO:
 - LOCAL: {json.dumps(local_data, ensure_ascii=False)}
