@@ -1872,19 +1872,6 @@ def secao_market_report_fragment():
         with st.container():
             st.markdown(latest.get("report", ""))
 
-    tab_labels = [
-        f"{report.get('slot_label', report.get('slot', 'Report'))} - {report.get('updated_at', '---')[-8:-3]}"
-        for report in reports
-    ]
-    tabs = st.tabs(tab_labels)
-    for tab, report in zip(tabs, reports):
-        with tab:
-            st.markdown(
-                f"**Janela:** `{report.get('slot_window', '---')}`  "
-                f"**Atualizado:** `{report.get('updated_at', '---')}`"
-            )
-            st.markdown(report.get("report", ""))
-
 
 @st.fragment(run_every=2)
 def painel_inferior_rtd():
