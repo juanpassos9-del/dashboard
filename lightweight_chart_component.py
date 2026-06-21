@@ -410,6 +410,8 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           <div id="lw-chart"></div>
         </div>
         <aside class="lw-side">
+          <div class="lw-stat"><span>ATR 14</span><strong id="lw-atr14">---</strong><small id="lw-atr14-extra">Stop 1x/1.5x ---</small></div>
+          <div class="lw-stat"><span>GARCH intraday</span><strong id="lw-garch-intraday">---</strong><small id="lw-garch-intraday-extra">Timeframe atual</small></div>
           <div class="lw-stat"><span>Sinal / Candle</span><strong id="lw-hover-title">Passe o mouse</strong><small id="lw-hover-data">OHLC, VWAP e sinal.</small></div>
           <div class="lw-settings" id="lw-ma-settings">
             <div class="lw-settings-title">Medias moveis</div>
@@ -1039,6 +1041,32 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         candles.forEach((c, i) => { sum += c.close; if (i >= period) sum -= candles[i - period].close; if (i >= period - 1) out.push({ time:c.time, value:sum / period }); });
         return out;
       }
+      function computeATR(candles, period=14) {
+        if (!Array.isArray(candles) || candles.length < 2) return { ok:false, period, value:NaN, percent:NaN, series:[] };
+        const trueRanges = [];
+        candles.forEach((c, i) => {
+          const prevClose = candles[i - 1]?.close;
+          if (!Number.isFinite(c?.high) || !Number.isFinite(c?.low)) return;
+          const tr = Number.isFinite(prevClose)
+            ? Math.max(c.high - c.low, Math.abs(c.high - prevClose), Math.abs(c.low - prevClose))
+            : c.high - c.low;
+          trueRanges.push({ time:c.time, value:tr });
+        });
+        const series = trueRanges.map((item, i) => {
+          const slice = trueRanges.slice(Math.max(0, i - period + 1), i + 1);
+          const value = slice.reduce((sum, row) => sum + row.value, 0) / slice.length;
+          return { time:item.time, value };
+        });
+        const value = series[series.length - 1]?.value;
+        const lastClose = candles[candles.length - 1]?.close;
+        return {
+          ok:Number.isFinite(value),
+          period,
+          value,
+          percent:Number.isFinite(value) && Number.isFinite(lastClose) && lastClose > 0 ? (value / lastClose) * 100 : NaN,
+          series,
+        };
+      }
       function corrPriceVolume(candles, n=80) {
         const data = candles.slice(-n); if (data.length < 10) return NaN;
         const xs = data.map((c, i) => i === 0 ? 0 : c.close - data[i - 1].close), ys = data.map((c) => c.volume);
@@ -1196,6 +1224,14 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const current = candles[candles.length - 1]?.close;
         const classification = classifyCurrentGarchZone(current, referencePrice, garch.latestVolatility);
         return { ...garch, referencePrice, referenceMode, garchTimeframe:garchSource === dailyCandles ? "D" : "intraday", zones, classification };
+      }
+      function calculateIntradayGarch(candles) {
+        const cfg = state.signalConfig.garch || {};
+        const garch = calculateGarch11Volatility(candles, { ...cfg, annualizationFactor:annualizationFactorForTimeframe(state.timeframe) });
+        const current = candles[candles.length - 1]?.close;
+        const referencePrice = candles[Math.max(0, candles.length - 2)]?.close ?? current;
+        const classification = classifyCurrentGarchZone(current, referencePrice, garch.latestVolatility);
+        return { ...garch, referencePrice, garchTimeframe:state.timeframe, classification };
       }
       function horizontalSessionLine(candles, value) {
         if (!candles.length || !Number.isFinite(value)) return [];
@@ -1518,8 +1554,10 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const volumeProfile = computeSessionVolumeProfile(candles);
         const weisWave = computeWeisWaveVolume(candles, 0.2);
         const garch = calculateGarchOverlay(candles, state.dailyCandles, refs, vwapDay);
+        const garchIntraday = calculateIntradayGarch(candles);
         const hv252 = calculateHistoricalVolatility(state.dailyCandles, 252);
-        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, signalMAs, stdevBands, weekVolBands, refs, volumeProfile, weisWave, garch, hv252 };
+        const atr14 = computeATR(candles, 14);
+        const indicators = { vwapDay, vwapWeek, vwapMonth, volumeStats, ma, signalMAs, stdevBands, weekVolBands, refs, volumeProfile, weisWave, garch, garchIntraday, hv252, atr14 };
         indicators.signals = generateSignals(candles, indicators);
         return indicators;
       }
@@ -1740,6 +1778,26 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const vwap = indicators.vwapDay;
         const last = state.candles[state.candles.length - 1], lastVwap = vwap[vwap.length - 1]?.value;
         const lastVol = indicators.volumeStats[indicators.volumeStats.length - 1] || {};
+        const atr = indicators.atr14 || {};
+        const garchIntraday = indicators.garchIntraday || {};
+        const gClass = garchIntraday.classification || {};
+        const sigmaSign = gClass.side === "upper" ? "+" : gClass.side === "lower" ? "-" : "";
+        const atrEl = document.getElementById("lw-atr14");
+        const atrExtraEl = document.getElementById("lw-atr14-extra");
+        const garchEl = document.getElementById("lw-garch-intraday");
+        const garchExtraEl = document.getElementById("lw-garch-intraday-extra");
+        if (atrEl) atrEl.textContent = atr.ok ? `${fmt(atr.value, 4)} | ${Number.isFinite(atr.percent) ? atr.percent.toFixed(2) : "---"}%` : "ATR indisponivel";
+        if (atrExtraEl) atrExtraEl.textContent = atr.ok ? `Stop 1x ${fmt(atr.value, 4)} | 1.5x ${fmt(atr.value * 1.5, 4)}` : "Aguardando 14 candles";
+        if (garchEl) {
+          garchEl.textContent = garchIntraday.ok
+            ? `${Number.isFinite(garchIntraday.latestVolatility) ? (garchIntraday.latestVolatility * 100).toFixed(3) : "---"}% | ${sigmaSign}${Number.isFinite(gClass.sigmaDistance) ? Math.abs(gClass.sigmaDistance).toFixed(2) : "---"}σ`
+            : (garchIntraday.warning || "GARCH indisponivel");
+        }
+        if (garchExtraEl) {
+          garchExtraEl.textContent = garchIntraday.ok
+            ? `${state.timeframe} | anual ${(garchIntraday.annualizedVolatility * 100).toFixed(2)}% | ${gClass.zone || "---"}`
+            : "Historico insuficiente no timeframe atual";
+        }
         renderAlerts(last, lastVwap, lastVol.rvol, indicators.signals);
       }
       function renderAlerts(last, vwap, rvol, signals) {
