@@ -208,6 +208,12 @@ def build_macro_regime_context(local_data, global_data, calendar_data):
 
 def _extract_sentiment(full_text, fallback="NEUTRO"):
     upper = full_text.upper()
+    if "REGIME: RISK-ON" in upper or "REGIME: RISK ON" in upper:
+        return "COMPRA"
+    if "REGIME: RISK-OFF" in upper or "REGIME: RISK OFF" in upper:
+        return "VENDA"
+    if "REGIME: NEUTRO" in upper or "REGIME: NEUTRO/SELETIVO" in upper:
+        return "NEUTRO"
     if "VEREDITO: COMPRA" in upper:
         return "COMPRA"
     if "VEREDITO: VENDA" in upper:
@@ -219,7 +225,11 @@ def _extract_sentiment(full_text, fallback="NEUTRO"):
 
 def _clean_verdict(full_text):
     cleaned = full_text
-    for verdict in ["VEREDITO: COMPRA", "VEREDITO: VENDA", "VEREDITO: NEUTRO"]:
+    for verdict in [
+        "VEREDITO: COMPRA", "VEREDITO: VENDA", "VEREDITO: NEUTRO",
+        "REGIME: RISK-ON", "REGIME: RISK ON", "REGIME: RISK-OFF", "REGIME: RISK OFF",
+        "REGIME: NEUTRO", "REGIME: NEUTRO/SELETIVO",
+    ]:
         cleaned = cleaned.replace(verdict, "")
         cleaned = cleaned.replace(verdict.lower(), "")
         cleaned = cleaned.replace(verdict.title(), "")
@@ -230,20 +240,23 @@ def _local_fallback_text(context):
     reasons = "; ".join(context.get("reasons") or ["sinais mistos"])
     calendar = context.get("calendar_focus") or ["Sem evento HIGH/MEDIUM carregado no calendario."]
     curve = context.get("curve", {})
-    return f"""MACRO GLOBAL
-Regime {context['regime']} com confianca {context['confidence']}. Score macro {context['score']}. Principais drivers: {reasons}.
+    return f"""REGIME MACRO
+{context['regime']} | confianca {context['confidence']} | score {context['score']}. Drivers: {reasons}.
 
-CURVA AMERICANA
+CURVA, JUROS E DOLAR
 {curve.get('regime', 'Neutro')} | {curve.get('bias', 'Neutro')}. {curve.get('reading', '')}
 
+INTERMERCADOS
+Juros e DXY sao o primeiro filtro; VIX confirma apetite a risco; EEM/EWZ/USDBRL mostram transmissao para emergentes e Brasil.
+
 CALENDARIO
-{chr(10).join('- ' + item for item in calendar[:4])}
+{chr(10).join('- ' + item for item in calendar[:3])}
 
-DIRECAO DO MERCADO
-Vies {context['sentiment_hint']}. Usar como filtro macro, confirmando por preco, VWAP, volume, fluxo e rejeicao.
+IMPACTO PROVAVEL
+Regime macro usado como filtro de risco. Entrada operacional depende do setup tecnico, liquidez e confirmacao do preco.
 
-PONTOS DE ATENCAO
-Se DXY, VIX, curva americana e emergentes divergirem, reduzir mao e evitar perseguir movimento.
+RISCO
+Se DXY, VIX, curva americana e emergentes divergirem, tratar o ambiente como seletivo.
 """
 
 
@@ -266,10 +279,16 @@ def generate_macro_insight():
 Voce e um Analista Macro Global Profissional, com mentalidade de trader institucional.
 
 Use o painel macro estruturado abaixo como fonte principal. Os dados brutos sao apenas apoio.
-Seu trabalho e transformar o contexto em direcao operacional clara para o Terminal de Trading.
+Seu trabalho e transformar o contexto em uma leitura curta de regime macro para o Terminal de Trading.
 
 HIERARQUIA OBRIGATORIA:
-Macro global -> Curva/Juros EUA -> DXY/USDBRL/6L -> VIX/risco -> EEM/EWZ -> commodities -> impacto em Brasil.
+1. Curva americana e yields
+2. DXY e liquidez global
+3. VIX e apetite a risco
+4. S&P 500, Nasdaq e Dow
+5. Emergentes: EEM, EWZ, USDBRL e 6L
+6. Commodities: petroleo, ouro e cripto
+7. Calendario economico
 
 PAINEL MACRO ESTRUTURADO:
 {json.dumps(macro_context, ensure_ascii=False, indent=2)}
@@ -280,35 +299,34 @@ MERCADOS GLOBAIS: {json.dumps(global_data, ensure_ascii=False)}
 CALENDARIO: {json.dumps(calendar_data, ensure_ascii=False)}
 
 FORMATO:
-MACRO GLOBAL
-2 a 4 linhas diretas.
+REGIME
+Uma linha com Risk-on, Risk-off ou Neutro/seletivo e o motivo principal.
 
-CURVA/JUROS, DXY E RISCO
-- Juros/curva:
-- DXY/BRL:
-- VIX/Emergentes:
+DRIVERS
+3 bullets curtos conectando dado observado -> leitura macro -> impacto provavel.
+
+INTERMERCADOS
+- Juros/DXY:
+- VIX/Indices EUA:
+- Emergentes/Brasil:
 - Commodities:
 
-FLUXO DE CAPITAL
-Para onde o dinheiro parece estar indo.
+CALENDARIO
+Classifique os eventos relevantes como inflacao, crescimento, emprego, politica monetaria ou neutro. Explique o risco macro em 1 ou 2 linhas.
 
-IMPACTO NOS ATIVOS
-- Indices EUA:
-- Brasil/EWZ/IBOV:
-- Dolar/USDBRL:
-- Commodities/cripto:
+IMPACTO PROVAVEL
+Explique em uma linha o efeito esperado em juros, DXY, petroleo, indices EUA e Brasil.
 
-DIRECAO DO MERCADO
-Compra, Venda ou Neutro, com justificativa curta.
-
-PONTOS DE ATENCAO
-Riscos e armadilhas.
+RISCO
+Uma linha com o principal ponto que pode invalidar a leitura.
 
 REGRAS:
 - Nao seja generico.
 - Nao invente dados ausentes.
 - Nao trate a curva como gatilho isolado.
-- A ultima linha deve ser exatamente: VEREDITO: COMPRA, VEREDITO: VENDA ou VEREDITO: NEUTRO.
+- Nao liste ativos isoladamente; explique a cadeia juros -> dolar -> risco -> emergentes -> Brasil.
+- Nao gere recomendacao direta de compra/venda. E uma leitura de regime macro, nao call de trade.
+- A ultima linha deve ser exatamente: REGIME: RISK-ON, REGIME: RISK-OFF ou REGIME: NEUTRO.
 """
             response = model.generate_content(prompt)
             full_text = getattr(response, "text", "") or ""
