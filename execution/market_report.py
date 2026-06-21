@@ -778,6 +778,13 @@ def generate_market_report(slot=None, force=False):
         market_regime = _market_regime(market_snapshot)
         market_context = "\n".join(_market_context_lines(market_snapshot, market_regime))
         market_implications = "\n".join(f"- {line}" for line in _market_implications(market_snapshot, market_regime))
+        try:
+            from execution.yield_curve_regime import analyze_yield_curve_regime
+
+            curve_context = analyze_yield_curve_regime(global_data)
+        except Exception as curve_error:
+            curve_context = {"regime": "Neutro", "operational_bias": "Neutro", "macro_reading": f"Curva indisponivel: {curve_error}"}
+        ai_macro_context = _load_json_file("ai_insight.json", {}) or _load_app_state_value("ai_insight", {})
 
         slot_meta = REPORT_SLOTS[slot]
         previous_reports = "\n\n".join(
@@ -865,6 +872,85 @@ INSTRUCOES:
 7. Termine com uma linha "Vies tatico:".
 
 Use Markdown compacto. Evite texto longo.
+"""
+
+        prompt = f"""
+Voce e o Estrategista-Chefe de uma mesa institucional macro global.
+Crie o MARKET REPORT {slot_meta['label'].upper()} de {date_str} em portugues do Brasil.
+
+Use somente os dados fornecidos. Nao invente precos, noticias, eventos ou leituras ausentes.
+Para cada conclusao importante, use o padrao mental: dado observado -> leitura macro -> impacto provavel.
+
+FOCO DO SLOT:
+{slot_meta['focus']}
+
+HIERARQUIA OBRIGATORIA:
+1. Curva de juros americana e yields
+2. DXY / dolar global
+3. VIX / apetite a risco
+4. S&P 500, Nasdaq e Dow
+5. Commodities: petroleo, ouro e cripto quando relevante
+6. Emergentes/Brasil: EWZ, IBOV, USDBRL
+7. Calendario economico e noticias
+
+PAINEL MACRO JA PROCESSADO:
+{market_context}
+
+IMPLICACOES INTERMERCADOS:
+{market_implications}
+
+REGIME DA CURVA AMERICANA:
+{json.dumps(curve_context, ensure_ascii=False)}
+
+ULTIMA LEITURA DO ANALISTA IA MACRO GLOBAL:
+{json.dumps(ai_macro_context, ensure_ascii=False)}
+
+DADOS BRUTOS DE APOIO:
+- LOCAL: {json.dumps(local_data, ensure_ascii=False)}
+- GLOBAL: {json.dumps(global_data, ensure_ascii=False)}
+
+PRINCIPAIS NOTICIAS DO MOMENTO:
+{news_context}
+
+CALENDARIO ECONOMICO DE HOJE (HORARIO DE BRASILIA):
+Fonte: {calendar_source}
+{calendar_context}
+
+REPORTS JA REGISTRADOS HOJE:
+{previous_reports}
+
+INSTRUCOES:
+1. Nao analise ativos isolados; sempre relacione juros, DXY, VIX, indices, commodities e Brasil.
+2. Se os sinais estiverem contraditorios, diga que o regime e misto e explique o conflito.
+3. Nao repita mecanicamente reports anteriores; atualize a leitura e destaque mudancas de regime.
+4. Seja curto, direto, profissional e sem frases genericas.
+5. Nao cite WIN e nao de recomendacao de day trade.
+
+FORMATO OBRIGATORIO:
+
+### Drivers do momento
+- 3 a 5 bullets.
+- Explique o principal regime: Risk-on, Risk-off ou Neutro/seletivo.
+- Destaque se ha alinhamento ou desalinhamento entre curva/juros, DXY, VIX e indices.
+
+### Global vs Brasil
+- Explique como o cenario global afeta EWZ, IBOV e USDBRL.
+- Diga se Brasil tende a performar melhor, pior ou em linha com mercados globais.
+- Cite commodities apenas se forem relevantes para Brasil.
+
+### Calendario economico e cenarios
+- Liste os principais eventos HIGH/MEDIUM.
+- Para cada evento importante, informe Atual, Projecao e Anterior.
+- Interprete acima/abaixo/em linha e impacto em juros, DXY, S&P 500, Nasdaq, Dow, petroleo/ouro quando fizer sentido.
+
+### Riscos radar
+- Liste riscos vindos das noticias.
+- Separe risco de inflacao, crescimento, geopolitica e politica monetaria quando aplicavel.
+
+### Vies tatico
+- Uma linha final.
+- Classifique como: Risk-on forte, Risk-on moderado, Neutro/seletivo, Risk-off moderado ou Risk-off forte.
+- Diga o que confirmaria ou invalidaria esse vies.
 """
 
         ai_errors = []
