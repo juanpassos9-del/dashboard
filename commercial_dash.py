@@ -1782,12 +1782,23 @@ def secao_market_report_fragment():
             ai_bg, ai_color, ai_label = "#171717", "#FFD166", "NEUTRO"
         history_items = []
         if isinstance(ai_history, list):
-            for item in ai_history[-5:]:
+            ai_history = ai_history[-5:]
+        else:
+            ai_history = []
+        for idx in range(5):
+            if idx < len(ai_history):
+                item = ai_history[idx]
                 h_sent = sanitize_text(str(item.get("sentiment", "NEUTRO")))
                 h_time = sanitize_text(str(item.get("updated_at", "---")))
+                h_regime = sanitize_text(str(item.get("macro_regime", "")))
                 h_color = "#00FFA3" if h_sent == "COMPRA" else ("#FF4B4B" if h_sent == "VENDA" else "#FFD166")
+                subtitle = f"<small style='display:block; color:#94A3B8; margin-top:2px; font-size:0.62rem;'>{h_regime}</small>" if h_regime else ""
                 history_items.append(
-                    f"<span style='border:1px solid {h_color}55; color:{h_color}; background:#0B0F16; border-radius:5px; padding:5px 7px; font-size:0.72rem; font-weight:900;'>{h_time} {h_sent}</span>"
+                    f"<span style='min-width:118px; border:1px solid {h_color}55; color:{h_color}; background:#0B0F16; border-radius:5px; padding:6px 8px; font-size:0.72rem; font-weight:900; text-align:center;'>{h_time} {h_sent}{subtitle}</span>"
+                )
+            else:
+                history_items.append(
+                    "<span style='min-width:118px; border:1px dashed #334155; color:#64748B; background:#0B0F16; border-radius:5px; padding:6px 8px; font-size:0.72rem; font-weight:850; text-align:center;'>aguardando<small style='display:block; color:#475569; margin-top:2px; font-size:0.62rem;'>analise</small></span>"
                 )
         meta_chips = []
         for label, value in [
@@ -1814,7 +1825,8 @@ def secao_market_report_fragment():
                 </div>
                 <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;">{''.join(meta_chips)}</div>
                 <div style="color:#E5E7EB; font-size:0.94rem; line-height:1.52; margin-top:12px;">{sanitize_text(ai_data.get('insight', '')).replace(chr(10), '<br>')}</div>
-                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:14px;">{''.join(history_items)}</div>
+                <div style="color:#94A3B8; font-size:0.7rem; font-weight:900; text-transform:uppercase; letter-spacing:.04em; margin-top:14px;">Historico das ultimas 5 analises</div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:7px;">{''.join(history_items)}</div>
             </section>
             """,
             unsafe_allow_html=True,
