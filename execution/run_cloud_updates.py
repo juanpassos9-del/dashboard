@@ -70,6 +70,7 @@ try:
                     history.append({
                         "sentiment": new_insight.get("sentiment", "NEUTRO"),
                         "updated_at": new_insight.get("updated_at", ""),
+                        "insight": new_insight.get("insight", ""),
                         "macro_regime": new_insight.get("macro_regime", ""),
                         "confidence": new_insight.get("confidence", ""),
                         "macro_score": new_insight.get("macro_score", 0),
