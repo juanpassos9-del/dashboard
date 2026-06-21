@@ -1770,6 +1770,43 @@ def secao_market_report_fragment():
     if sync_warning:
         st.warning(sync_warning)
 
+    ai_data = fetch_app_state_cached("ai_insight")
+    ai_history = fetch_app_state_cached("ai_insight_history") or []
+    if ai_data:
+        sent = ai_data.get("sentiment", "NEUTRO")
+        if sent == "COMPRA":
+            ai_bg, ai_color, ai_label = "#061F14", "#00FFA3", "COMPRA"
+        elif sent == "VENDA":
+            ai_bg, ai_color, ai_label = "#260606", "#FF4B4B", "VENDA"
+        else:
+            ai_bg, ai_color, ai_label = "#171717", "#FFD166", "NEUTRO"
+        history_items = []
+        if isinstance(ai_history, list):
+            for item in ai_history[-5:]:
+                h_sent = sanitize_text(str(item.get("sentiment", "NEUTRO")))
+                h_time = sanitize_text(str(item.get("updated_at", "---")))
+                h_color = "#00FFA3" if h_sent == "COMPRA" else ("#FF4B4B" if h_sent == "VENDA" else "#FFD166")
+                history_items.append(
+                    f"<span style='border:1px solid {h_color}55; color:{h_color}; background:#0B0F16; border-radius:5px; padding:5px 7px; font-size:0.72rem; font-weight:900;'>{h_time} {h_sent}</span>"
+                )
+
+        st.markdown(
+            f"""
+            <section style="background:{ai_bg}; border:1px solid {ai_color}55; border-left:7px solid {ai_color}; border-radius:8px; padding:18px 20px; margin:16px 0 18px;">
+                <div style="display:flex; justify-content:space-between; gap:14px; align-items:flex-start; flex-wrap:wrap;">
+                    <div>
+                        <div style="color:#94A3B8; font-size:0.72rem; font-weight:900; text-transform:uppercase; letter-spacing:.04em;">Analista IA Macro Global</div>
+                        <div style="color:{ai_color}; font-size:1.35rem; font-weight:950; margin-top:3px;">{ai_label}</div>
+                    </div>
+                    <div style="text-align:right; color:#94A3B8; font-size:0.75rem;">{sanitize_text(str(ai_data.get('updated_at', '---')))}</div>
+                </div>
+                <div style="color:#E5E7EB; font-size:0.94rem; line-height:1.52; margin-top:12px;">{sanitize_text(ai_data.get('insight', '')).replace(chr(10), '<br>')}</div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:14px;">{''.join(history_items)}</div>
+            </section>
+            """,
+            unsafe_allow_html=True,
+        )
+
     if st.session_state.get("market_report_last_generated"):
         generated = st.session_state["market_report_last_generated"]
         if isinstance(generated, dict) and generated not in reports:
