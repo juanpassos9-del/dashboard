@@ -1855,10 +1855,10 @@ def secao_market_report_fragment():
                     </div>
                     <div style="text-align:right; color:#94A3B8; font-size:0.75rem;">{sanitize_text(str(ai_data.get('updated_at', '---')))}</div>
                 </div>
-                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;">{''.join(meta_chips)}</div>
-                <div style="color:#E5E7EB; font-size:0.94rem; line-height:1.52; margin-top:12px;">{sanitize_text(ai_data.get('insight', '')).replace(chr(10), '<br>')}</div>
                 <div style="color:#94A3B8; font-size:0.7rem; font-weight:900; text-transform:uppercase; letter-spacing:.04em; margin-top:14px;">Historico das ultimas 5 analises</div>
                 <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:7px;">{''.join(history_items)}</div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;">{''.join(meta_chips)}</div>
+                <div style="color:#E5E7EB; font-size:0.94rem; line-height:1.52; margin-top:12px;">{sanitize_text(ai_data.get('insight', '')).replace(chr(10), '<br>')}</div>
             </section>
         """
 
