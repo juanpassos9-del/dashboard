@@ -2297,21 +2297,23 @@ def render_source_health_panel():
         rows = item.get("rows")
         rows_text = f" | {rows}" if rows is not None else ""
         msg = html.escape(str(item.get("message") or ""))
+        label = html.escape(labels.get(name, name))
+        status_safe = html.escape(status)
+        state_text = html.escape(status_label.get(status, status))
+        rows_safe = html.escape(rows_text)
+        age_text = fmt_age(item.get("age_seconds", 0))
         items.append(
-            f"""
-            <div class="source-health-pill {html.escape(status)}" title="{msg}">
-              <span class="source-dot"></span>
-              <strong>{html.escape(labels.get(name, name))}</strong>
-              <em>{html.escape(status_label.get(status, status))} | {fmt_age(item.get("age_seconds", 0))}{html.escape(rows_text)}</em>
-            </div>
-            """
+            f'<div class="source-health-pill {status_safe}" title="{msg}">'
+            f'<span class="source-dot"></span>'
+            f'<strong>{label}</strong>'
+            f'<em>{state_text} | {age_text}{rows_safe}</em>'
+            f'</div>'
         )
     if not items:
         return
 
     st.markdown(
-        f"""
-        <style>
+        f"""<style>
           .source-health-wrap {{
             display:flex; align-items:center; gap:8px; flex-wrap:wrap;
             margin:4px 0 14px; padding:8px 10px;
@@ -2339,12 +2341,7 @@ def render_source_health_panel():
           .source-health-pill.ok .source-dot {{ background:#22c55e; box-shadow:0 0 9px rgba(34,197,94,.7); }}
           .source-health-pill.stale .source-dot {{ background:#ff9800; box-shadow:0 0 9px rgba(255,152,0,.65); }}
           .source-health-pill.error .source-dot {{ background:#ff4b4b; box-shadow:0 0 9px rgba(255,75,75,.7); }}
-        </style>
-        <div class="source-health-wrap">
-          <span class="source-health-title">Saude das fontes</span>
-          {''.join(items)}
-        </div>
-        """,
+        </style><div class="source-health-wrap"><span class="source-health-title">Saude das fontes</span>{''.join(items)}</div>""",
         unsafe_allow_html=True,
     )
 
