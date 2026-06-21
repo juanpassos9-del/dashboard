@@ -1847,7 +1847,7 @@ def secao_market_report_fragment():
                     f"<span style='border:1px solid #334155; background:#0B0F16; color:#CBD5E1; border-radius:5px; padding:5px 7px; font-size:0.72rem; font-weight:850;'><b style='color:#94A3B8;'>{sanitize_text(str(label))}</b> {sanitize_text(str(value))}</span>"
                 )
 
-        panel_height = 640
+        panel_height = 920
         ai_card_html = f"""
             <section style="background:{ai_bg}; border:1px solid {ai_color}55; border-left:7px solid {ai_color}; border-radius:8px; padding:18px 20px; margin:16px 0 18px; height:{panel_height}px; overflow-y:auto; box-sizing:border-box;">
                 <div style="display:flex; justify-content:space-between; gap:14px; align-items:flex-start; flex-wrap:wrap;">
@@ -1879,7 +1879,7 @@ def secao_market_report_fragment():
     reports = sorted(reports, key=lambda item: slot_order.get(item.get("slot"), 99))
     latest = reports[-1]
 
-    panel_height = 640
+    panel_height = 920
     report_header_html = f"""
         <div style="background:#0A0A0A; border:1px solid #1a1a1a; border-top:4px solid #FF9800; padding:18px 20px; border-radius:8px; margin:0 0 14px;">
             <div style="display:flex; justify-content:space-between; gap:15px; align-items:flex-start; margin-bottom:12px; flex-wrap:wrap;">
