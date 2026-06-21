@@ -7,6 +7,12 @@ import requests
 import streamlit as st
 import yfinance as yf
 
+try:
+    from execution.source_health import mark_source
+except Exception:
+    def mark_source(*args, **kwargs):
+        return None
+
 
 YAHOO_LIGHTWEIGHT_ASSETS = [
     {"symbol": "SP500", "label": "S&P 500", "ticker": "^GSPC"},
@@ -169,7 +175,9 @@ def load_yahoo_lightweight_payload():
         if cached_payload:
             cached_payload["stale"] = True
             cached_payload["error"] = "; ".join(errors) or "Yahoo Finance retornou vazio; usando cache local."
+            mark_source("Lightweight Yahoo", "stale", message=cached_payload["error"], rows=len(cached_payload.get("series", {})), source="cache local")
             return cached_payload
+        mark_source("Lightweight Yahoo", "error", message="; ".join(errors) or "Yahoo Finance retornou vazio.", source="yfinance")
         return {
             "assets": YAHOO_LIGHTWEIGHT_ASSETS,
             "series": {},
@@ -217,10 +225,14 @@ def load_yahoo_lightweight_payload():
     result = {"assets": YAHOO_LIGHTWEIGHT_ASSETS, "series": payload, "error": "; ".join(errors) or None}
     if payload:
         _write_json_cache(YAHOO_PAYLOAD_CACHE, result)
+        mark_source("Lightweight Yahoo", "ok", message="Payload yfinance carregado.", rows=len(payload), source="yfinance")
     elif cached_payload:
         cached_payload["stale"] = True
         cached_payload["error"] = "; ".join(errors) or "Yahoo Finance retornou vazio; usando cache local."
+        mark_source("Lightweight Yahoo", "stale", message=cached_payload["error"], rows=len(cached_payload.get("series", {})), source="cache local")
         return cached_payload
+    else:
+        mark_source("Lightweight Yahoo", "error", message="; ".join(errors) or "Yahoo Finance retornou vazio.", source="yfinance")
     return result
 
 
@@ -228,6 +240,7 @@ def load_yahoo_lightweight_payload():
 def load_fred_lightweight_payload():
     api_key = _nested_secret_or_env("FRED_API_KEY", ("fred", "api_key"), ("FRED", "API_KEY"))
     if not api_key:
+        mark_source("FRED", "disabled", message="Configure FRED_API_KEY para habilitar FRED.", source="st.secrets/env")
         return {
             "enabled": False,
             "assets": FRED_LIGHTWEIGHT_ASSETS,
@@ -280,6 +293,11 @@ def load_fred_lightweight_payload():
                 }
         except Exception as e:
             errors.append(f"{series_id}: {e}")
+    if payload:
+        status = "stale" if errors else "ok"
+        mark_source("FRED", status, message="; ".join(errors) if errors else "Series FRED carregadas.", rows=len(payload), source="FRED API")
+    else:
+        mark_source("FRED", "error", message="; ".join(errors) or "FRED retornou vazio.", source="FRED API")
     return {"enabled": True, "assets": FRED_LIGHTWEIGHT_ASSETS, "series": payload, "error": "; ".join(errors) or None}
 
 
@@ -332,6 +350,11 @@ def load_bcb_lightweight_payload():
                 }
         except Exception as e:
             errors.append(f"{series_id}: {e}")
+    if payload:
+        status = "stale" if errors else "ok"
+        mark_source("Lightweight BCB", status, message="; ".join(errors) if errors else "Series BCB carregadas.", rows=len(payload), source="BCB SGS")
+    else:
+        mark_source("Lightweight BCB", "error", message="; ".join(errors) or "BCB retornou vazio.", source="BCB SGS")
     return {"enabled": True, "assets": BCB_LIGHTWEIGHT_ASSETS, "series": payload, "error": "; ".join(errors) or None}
 
 

@@ -10,6 +10,15 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from supabase import create_client, Client
 
+try:
+    from execution.source_health import get_source_health, mark_source
+except Exception:
+    def mark_source(*args, **kwargs):
+        return None
+
+    def get_source_health(*args, **kwargs):
+        return {}
+
 
 # ── Configuração da Página ──────────────────────────────────────────────────
 st.set_page_config(page_title="Terminal TTS | Inteligência", layout="wide")
@@ -718,34 +727,51 @@ def fetch_live_global_markets():
     """Busca cotacoes globais direto da fonte com cache curto para o Streamlit Cloud."""
     try:
         from execution.fetch_global_markets import fetch_global_data
-        return fetch_global_data(save_file=False)
+        data = fetch_global_data(save_file=False)
+        if data:
+            rows = sum(len(v) for v in (data.get("categories", data) or {}).values() if isinstance(v, list))
+            mark_source("Yahoo Finance", "ok", message="Mercados globais ao vivo.", rows=rows, source="execution.fetch_global_markets")
+        else:
+            mark_source("Yahoo Finance", "error", message="Mercados globais retornaram vazio.", source="execution.fetch_global_markets")
+        return data
     except Exception as e:
         print(f"[ERROR] Live global markets: {e}")
+        mark_source("Yahoo Finance", "error", message=str(e), source="execution.fetch_global_markets")
         return None
 
 def get_global_markets_data():
     """Usa Supabase/cache primeiro para nao travar o boot do Streamlit Cloud."""
     cached_data = fetch_app_state_cached("mercados_globais")
     if cached_data:
+        rows = sum(len(v) for v in (cached_data.get("categories", cached_data) or {}).values() if isinstance(v, list))
+        mark_source("Mercados Globais Cache", "stale", message="Usando app_state/Supabase como fallback rapido.", rows=rows, source="Supabase app_state")
         return cached_data
     live_data = fetch_live_global_markets()
     if live_data:
         return live_data
+    mark_source("Mercados Globais Cache", "error", message="Sem cache e sem fonte ao vivo.", source="Supabase/Yahoo")
     return None
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_investing_calendar_live():
     try:
         from execution.fetch_calendar import _fetch_investing_calendar
-        return _fetch_investing_calendar()
+        events = _fetch_investing_calendar()
+        if events:
+            mark_source("Investing Calendar", "ok", message="Calendario economico ao vivo.", rows=len(events), source="Investing")
+        else:
+            mark_source("Investing Calendar", "error", message="Investing retornou calendario vazio.", source="Investing")
+        return events
     except Exception as e:
         print(f"[WARN] Investing calendar unavailable: {e}")
+        mark_source("Investing Calendar", "error", message=str(e), source="Investing")
         return None
 
 def get_calendar_data():
     """Usa Supabase/cache primeiro para evitar spinner longo no boot."""
     cached_data = fetch_app_state_cached("calendario_economico")
     if cached_data:
+        mark_source("Calendario Cache", "stale", message="Usando app_state/Supabase como fallback rapido.", rows=len(cached_data) if isinstance(cached_data, list) else None, source="Supabase app_state")
         return cached_data
     live_events = fetch_investing_calendar_live()
     if live_events:
@@ -760,9 +786,12 @@ def get_calendar_data():
                 with open(path, "r", encoding="utf-8") as f:
                     local_events = _json.load(f)
                 if local_events:
+                    mark_source("Calendario Cache", "stale", message=f"Usando arquivo local {os.path.basename(path)}.", rows=len(local_events) if isinstance(local_events, list) else None, source="arquivo local")
                     return local_events
         except Exception as e:
             print(f"[WARN] Local calendar unavailable: {e}")
+            mark_source("Calendario Cache", "error", message=str(e), source="arquivo local")
+    mark_source("Calendario Cache", "error", message="Sem calendario em cache/local.", source="fallback")
     return None
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -774,6 +803,7 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
     news_list = fetch_app_state_cached("financial_juice_news") or []
     if news_list:
         news_sources.append("Historico Supabase")
+        mark_source("Financial Juice Cache", "stale", message="Usando historico Supabase.", rows=len(news_list), source="Supabase app_state")
 
     try:
         from execution.fetch_financial_juice import cached_financial_juice_news
@@ -781,6 +811,7 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
         if cached_news:
             news_list.extend(cached_news)
             news_sources.append("Historico local")
+            mark_source("Financial Juice Cache", "stale", message="Usando historico local.", rows=len(cached_news), source="cache local")
     except Exception as e:
         warnings.append(f"Historico local indisponivel: {e}")
 
@@ -795,13 +826,17 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
         if live_news:
             news_list.extend(live_news)
             news_sources.append("Financial Juice RSS direto")
+            mark_source("Financial Juice RSS", "ok", message="Feed RSS direto atualizado.", rows=len(live_news), source="Financial Juice")
         elif news_list:
             warnings.append("Buscando noticias novas; exibindo historico recente.")
+            mark_source("Financial Juice RSS", "stale", message="Fonte ao vivo sem novas noticias; exibindo historico.", rows=len(news_list), source="Financial Juice/cache")
     except Exception as e:
         if news_list:
             warnings.append("Fonte ao vivo indisponivel; exibindo historico recente.")
+            mark_source("Financial Juice RSS", "stale", message=f"Fonte ao vivo indisponivel: {e}", rows=len(news_list), source="Financial Juice/cache")
         else:
             warnings.append(f"Financial Juice direto indisponivel: {e}")
+            mark_source("Financial Juice RSS", "error", message=str(e), source="Financial Juice")
 
     seen_news = set()
     unique_news = []
@@ -826,8 +861,10 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
             if unique_news:
                 news_sources.append("Historico local")
                 warnings.append("Aguardando noticias novas; exibindo ultimas 10 do historico.")
+                mark_source("Financial Juice Cache", "stale", message="Aguardando noticias novas; exibindo historico local.", rows=len(unique_news), source="cache local")
         except Exception as e:
             warnings.append(f"Historico de noticias indisponivel: {e}")
+            mark_source("Financial Juice Cache", "error", message=str(e), source="cache local")
     try:
         from execution.fetch_financial_juice import ensure_brazil_time
         for item in unique_news:
@@ -2210,6 +2247,108 @@ def painel_topo_global():
     )
 
 
+def render_source_health_panel():
+    """Mostra a saude das fontes sem disparar novas chamadas externas."""
+    health = get_source_health(max_age_seconds=1800)
+    if not health:
+        return
+
+    order = [
+        "Yahoo Finance",
+        "Mercados Globais Cache",
+        "Investing Calendar",
+        "Calendario Cache",
+        "Financial Juice RSS",
+        "Financial Juice Cache",
+        "FRED",
+        "Lightweight Yahoo",
+        "Lightweight BCB",
+    ]
+    labels = {
+        "Yahoo Finance": "Yahoo",
+        "Mercados Globais Cache": "Mercados cache",
+        "Investing Calendar": "Investing",
+        "Calendario Cache": "Calendario cache",
+        "Financial Juice RSS": "NEWS",
+        "Financial Juice Cache": "NEWS cache",
+        "FRED": "FRED",
+        "Lightweight Yahoo": "LW Yahoo",
+        "Lightweight BCB": "LW BCB",
+    }
+    status_label = {"ok": "online", "stale": "cache", "error": "erro", "disabled": "off"}
+
+    def fmt_age(seconds):
+        try:
+            seconds = int(seconds)
+        except Exception:
+            return "--"
+        if seconds < 60:
+            return f"{seconds}s"
+        if seconds < 3600:
+            return f"{seconds // 60}min"
+        return f"{seconds // 3600}h"
+
+    items = []
+    for name in order:
+        item = health.get(name)
+        if not item:
+            continue
+        status = str(item.get("status", "error"))
+        rows = item.get("rows")
+        rows_text = f" | {rows}" if rows is not None else ""
+        msg = html.escape(str(item.get("message") or ""))
+        items.append(
+            f"""
+            <div class="source-health-pill {html.escape(status)}" title="{msg}">
+              <span class="source-dot"></span>
+              <strong>{html.escape(labels.get(name, name))}</strong>
+              <em>{html.escape(status_label.get(status, status))} | {fmt_age(item.get("age_seconds", 0))}{html.escape(rows_text)}</em>
+            </div>
+            """
+        )
+    if not items:
+        return
+
+    st.markdown(
+        f"""
+        <style>
+          .source-health-wrap {{
+            display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+            margin:4px 0 14px; padding:8px 10px;
+            border:1px solid rgba(148,163,184,.20); border-radius:8px;
+            background:rgba(15,23,42,.56);
+            font-family:"Roboto Mono","Consolas",monospace;
+          }}
+          .source-health-title {{
+            color:#94a3b8; font-size:.68rem; font-weight:900;
+            letter-spacing:.08em; text-transform:uppercase; margin-right:3px;
+          }}
+          .source-health-pill {{
+            display:flex; align-items:center; gap:6px;
+            border:1px solid rgba(148,163,184,.22); border-radius:999px;
+            padding:4px 8px; background:rgba(2,6,23,.54);
+            color:#cbd5e1; font-size:.68rem; line-height:1;
+          }}
+          .source-health-pill strong {{ color:#f8fafc; font-size:.68rem; }}
+          .source-health-pill em {{ color:#94a3b8; font-style:normal; }}
+          .source-health-pill.ok {{ border-color:rgba(34,197,94,.36); }}
+          .source-health-pill.stale {{ border-color:rgba(255,152,0,.42); }}
+          .source-health-pill.error {{ border-color:rgba(255,75,75,.48); }}
+          .source-health-pill.disabled {{ opacity:.72; }}
+          .source-dot {{ width:7px; height:7px; border-radius:999px; background:#94a3b8; }}
+          .source-health-pill.ok .source-dot {{ background:#22c55e; box-shadow:0 0 9px rgba(34,197,94,.7); }}
+          .source-health-pill.stale .source-dot {{ background:#ff9800; box-shadow:0 0 9px rgba(255,152,0,.65); }}
+          .source-health-pill.error .source-dot {{ background:#ff4b4b; box-shadow:0 0 9px rgba(255,75,75,.7); }}
+        </style>
+        <div class="source-health-wrap">
+          <span class="source-health-title">Saude das fontes</span>
+          {''.join(items)}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def get_yield_curve_regime_cached(global_data):
     from execution.yield_curve_regime import analyze_yield_curve_regime
@@ -3324,6 +3463,7 @@ def pagina_terminal_global():
     render_terminal_global_layout_css()
     st.markdown("<div id='tg-top'></div>", unsafe_allow_html=True)
     painel_topo_global()
+    render_source_health_panel()
     render_yield_curve_regime_panel()
     
     body_col, corr_col = st.columns([0.74, 0.26], gap="medium")
