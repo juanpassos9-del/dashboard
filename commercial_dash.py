@@ -1764,11 +1764,84 @@ def secao_market_report_fragment():
             except Exception as e:
                 st.error(f"Erro ao atualizar Market Report: {e}")
 
+    if st.button("Atualizar Analista IA Macro", use_container_width=True, key="ai_macro_refresh_now"):
+        with st.spinner("Atualizando Analista IA Macro..."):
+            try:
+                import json as _json
+                from execution.ai_analyst import generate_macro_insight
+
+                try:
+                    for secret_key in ("GOOGLE_API_KEY", "GEMINI_API_KEY"):
+                        secret_value = st.secrets.get(secret_key, "")
+                        if secret_value:
+                            os.environ[secret_key] = secret_value
+                except Exception:
+                    pass
+
+                prime_market_report_files()
+                generate_macro_insight()
+                ai_warnings = []
+                saved_online = False
+                new_insight = None
+                for path in ["ai_insight.json", "execution/ai_insight.json"]:
+                    if os.path.exists(path):
+                        with open(path, "r", encoding="utf-8") as f:
+                            new_insight = _json.load(f)
+                        break
+                if not new_insight:
+                    st.warning("Nao foi possivel gerar a analise do Analista IA agora.")
+                elif supabase:
+                    ok, warning = sync_app_state_value("ai_insight", new_insight)
+                    saved_online = saved_online or ok
+                    if warning:
+                        ai_warnings.append(f"ai_insight: {warning}")
+                    try:
+                        history = fetch_app_state("ai_insight_history") or []
+                        if not isinstance(history, list):
+                            history = []
+                        history.append({
+                            "sentiment": new_insight.get("sentiment", "NEUTRO"),
+                            "updated_at": new_insight.get("updated_at", ""),
+                            "insight": new_insight.get("insight", ""),
+                            "macro_regime": new_insight.get("macro_regime", ""),
+                            "confidence": new_insight.get("confidence", ""),
+                            "macro_score": new_insight.get("macro_score", 0),
+                            "curve_regime": new_insight.get("curve_regime", ""),
+                            "curve_bias": new_insight.get("curve_bias", ""),
+                            "id": int(time.time()),
+                        })
+                        ok, warning = sync_app_state_value("ai_insight_history", history[-5:])
+                        saved_online = saved_online or ok
+                        if warning:
+                            ai_warnings.append(f"ai_insight_history: {warning}")
+                    except Exception as hist_error:
+                        ai_warnings.append(f"ai_insight_history: {hist_error}")
+
+                    fetch_app_state_cached.clear()
+                    fetch_app_state_fast.clear()
+                    if ai_warnings:
+                        st.session_state["ai_macro_sync_warning"] = "Analista IA atualizado, mas houve aviso ao salvar historico online: " + " | ".join(ai_warnings[:2])
+                    elif saved_online:
+                        st.session_state["ai_macro_sync_success"] = "Analista IA atualizado e salvo."
+                    else:
+                        st.session_state["ai_macro_sync_warning"] = "Analista IA gerado nesta sessao, mas nao foi salvo no historico online."
+                    st.rerun()
+                else:
+                    st.session_state["ai_macro_sync_warning"] = "Analista IA gerado, mas Supabase esta indisponivel para salvar no historico online."
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao atualizar Analista IA Macro: {e}")
+
     if st.session_state.pop("market_report_sync_success", ""):
         st.success("Analise atualizada e salva.")
     sync_warning = st.session_state.pop("market_report_sync_warning", "")
     if sync_warning:
         st.warning(sync_warning)
+    if st.session_state.pop("ai_macro_sync_success", ""):
+        st.success("Analista IA atualizado e salvo.")
+    ai_sync_warning = st.session_state.pop("ai_macro_sync_warning", "")
+    if ai_sync_warning:
+        st.warning(ai_sync_warning)
 
     ai_card_html = ""
     ai_data = fetch_app_state_cached("ai_insight")
