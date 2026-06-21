@@ -1372,17 +1372,21 @@ def _market_visual_items(global_data):
     """Extrai os principais ativos globais para graficos compactos do Market Report."""
     if not global_data:
         return []
-    if isinstance(global_data, dict):
-        raw_items = []
-        for value in global_data.values():
-            if isinstance(value, list):
-                raw_items.extend([item for item in value if isinstance(item, dict)])
-            elif isinstance(value, dict):
-                raw_items.append(value)
-    elif isinstance(global_data, list):
-        raw_items = [item for item in global_data if isinstance(item, dict)]
-    else:
-        raw_items = []
+
+    def flatten_assets(value):
+        items = []
+        if isinstance(value, list):
+            for entry in value:
+                items.extend(flatten_assets(entry))
+        elif isinstance(value, dict):
+            if value.get("name") or value.get("symbol") or value.get("ticker"):
+                items.append(value)
+            else:
+                for nested in value.values():
+                    items.extend(flatten_assets(nested))
+        return items
+
+    raw_items = flatten_assets(global_data)
 
     def label_of(item):
         return str(item.get("name") or item.get("label") or item.get("symbol") or "").strip()
@@ -1439,6 +1443,7 @@ def render_market_report_visuals():
     """Figuras leves para ilustrar o Market Report sem depender da IA."""
     rows = _market_visual_items(get_global_markets_data())
     if not rows:
+        st.info("Painel visual indisponivel: sem dados globais suficientes no cache.")
         return
     try:
         import plotly.graph_objects as go
