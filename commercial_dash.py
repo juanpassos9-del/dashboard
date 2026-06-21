@@ -1368,6 +1368,157 @@ def clean_val(val):
 
 
 
+def _market_visual_items(global_data):
+    """Extrai os principais ativos globais para graficos compactos do Market Report."""
+    if not global_data:
+        return []
+    if isinstance(global_data, dict):
+        raw_items = []
+        for value in global_data.values():
+            if isinstance(value, list):
+                raw_items.extend([item for item in value if isinstance(item, dict)])
+            elif isinstance(value, dict):
+                raw_items.append(value)
+    elif isinstance(global_data, list):
+        raw_items = [item for item in global_data if isinstance(item, dict)]
+    else:
+        raw_items = []
+
+    def label_of(item):
+        return str(item.get("name") or item.get("label") or item.get("symbol") or "").strip()
+
+    def symbol_of(item):
+        return str(item.get("symbol") or item.get("ticker") or "").strip()
+
+    def change_of(item):
+        for key in ("change_pct", "change_percent", "percent_change", "var_pct", "variation", "change"):
+            if key in item:
+                return clean_val(item.get(key))
+        return 0.0
+
+    wanted = [
+        ("S&P 500", ("s&p 500", "sp 500", "^gspc", "usa500", "spy")),
+        ("Nasdaq", ("nasdaq", "^ixic", "usatec", "nas100")),
+        ("Dow Jones", ("dow", "^dji", "djia")),
+        ("Russell", ("russell", "rty", "iwm")),
+        ("VIX", ("vix", "^vix", "vxx")),
+        ("DXY", ("dxy", "dolar index", "dollar index")),
+        ("US10Y", ("us10y", "us 10y", "10 year", "^tnx")),
+        ("US30Y", ("us30y", "us 30y", "30 year", "^tyx")),
+        ("Brent", ("brent", "ukoil", "bz=f")),
+        ("WTI", ("wti", "crude oil", "cl=f")),
+        ("Gold", ("gold", "ouro", "xau", "gc=f")),
+        ("IBOV", ("ibov", "bovespa", "^bvsp")),
+        ("EWZ", ("ewz",)),
+        ("USDBRL", ("usdbrl", "brl=x", "usdb")),
+    ]
+
+    rows = []
+    used_ids = set()
+    for display, needles in wanted:
+        found = None
+        for item in raw_items:
+            haystack = f"{label_of(item)} {symbol_of(item)}".lower()
+            if any(needle in haystack for needle in needles):
+                found = item
+                break
+        if found:
+            item_id = id(found)
+            if item_id in used_ids:
+                continue
+            used_ids.add(item_id)
+            rows.append({
+                "Ativo": display,
+                "Variacao": change_of(found),
+                "Preco": found.get("price") or found.get("last") or found.get("value") or found.get("close") or "---",
+            })
+    return rows
+
+
+def render_market_report_visuals():
+    """Figuras leves para ilustrar o Market Report sem depender da IA."""
+    rows = _market_visual_items(get_global_markets_data())
+    if not rows:
+        return
+    try:
+        import plotly.graph_objects as go
+    except Exception:
+        return
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return
+
+    regime_score = 0
+    score_rules = {
+        "S&P 500": 1, "Nasdaq": 1, "Dow Jones": 1, "Russell": 1,
+        "VIX": -1, "DXY": -1, "US10Y": -1, "US30Y": -1, "USDBRL": -1,
+        "Brent": 0, "WTI": 0, "Gold": 0, "IBOV": 1, "EWZ": 1,
+    }
+    for row in rows:
+        direction = 1 if row["Variacao"] > 0.01 else (-1 if row["Variacao"] < -0.01 else 0)
+        regime_score += direction * score_rules.get(row["Ativo"], 0)
+    if regime_score >= 3:
+        regime_label, regime_color = "Risk-on", "#00FFA3"
+    elif regime_score <= -3:
+        regime_label, regime_color = "Risk-off", "#FF4B4B"
+    else:
+        regime_label, regime_color = "Neutro/seletivo", "#FFD166"
+
+    st.markdown("#### Painel visual do Market Report")
+    c1, c2 = st.columns([0.64, 0.36], gap="medium")
+    with c1:
+        df_bar = df.copy()
+        df_bar["Cor"] = df_bar["Variacao"].apply(lambda x: "#00FFA3" if x > 0 else ("#FF4B4B" if x < 0 else "#FFD166"))
+        fig = go.Figure(go.Bar(
+            x=df_bar["Variacao"],
+            y=df_bar["Ativo"],
+            orientation="h",
+            marker_color=df_bar["Cor"],
+            text=[f"{v:+.2f}%" for v in df_bar["Variacao"]],
+            textposition="outside",
+            hovertemplate="%{y}: %{x:+.2f}%<extra></extra>",
+        ))
+        fig.update_layout(
+            height=max(280, len(df_bar) * 25),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#E5E7EB", family='"Roboto Mono", monospace', size=11),
+            margin=dict(l=5, r=35, t=8, b=8),
+            showlegend=False,
+            xaxis=dict(showgrid=True, gridcolor="#1F2937", zeroline=True, zerolinecolor="#94A3B8", ticksuffix="%"),
+            yaxis=dict(autorange="reversed", title=None),
+        )
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    with c2:
+        metric_html = [
+            f"""
+            <div style="background:#0B0F16; border:1px solid {regime_color}66; border-left:6px solid {regime_color}; border-radius:8px; padding:13px 14px; margin-bottom:10px;">
+                <div style="color:#94A3B8; font-size:0.72rem; font-weight:900; text-transform:uppercase;">Regime visual</div>
+                <div style="color:{regime_color}; font-size:1.45rem; font-weight:950;">{regime_label}</div>
+                <div style="color:#CBD5E1; font-size:0.78rem;">Score intermercado: {regime_score:+d}</div>
+            </div>
+            """
+        ]
+        for name in ["US10Y", "US30Y", "DXY", "VIX", "Brent", "Gold"]:
+            item = next((row for row in rows if row["Ativo"] == name), None)
+            if not item:
+                continue
+            color = "#00FFA3" if item["Variacao"] > 0 else ("#FF4B4B" if item["Variacao"] < 0 else "#FFD166")
+            metric_html.append(
+                f"""
+                <div style="display:flex; justify-content:space-between; align-items:center; background:#111827; border:1px solid #263244; border-radius:7px; padding:9px 10px; margin-bottom:6px;">
+                    <div>
+                        <div style="color:#94A3B8; font-size:0.68rem; font-weight:900;">{sanitize_text(name)}</div>
+                        <div style="color:#E5E7EB; font-size:0.95rem; font-weight:850;">{sanitize_text(str(item['Preco']))}</div>
+                    </div>
+                    <div style="color:{color}; font-size:0.95rem; font-weight:950;">{item['Variacao']:+.2f}%</div>
+                </div>
+                """
+            )
+        st.markdown("".join(metric_html), unsafe_allow_html=True)
+
+
 # ── Estilo Global ───────────────────────────────────────────────────────────
 st.markdown("""
     <style>
@@ -1769,6 +1920,8 @@ def secao_market_report_fragment():
     sync_warning = st.session_state.pop("market_report_sync_warning", "")
     if sync_warning:
         st.warning(sync_warning)
+
+    render_market_report_visuals()
 
     ai_card_html = ""
     ai_data = fetch_app_state_cached("ai_insight")
