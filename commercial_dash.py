@@ -3801,7 +3801,7 @@ def secao_calendario_global_fragment():
 
     now_br = datetime.now(ZoneInfo("America/Sao_Paulo"))
     today_str = now_br.strftime("%Y-%m-%d")
-    selected_currencies = ["USD", "EUR", "GBP", "JPY", "CNY", "CAD", "AUD", "NZD", "CHF"]
+    selected_currencies = ["USD", "BRL", "EUR", "GBP", "JPY", "CNY", "CAD", "AUD", "NZD", "CHF"]
     impact_rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "HOLIDAY": 3}
 
     events = [
@@ -3814,7 +3814,7 @@ def secao_calendario_global_fragment():
     st.markdown("<div id='tg-calendario'></div>", unsafe_allow_html=True)
     st.markdown("#### Calendario Economico")
     source_label = next((event.get("source") for event in events if event.get("source")), "Supabase")
-    st.caption(f"Eventos de hoje ({today_str}) | Horario de Brasilia | Fonte: {source_label}")
+    st.caption(f"Eventos de hoje ({today_str}) | Horario de Brasilia | Foco IA: proximos eventos EUA/USD e Brasil/BRL | Fonte: {source_label}")
 
     def event_datetime(event):
         try:
@@ -3849,15 +3849,46 @@ def secao_calendario_global_fragment():
             and str(event.get("previous", "---")).strip() not in ["", "---", "-"]
         )
 
+    def is_us_or_brl_event(event):
+        currency = str(event.get("currency", "")).upper()
+        text = f"{event.get('event', '')} {event.get('country', '')}".lower()
+        br_terms = ["brasil", "brazil", "brl", "bcb", "copom", "selic", "ipca", "igp", "real", "fiscal"]
+        us_terms = ["fed", "fomc", "powell", "treasury", "payroll", "jobless", "jolts", "pce", "cpi", "ppi", "ism", "pmi"]
+        return currency in {"USD", "BRL"} or any(term in text for term in br_terms + us_terms)
+
+    def macro_focus_rank(event):
+        currency = str(event.get("currency", "")).upper()
+        text = f"{event.get('event', '')} {event.get('country', '')}".lower()
+        if currency == "USD":
+            region_rank = 0
+        elif currency == "BRL" or any(term in text for term in ["brasil", "brazil", "bcb", "copom", "selic", "ipca", "real"]):
+            region_rank = 1
+        elif is_us_or_brl_event(event):
+            region_rank = 2
+        else:
+            region_rank = 5
+        event_dt = event_datetime(event)
+        minutes_until = int((event_dt - now_br).total_seconds() // 60) if event_dt else 9999
+        bull_rank = -int(event.get("bull_count", 0) or 0)
+        return (region_rank, impact_rank.get(event.get("impact", ""), 9), bull_rank, max(minutes_until, 0), event.get("time", "99:99"))
+
     released_investing_events = [event for event in analysis_pool if has_actual(event)]
     upcoming_analyzable_events = [
         event for event in upcoming_events
         if event in analysis_pool and (has_projection(event) or has_actual(event))
     ]
+    focused_upcoming_events = sorted([event for event in upcoming_events if is_us_or_brl_event(event)], key=macro_focus_rank)
+    focused_upcoming_analyzable_events = sorted([event for event in upcoming_analyzable_events if is_us_or_brl_event(event)], key=macro_focus_rank)
+    focused_released_events = [event for event in released_investing_events if is_us_or_brl_event(event)]
+    display_upcoming_events = focused_upcoming_events if focused_upcoming_events else upcoming_events
     analysis_event = (
-        upcoming_analyzable_events[0]
-        if upcoming_analyzable_events
-        else (released_investing_events[-1] if released_investing_events else next_event)
+        focused_upcoming_analyzable_events[0]
+        if focused_upcoming_analyzable_events
+        else (
+            upcoming_analyzable_events[0]
+            if upcoming_analyzable_events
+            else (focused_released_events[-1] if focused_released_events else (released_investing_events[-1] if released_investing_events else next_event))
+        )
     )
 
     analysis_col, widget_col = st.columns([1.05, 1], gap="large")
@@ -3878,24 +3909,26 @@ def secao_calendario_global_fragment():
 
             next_event_key = None
             if next_event or analysis_event:
-                if upcoming_events:
+                if display_upcoming_events:
+                    display_next_event = display_upcoming_events[0]
                     next_event_key = (
-                        next_event.get("date"),
-                        next_event.get("time"),
-                        next_event.get("currency"),
-                        next_event.get("event"),
+                        display_next_event.get("date"),
+                        display_next_event.get("time"),
+                        display_next_event.get("currency"),
+                        display_next_event.get("event"),
                     )
-                    top_impact = next_event.get("impact", "")
+                    top_impact = display_next_event.get("impact", "")
                     top_impact_color = "#FF4B4B" if top_impact == "HIGH" else ("#FF9800" if top_impact == "MEDIUM" else "#888")
                     upcoming_rows = []
-                    for idx, event in enumerate(upcoming_events[:3], start=1):
+                    for idx, event in enumerate(display_upcoming_events[:3], start=1):
                         impact = event.get("impact", "")
                         impact_color = "#FF4B4B" if impact == "HIGH" else ("#FF9800" if impact == "MEDIUM" else "#888")
                         border_top = "border-top:1px solid #242b36;" if idx > 1 else ""
+                        focus_badge = "FOCO USD/BRL" if is_us_or_brl_event(event) else "GLOBAL"
                         upcoming_rows.append(
                             f"<div style='{border_top} padding:{'10px' if idx > 1 else '0'} 0 0 0; margin-top:{'10px' if idx > 1 else '0'};'>"
                             f"<div style='display:flex; justify-content:space-between; gap:18px; align-items:center; flex-wrap:wrap;'>"
-                            f"<div style='font-size:0.72rem; color:#888; font-weight:800; text-transform:uppercase;'>Proximo evento #{idx}</div>"
+                            f"<div style='font-size:0.72rem; color:#888; font-weight:800; text-transform:uppercase;'>Proximo evento #{idx} | {focus_badge}</div>"
                             f"<div style='color:{impact_color}; font-weight:900; font-size:0.84rem;'>{impact or '---'} | {event.get('bull_count', 1)} touro(s)</div>"
                             f"</div>"
                             f"<div style='font-size:1rem; font-weight:800; color:#FFF; margin-top:4px;'>{event.get('time', '---')} | {event.get('currency', '---')} | {event.get('event', '---')}</div>"
@@ -3936,7 +3969,7 @@ def secao_calendario_global_fragment():
                         <div style="border:1px solid #334155; border-left:5px solid {effect_color}; border-radius:8px; padding:18px 20px; margin:0 0 16px 0; background:#0b1220;">
                             <div style="display:flex; justify-content:space-between; gap:16px; align-items:flex-start; flex-wrap:wrap;">
                                 <div>
-                                    <div style="font-size:0.72rem; color:#94A3B8; font-weight:800; text-transform:uppercase;">IA Macro TTS - calendario + intermercados</div>
+                                    <div style="font-size:0.72rem; color:#94A3B8; font-weight:800; text-transform:uppercase;">IA Macro TTS - foco EUA/BRL + intermercados</div>
                                     <div style="font-size:0.74rem; color:#64748B; margin-top:6px; text-transform:uppercase;">{panel_label}</div>
                                     <div style="font-size:1.15rem; color:#FFF; font-weight:900; margin-top:4px;">{analysis_event.get('time', '---')} | {analysis_event.get('currency', '---')} | {analysis_event.get('event', '---')}</div>
                                 </div>
