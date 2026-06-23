@@ -4320,6 +4320,11 @@ def pagina_watchlist():
           .wl-kpi {{background:#0B1220; border:1px solid #1F2937; border-radius:8px; padding:12px;}}
           .wl-kpi span {{display:block; color:#94A3B8; font-size:.72rem; font-weight:800; text-transform:uppercase;}}
           .wl-kpi strong {{display:block; color:#F8FAFC; font-size:1.1rem; margin-top:5px;}}
+          .wl-category {{--cat:#38BDF8; --cat-rgb:56,189,248; border:1px solid rgba(var(--cat-rgb),.42); border-top:3px solid var(--cat); border-radius:10px; background:linear-gradient(180deg,rgba(var(--cat-rgb),.13),rgba(11,18,32,.48) 24%,rgba(11,18,32,.12)); padding:14px; margin:0 0 18px; box-shadow:0 12px 32px rgba(0,0,0,.18);}}
+          .wl-category-header {{display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px;}}
+          .wl-category-name {{display:flex; align-items:center; gap:8px; color:#F8FAFC; font-size:1rem; font-weight:950; letter-spacing:.02em; text-transform:uppercase;}}
+          .wl-category-dot {{width:9px; height:9px; border-radius:999px; background:var(--cat); box-shadow:0 0 16px rgba(var(--cat-rgb),.82); flex:0 0 auto;}}
+          .wl-category-subtitle {{color:var(--cat); font-size:.7rem; font-weight:950; text-transform:uppercase; text-align:right;}}
           .wl-card {{border:1px solid #263244; border-radius:8px; background:#0B1220; padding:13px 14px; margin-bottom:10px; position:relative;}}
           .wl-card.selected {{border-color:rgba(0,255,163,.72); border-left:5px solid #00FFA3; background:linear-gradient(90deg, rgba(0,255,163,.10), #0B1220 38%); box-shadow:0 0 0 1px rgba(0,255,163,.10), 0 10px 28px rgba(0,0,0,.24);}}
           .wl-head {{display:flex; justify-content:space-between; gap:12px; align-items:flex-start;}}
@@ -4349,7 +4354,8 @@ def pagina_watchlist():
           .wl-panel-title {{display:flex; justify-content:space-between; align-items:center; gap:10px; margin:4px 0 10px;}}
           .wl-panel-title h3 {{margin:0; color:#F8FAFC; font-size:1.05rem;}}
           .wl-panel-title span {{color:#94A3B8; font-size:.72rem; font-weight:800; text-transform:uppercase;}}
-          .wl-comment {{border:1px solid #1F2937; background:#090F1A; border-radius:8px; padding:11px 12px; color:#CBD5E1; font-size:.86rem; line-height:1.45; margin-bottom:10px;}}
+          .wl-comment {{border:1px solid rgba(var(--cat-rgb),.34); background:rgba(9,15,26,.68); border-radius:8px; padding:11px 12px; color:#CBD5E1; font-size:.86rem; line-height:1.45; margin-bottom:10px;}}
+          .wl-empty {{border:1px solid rgba(var(--cat-rgb),.26); background:rgba(var(--cat-rgb),.10); color:#BAE6FD; border-radius:8px; padding:13px 14px; font-size:.86rem;}}
           @media(max-width:900px) {{.wl-kpi-grid {{grid-template-columns:1fr 1fr;}} .wl-panel-grid {{grid-template-columns:1fr;}} .wl-grid {{grid-template-columns:1fr 1fr;}}}}
         </style>
         <div class="wl-kpi-grid">
@@ -4362,10 +4368,9 @@ def pagina_watchlist():
         unsafe_allow_html=True,
     )
 
-    def render_recommendations(items, limit=10):
+    def build_recommendation_cards(items, limit=10):
         if not items:
-            st.info("Sem recomendacoes com dados suficientes para este bloco.")
-            return
+            return '<div class="wl-empty">Sem recomendacoes com dados suficientes para este bloco.</div>'
         html_cards = []
         for item in sorted(items, key=lambda r: r.get("score_atual", 0), reverse=True)[:limit]:
             score = item.get("score_atual", 0)
@@ -4408,7 +4413,10 @@ def pagina_watchlist():
                 </div>
                 """
             )
-        st.markdown("".join(html_cards), unsafe_allow_html=True)
+        return "".join(html_cards)
+
+    def render_recommendations(items, limit=10):
+        st.markdown(build_recommendation_cards(items, limit), unsafe_allow_html=True)
 
     def rec_filter(tipo=None, bloco=None):
         out = recs
@@ -4463,12 +4471,12 @@ def pagina_watchlist():
 
     comments = payload.get("commentary", {})
     watchlist_blocks = [
-        ("Brasil", "Brasil - Acoes", "Swing + Position", "brasil", 5),
-        ("EUA", "EUA - ETFs Setoriais", "Rotacao setorial", "eua", 5),
-        ("Cripto", "Cripto", "Liquidez + beta", "cripto", 4),
-        ("Moedas", "Moedas / Forex", "FX macro", "moedas", 4),
-        ("Commodities", "Commodities", "Energia + graos", "commodities", 4),
-        ("Metais", "Metais", "Preciosos + industriais", "metais", 4),
+        ("Brasil", "Brasil - Acoes", "Swing + Position", "brasil", 5, "#00FFA3", "0,255,163"),
+        ("EUA", "EUA - ETFs Setoriais", "Rotacao setorial", "eua", 5, "#38BDF8", "56,189,248"),
+        ("Cripto", "Cripto", "Liquidez + beta", "cripto", 4, "#F59E0B", "245,158,11"),
+        ("Moedas", "Moedas / Forex", "FX macro", "moedas", 4, "#22D3EE", "34,211,238"),
+        ("Commodities", "Commodities", "Energia + graos", "commodities", 4, "#F97316", "249,115,22"),
+        ("Metais", "Metais", "Preciosos + industriais", "metais", 4, "#FACC15", "250,204,21"),
     ]
 
     def block_comment(comment_key, title):
@@ -4477,18 +4485,21 @@ def pagina_watchlist():
             return text
         return f"Radar {title} aguardando novo ciclo de dados. Clique em Atualizar Watchlist agora se o cache antigo ainda estiver ativo."
 
-    def render_panel(block_prefix, title, subtitle, comment_key, limit):
+    def render_panel(block_prefix, title, subtitle, comment_key, limit, color, rgb):
+        cards_html = build_recommendation_cards(rec_filter(bloco=block_prefix), limit=limit)
         st.markdown(
             f"""
-            <div class="wl-panel-title">
-              <h3>{html.escape(title)}</h3>
-              <span>{html.escape(subtitle)}</span>
+            <div class="wl-category" style="--cat:{html.escape(color)}; --cat-rgb:{html.escape(rgb)};">
+              <div class="wl-category-header">
+                <div class="wl-category-name"><span class="wl-category-dot"></span>{html.escape(title)}</div>
+                <div class="wl-category-subtitle">{html.escape(subtitle)}</div>
+              </div>
+              <div class="wl-comment">{html.escape(str(block_comment(comment_key, title)))}</div>
+              {cards_html}
             </div>
-            <div class="wl-comment">{html.escape(str(block_comment(comment_key, title)))}</div>
             """,
             unsafe_allow_html=True,
         )
-        render_recommendations(rec_filter(bloco=block_prefix), limit=limit)
 
     st.markdown("#### Mesa WATCHLIST")
     for idx in range(0, len(watchlist_blocks), 2):
@@ -4542,16 +4553,16 @@ def pagina_watchlist():
         render_recommendations(rec_filter(bloco="Metais"), limit=10)
     with tabs[7]:
         st.markdown("#### Radar Swing")
-        for block_prefix, title, *_ in watchlist_blocks:
+        for block_prefix, title, *_rest in watchlist_blocks:
             st.markdown(f"##### {title}")
             render_recommendations(rec_filter(tipo="Swing", bloco=block_prefix), limit=6)
     with tabs[8]:
         st.markdown("#### Radar Position")
-        for block_prefix, title, *_ in watchlist_blocks:
+        for block_prefix, title, *_rest in watchlist_blocks:
             st.markdown(f"##### {title}")
             render_recommendations(rec_filter(tipo="Position", bloco=block_prefix), limit=6)
     with tabs[9]:
-        for _, title, _, comment_key, _ in watchlist_blocks:
+        for _block_prefix, title, _subtitle, comment_key, _limit, _color, _rgb in watchlist_blocks:
             st.markdown(f"#### {title}\n{block_comment(comment_key, title)}")
 
 def pagina_graficos():
