@@ -91,6 +91,7 @@ ASSET_GROUPS = {
 }
 
 WATCHLIST_RESULTS_PATH = Path(".tmp") / "watchlist_results.json"
+WATCHLIST_PAYLOAD_PATH = Path(".tmp") / "watchlist_payload.json"
 
 
 @dataclass
@@ -113,6 +114,7 @@ class AssetSnapshot:
     ma50: float
     ma200: float
     avg_volume_20d: float
+    source: str = "historico"
 
 
 def _safe_float(value, default=0.0) -> float:
@@ -320,6 +322,82 @@ def _build_snapshot(symbol: str, meta: dict, block: str, data: pd.DataFrame, ben
     )
 
 
+def _flatten_global_assets(global_data: dict | None) -> list[dict[str, Any]]:
+    if not global_data:
+        return []
+    categories = global_data.get("categories", global_data)
+    rows: list[dict[str, Any]] = []
+    if not isinstance(categories, dict):
+        return rows
+    for assets in categories.values():
+        if not isinstance(assets, list):
+            continue
+        for item in assets:
+            if isinstance(item, dict):
+                rows.append(item)
+    return rows
+
+
+def _global_asset_map(global_data: dict | None) -> dict[str, dict[str, Any]]:
+    mapped: dict[str, dict[str, Any]] = {}
+    for item in _flatten_global_assets(global_data):
+        for key in [item.get("symbol"), item.get("name")]:
+            if key:
+                mapped[str(key).upper()] = item
+    return mapped
+
+
+def _quick_snapshot_from_dashboard(
+    symbol: str,
+    meta: dict,
+    block: str,
+    item: dict[str, Any],
+    benchmark_change: float = 0.0,
+) -> AssetSnapshot | None:
+    price = _safe_float(item.get("price"), 0.0)
+    if price <= 0:
+        return None
+    change = _safe_float(item.get("change"), 0.0)
+    high = _safe_float(item.get("high"), price)
+    low = _safe_float(item.get("low"), price)
+    day_range = max(abs(high - low), price * 0.01)
+    rel = change - benchmark_change
+    trend = max(0, min(100, 52 + change * 6 + rel * 2))
+    relative = max(0, min(100, 50 + rel * 6))
+    annual_vol_defaults = {
+        "Cripto": 72,
+        "Moedas": 13,
+        "Commodities": 36,
+        "Metais": 28,
+        "Brasil": 32,
+        "EUA": 22,
+    }
+    annual_vol = annual_vol_defaults.get(block, 30)
+    vol_score = max(20, min(85, 85 - annual_vol * 0.55))
+    synthetic_ma20 = price / (1 + change / 100) if abs(change) < 45 else price
+    return AssetSnapshot(
+        symbol=symbol,
+        ticker=meta["ticker"],
+        block=block,
+        sector=meta["sector"],
+        driver=meta["driver"],
+        price=price,
+        trend_score=trend,
+        relative_score=relative,
+        volatility_score=vol_score,
+        momentum_20d=change,
+        momentum_60d=rel,
+        relative_60d=rel,
+        annual_vol=annual_vol,
+        atr14=day_range,
+        ma20=synthetic_ma20,
+        ma50=synthetic_ma20,
+        ma200=synthetic_ma20,
+        avg_volume_20d=0.0,
+        source="dashboard",
+    )
+
+
 def _score_snapshot(s: AssetSnapshot, macro: dict, style: str) -> float:
     regime = _regime_component(s.block, s.sector, macro["regime"])
     if s.block == "Brasil":
@@ -367,6 +445,7 @@ def _recommendation(s: AssetSnapshot, macro: dict, style: str) -> dict[str, Any]
     block_label = group.get("label", s.block)
     asset_class = group.get("class", s.block)
     carteira = f"Carteira {style} {block_label}"
+    source_label = "historico yfinance" if s.source == "historico" else "radar rapido dashboard"
     return {
         "bloco": block_label,
         "ativo": s.symbol,
@@ -398,6 +477,8 @@ def _recommendation(s: AssetSnapshot, macro: dict, style: str) -> dict[str, Any]
         "forca_relativa_60d": round(s.relative_60d, 2),
         "volatilidade_anual": round(s.annual_vol, 2),
         "driver": s.driver,
+        "fonte_sinal": s.source,
+        "fonte_descricao": source_label,
     }
 
 
@@ -436,6 +517,7 @@ def generate_watchlist(global_data: dict | None = None) -> dict[str, Any]:
         tickers.extend(group.get("benchmarks", []))
     data = _download_prices(tickers)
     macro = _macro_regime(global_data)
+    dashboard_assets = _global_asset_map(global_data)
 
     snapshots: list[AssetSnapshot] = []
     for block, group in ASSET_GROUPS.items():
@@ -445,8 +527,18 @@ def generate_watchlist(global_data: dict | None = None) -> dict[str, Any]:
             if not benchmark.empty:
                 break
         benchmark_close = benchmark["Close"].astype(float) if not benchmark.empty else pd.Series(dtype=float)
+        benchmark_change = 0.0
+        for benchmark_ticker in group.get("benchmarks", []):
+            dashboard_benchmark = dashboard_assets.get(str(benchmark_ticker).upper())
+            if dashboard_benchmark:
+                benchmark_change = _safe_float(dashboard_benchmark.get("change"), 0.0)
+                break
         for symbol, meta in group["assets"].items():
             snap = _build_snapshot(symbol, meta, block, data, benchmark_close)
+            if not snap:
+                dashboard_item = dashboard_assets.get(str(meta["ticker"]).upper()) or dashboard_assets.get(symbol.upper())
+                if dashboard_item:
+                    snap = _quick_snapshot_from_dashboard(symbol, meta, block, dashboard_item, benchmark_change)
             if snap:
                 snapshots.append(snap)
 
@@ -456,7 +548,9 @@ def generate_watchlist(global_data: dict | None = None) -> dict[str, Any]:
         recommendations.append(_recommendation(snap, macro, "Position"))
 
     recommendations.sort(key=lambda r: (r["tipo"], r["bloco"], -r["score_atual"]))
-    return {
+    dashboard_count = sum(1 for snap in snapshots if snap.source == "dashboard")
+    historical_count = sum(1 for snap in snapshots if snap.source == "historico")
+    payload = {
         "schema_version": "watchlist_v3_multi_asset",
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "macro": macro,
@@ -467,10 +561,24 @@ def generate_watchlist(global_data: dict | None = None) -> dict[str, Any]:
         },
         "data_quality": {
             "assets_loaded": len(snapshots),
+            "historical_assets": historical_count,
+            "dashboard_assets": dashboard_count,
             "recommendations": len(recommendations),
             "source": "yfinance + mercados_globais/cache",
         },
     }
+    if recommendations:
+        _save_watchlist_payload(payload)
+        return payload
+    cached_payload = _load_watchlist_payload()
+    if cached_payload:
+        cached_payload["data_quality"] = {
+            **cached_payload.get("data_quality", {}),
+            "source": "ultimo payload valido da WATCHLIST",
+            "stale": True,
+        }
+        return cached_payload
+    return payload
 
 
 def _safe_number(value: Any) -> float | None:
@@ -483,6 +591,27 @@ def _safe_number(value: Any) -> float | None:
     if not math.isfinite(number):
         return None
     return number
+
+
+def _load_watchlist_payload() -> dict[str, Any] | None:
+    try:
+        if not WATCHLIST_PAYLOAD_PATH.exists():
+            return None
+        data = json.loads(WATCHLIST_PAYLOAD_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _save_watchlist_payload(payload: dict[str, Any]) -> None:
+    try:
+        WATCHLIST_PAYLOAD_PATH.parent.mkdir(parents=True, exist_ok=True)
+        WATCHLIST_PAYLOAD_PATH.write_text(
+            json.dumps(payload, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        return None
 
 
 def _load_watchlist_results() -> list[dict[str, Any]]:

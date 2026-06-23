@@ -4355,7 +4355,7 @@ def pagina_watchlist():
         <div class="wl-kpi-grid">
           <div class="wl-kpi"><span>Regime Macro</span><strong>{html.escape(str(macro.get('regime', '---')))}</strong></div>
           <div class="wl-kpi"><span>Score Macro</span><strong>{html.escape(str(macro.get('score', '---')))}</strong></div>
-          <div class="wl-kpi"><span>Ativos carregados</span><strong>{quality.get('assets_loaded', 0)}</strong></div>
+          <div class="wl-kpi"><span>Ativos carregados</span><strong>{quality.get('assets_loaded', 0)}</strong><small style="color:#94A3B8;">Hist {quality.get('historical_assets', 0)} | Dash {quality.get('dashboard_assets', 0)}</small></div>
           <div class="wl-kpi"><span>Atualizado</span><strong>{html.escape(str(payload.get('generated_at', '---'))[11:])}</strong></div>
         </div>
         """,
@@ -4404,7 +4404,7 @@ def pagina_watchlist():
                   </div>
                   <div class="wl-text"><b>Tese:</b> {html.escape(str(item.get('tese_principal', '')))}</div>
                   <div class="wl-text"><b>Confirmacoes:</b> {html.escape(str(item.get('confirmacoes', '')))}</div>
-                  <span class="wl-action">{html.escape(str(item.get('acao', '---')).upper())} | RR {html.escape(str(item.get('risco_retorno', '---')))} | {html.escape(str(item.get('tamanho_sugerido', '---')))}</span>
+                  <span class="wl-action">{html.escape(str(item.get('acao', '---')).upper())} | RR {html.escape(str(item.get('risco_retorno', '---')))} | {html.escape(str(item.get('tamanho_sugerido', '---')))} | {html.escape(str(item.get('fonte_descricao', 'historico yfinance')))}</span>
                 </div>
                 """
             )
