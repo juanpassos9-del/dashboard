@@ -4231,6 +4231,161 @@ def pagina_market_report():
     painel_tickers_topo()
     secao_market_report_fragment()
 
+
+@st.cache_data(ttl=900, show_spinner=False)
+def get_watchlist_payload_cached(global_data):
+    from execution.watchlist_ai import generate_watchlist
+
+    return generate_watchlist(global_data)
+
+
+def pagina_watchlist():
+    """Radar IA TTS Swing & Position."""
+    st.title("WATCHLIST")
+    st.caption("Radar IA TTS para Swing & Position: Brasil Acoes e EUA ETFs Setoriais.")
+
+    global_data = get_global_markets_data()
+    if st.button("Atualizar Watchlist agora", type="primary", use_container_width=True, key="watchlist_refresh_now"):
+        get_watchlist_payload_cached.clear()
+
+    try:
+        payload = get_watchlist_payload_cached(global_data)
+    except Exception as e:
+        st.error(f"Nao foi possivel gerar a WATCHLIST agora: {e}")
+        return
+
+    recs = payload.get("recommendations", [])
+    macro = payload.get("macro", {})
+    quality = payload.get("data_quality", {})
+
+    def fmt_price(value):
+        if value is None or value == "":
+            return "---"
+        try:
+            return f"{float(value):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        except Exception:
+            return str(value)
+
+    def score_color(score):
+        try:
+            score = float(score)
+        except Exception:
+            score = 0
+        if score >= 72:
+            return "#00FFA3"
+        if score >= 62:
+            return "#FFB020"
+        if score >= 52:
+            return "#94A3B8"
+        return "#FF4B4B"
+
+    st.markdown(
+        f"""
+        <style>
+          .wl-kpi-grid {{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:10px 0 16px;}}
+          .wl-kpi {{background:#0B1220; border:1px solid #1F2937; border-radius:8px; padding:12px;}}
+          .wl-kpi span {{display:block; color:#94A3B8; font-size:.72rem; font-weight:800; text-transform:uppercase;}}
+          .wl-kpi strong {{display:block; color:#F8FAFC; font-size:1.1rem; margin-top:5px;}}
+          .wl-card {{border:1px solid #263244; border-radius:8px; background:#0B1220; padding:13px 14px; margin-bottom:10px;}}
+          .wl-head {{display:flex; justify-content:space-between; gap:12px; align-items:flex-start;}}
+          .wl-symbol {{font-size:1.05rem; color:#FFF; font-weight:950;}}
+          .wl-meta {{color:#94A3B8; font-size:.76rem; margin-top:3px;}}
+          .wl-score {{font-size:1.35rem; font-weight:950; text-align:right;}}
+          .wl-grid {{display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; margin-top:12px;}}
+          .wl-box {{background:#111827; border:1px solid #1F2937; border-radius:7px; padding:8px;}}
+          .wl-box span {{color:#94A3B8; font-size:.68rem; display:block;}}
+          .wl-box b {{color:#F8FAFC; font-size:.82rem;}}
+          .wl-text {{color:#CBD5E1; font-size:.86rem; line-height:1.45; margin-top:10px;}}
+          .wl-action {{display:inline-block; border:1px solid #334155; border-radius:999px; padding:4px 8px; font-size:.72rem; font-weight:900; color:#F8FAFC; background:#111827; margin-top:8px;}}
+          @media(max-width:900px) {{.wl-kpi-grid {{grid-template-columns:1fr 1fr;}} .wl-grid {{grid-template-columns:1fr 1fr;}}}}
+        </style>
+        <div class="wl-kpi-grid">
+          <div class="wl-kpi"><span>Regime Macro</span><strong>{html.escape(str(macro.get('regime', '---')))}</strong></div>
+          <div class="wl-kpi"><span>Score Macro</span><strong>{html.escape(str(macro.get('score', '---')))}</strong></div>
+          <div class="wl-kpi"><span>Ativos carregados</span><strong>{quality.get('assets_loaded', 0)}</strong></div>
+          <div class="wl-kpi"><span>Atualizado</span><strong>{html.escape(str(payload.get('generated_at', '---'))[11:])}</strong></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    def render_recommendations(items, limit=10):
+        if not items:
+            st.info("Sem recomendacoes com dados suficientes para este bloco.")
+            return
+        html_cards = []
+        for item in sorted(items, key=lambda r: r.get("score_atual", 0), reverse=True)[:limit]:
+            score = item.get("score_atual", 0)
+            color = score_color(score)
+            html_cards.append(
+                f"""
+                <div class="wl-card">
+                  <div class="wl-head">
+                    <div>
+                      <div class="wl-symbol">{html.escape(str(item.get('ativo', '---')))} <span style="color:#94A3B8;font-size:.78rem;">{html.escape(str(item.get('tipo', '---')))}</span></div>
+                      <div class="wl-meta">{html.escape(str(item.get('bloco', '---')))} | {html.escape(str(item.get('setor', '---')))} | {html.escape(str(item.get('status', '---')))}</div>
+                    </div>
+                    <div>
+                      <div class="wl-score" style="color:{color};">{score}</div>
+                      <div style="color:#94A3B8;font-size:.7rem;text-align:right;">score atual</div>
+                    </div>
+                  </div>
+                  <div class="wl-grid">
+                    <div class="wl-box"><span>Preco</span><b>{fmt_price(item.get('preco_atual'))}</b></div>
+                    <div class="wl-box"><span>Entrada ideal</span><b>{fmt_price(item.get('entrada_ideal'))}</b></div>
+                    <div class="wl-box"><span>Entrada parcial</span><b>{fmt_price(item.get('entrada_parcial'))}</b></div>
+                    <div class="wl-box"><span>Gain 1 / 2</span><b>{fmt_price(item.get('gain_1'))} / {fmt_price(item.get('gain_2'))}</b></div>
+                    <div class="wl-box"><span>Gain final</span><b>{fmt_price(item.get('gain_final'))}</b></div>
+                    <div class="wl-box"><span>Loss</span><b>{fmt_price(item.get('loss'))}</b></div>
+                  </div>
+                  <div class="wl-text"><b>Tese:</b> {html.escape(str(item.get('tese_principal', '')))}</div>
+                  <div class="wl-text"><b>Confirmacoes:</b> {html.escape(str(item.get('confirmacoes', '')))}</div>
+                  <span class="wl-action">{html.escape(str(item.get('acao', '---')).upper())} | RR {html.escape(str(item.get('risco_retorno', '---')))} | {html.escape(str(item.get('tamanho_sugerido', '---')))}</span>
+                </div>
+                """
+            )
+        st.markdown("".join(html_cards), unsafe_allow_html=True)
+
+    def rec_filter(tipo=None, bloco=None):
+        out = recs
+        if tipo:
+            out = [r for r in out if r.get("tipo") == tipo]
+        if bloco:
+            out = [r for r in out if str(r.get("bloco", "")).startswith(bloco)]
+        return out
+
+    tabs = st.tabs([
+        "Visao Macro Global",
+        "Brasil - Acoes",
+        "EUA - Rotacao Setorial",
+        "Radar Swing Brasil",
+        "Radar Swing EUA",
+        "Radar Position Brasil",
+        "Radar Position EUA",
+        "Comentario da IA",
+    ])
+
+    with tabs[0]:
+        st.markdown("#### Visao Macro Global")
+        st.write(f"Regime: **{macro.get('regime', '---')}** | SPX: `{macro.get('spx')}` | Nasdaq: `{macro.get('nasdaq')}` | VIX: `{macro.get('vix')}` | DXY: `{macro.get('dxy')}` | EWZ: `{macro.get('ewz')}` | IBOV: `{macro.get('ibov')}`")
+        st.caption(f"Fonte: {quality.get('source', '---')}. Esta etapa ainda nao persiste carteira/historico.")
+    with tabs[1]:
+        render_recommendations(rec_filter(bloco="Brasil"), limit=16)
+    with tabs[2]:
+        render_recommendations(rec_filter(bloco="EUA"), limit=10)
+    with tabs[3]:
+        render_recommendations(rec_filter(tipo="Swing", bloco="Brasil"), limit=10)
+    with tabs[4]:
+        render_recommendations(rec_filter(tipo="Swing", bloco="EUA"), limit=8)
+    with tabs[5]:
+        render_recommendations(rec_filter(tipo="Position", bloco="Brasil"), limit=10)
+    with tabs[6]:
+        render_recommendations(rec_filter(tipo="Position", bloco="EUA"), limit=8)
+    with tabs[7]:
+        comments = payload.get("commentary", {})
+        st.markdown(f"#### Brasil\n{comments.get('brasil', '---')}")
+        st.markdown(f"#### EUA\n{comments.get('eua', '---')}")
+
 def pagina_graficos():
     """Página com integração TradingView Advanced Chart."""
     st.markdown("### 📊 Gráficos Avançados TradingView")
@@ -5690,7 +5845,7 @@ with st.sidebar:
         st.session_state.pop("auth_loading_until", None)
         _auth_rerun()
     st.markdown("### 🧭 Navegação")
-    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📺 Terminal Bloomberg", "📰 Market Report", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
+    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📺 Terminal Bloomberg", "📰 Market Report", "WATCHLIST", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
     sidebar_clock()
     
     st.markdown("---")
@@ -5711,6 +5866,8 @@ elif page == "📺 Terminal Bloomberg":
     pagina_terminal_bloomberg()
 elif page == "📰 Market Report":
     pagina_market_report()
+elif page == "WATCHLIST":
+    pagina_watchlist()
 elif page == "📊 Gráficos Avançados":
     pagina_graficos()
 elif page == "⚖️ Painel de Correlação":
