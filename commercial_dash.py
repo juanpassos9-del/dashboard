@@ -4417,6 +4417,49 @@ def pagina_watchlist():
             out = [r for r in out if str(r.get("bloco", "")).startswith(bloco)]
         return out
 
+    def render_watchlist_results(rows):
+        st.markdown("#### Registro de takes e stops")
+        if not rows:
+            st.caption("Ainda nao houve recomendacao com take ou stop atingido.")
+            return
+        df_results = pd.DataFrame(rows).tail(30).iloc[::-1].copy()
+        cols = ["data", "ativo", "tipo", "bloco", "evento", "entrada", "saida", "preco_atual", "resultado_pct", "score"]
+        df_results = df_results[[c for c in cols if c in df_results.columns]]
+        rename = {
+            "data": "Data",
+            "ativo": "Ativo",
+            "tipo": "Tipo",
+            "bloco": "Bloco",
+            "evento": "Evento",
+            "entrada": "Entrada",
+            "saida": "Saida",
+            "preco_atual": "Preco atual",
+            "resultado_pct": "Resultado %",
+            "score": "Score",
+        }
+        df_results = df_results.rename(columns=rename)
+        if "Resultado %" in df_results.columns:
+            df_results["Resultado %"] = pd.to_numeric(df_results["Resultado %"], errors="coerce")
+
+        def style_result(row):
+            result = row.get("Resultado %", 0)
+            event = str(row.get("Evento", ""))
+            color = "color:#00FFA3; font-weight:900;" if result >= 0 else "color:#FF4B4B; font-weight:900;"
+            bg = "background-color:rgba(0,255,163,.08);" if "TAKE" in event else "background-color:rgba(255,75,75,.08);"
+            return [bg + (color if col == "Resultado %" else "") for col in row.index]
+
+        styled = (
+            df_results.style
+            .apply(style_result, axis=1)
+            .format({
+                "Entrada": "{:,.2f}",
+                "Saida": "{:,.2f}",
+                "Preco atual": "{:,.2f}",
+                "Resultado %": "{:+.2f}%",
+            }, na_rep="---")
+        )
+        st.dataframe(styled, hide_index=True, use_container_width=True, height=min(430, 38 + len(df_results) * 35))
+
     comments = payload.get("commentary", {})
     st.markdown("#### Mesa WATCHLIST")
     brasil_col, eua_col = st.columns(2, gap="large")
@@ -4446,6 +4489,16 @@ def pagina_watchlist():
         render_recommendations(rec_filter(bloco="EUA"), limit=5)
 
     st.markdown("---")
+    try:
+        from execution.watchlist_ai import update_watchlist_results
+
+        watchlist_results = update_watchlist_results(recs)
+    except Exception as e:
+        watchlist_results = []
+        st.caption(f"Registro de takes/stops indisponivel agora: {e}")
+    render_watchlist_results(watchlist_results)
+
+    st.markdown("---")
 
     tabs = st.tabs([
         "Visao Macro Global",
@@ -4461,7 +4514,7 @@ def pagina_watchlist():
     with tabs[0]:
         st.markdown("#### Visao Macro Global")
         st.write(f"Regime: **{macro.get('regime', '---')}** | SPX: `{macro.get('spx')}` | Nasdaq: `{macro.get('nasdaq')}` | VIX: `{macro.get('vix')}` | DXY: `{macro.get('dxy')}` | EWZ: `{macro.get('ewz')}` | IBOV: `{macro.get('ibov')}`")
-        st.caption(f"Fonte: {quality.get('source', '---')}. Esta etapa ainda nao persiste carteira/historico.")
+        st.caption(f"Fonte: {quality.get('source', '---')}. Takes e stops acionados ficam registrados no historico local da WATCHLIST.")
     with tabs[1]:
         render_recommendations(rec_filter(bloco="Brasil"), limit=16)
     with tabs[2]:

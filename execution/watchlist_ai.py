@@ -7,10 +7,12 @@ sector ETFs separated.
 
 from __future__ import annotations
 
+import json
 import math
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -44,6 +46,8 @@ US_SECTOR_ETFS = {
     "XLB": {"ticker": "XLB", "sector": "Materials", "driver": "commodities, China, dolar, ciclo industrial"},
     "XLI": {"ticker": "XLI", "sector": "Industrials", "driver": "crescimento, PMIs, infraestrutura, ciclo economico"},
 }
+
+WATCHLIST_RESULTS_PATH = Path(".tmp") / "watchlist_results.json"
 
 
 @dataclass
@@ -357,3 +361,103 @@ def generate_watchlist(global_data: dict | None = None) -> dict[str, Any]:
             "source": "yfinance + mercados_globais/cache",
         },
     }
+
+
+def _safe_number(value: Any) -> float | None:
+    try:
+        if value is None or value == "":
+            return None
+        number = float(value)
+    except Exception:
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def _load_watchlist_results() -> list[dict[str, Any]]:
+    try:
+        if not WATCHLIST_RESULTS_PATH.exists():
+            return []
+        data = json.loads(WATCHLIST_RESULTS_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_watchlist_results(rows: list[dict[str, Any]]) -> None:
+    WATCHLIST_RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    WATCHLIST_RESULTS_PATH.write_text(
+        json.dumps(rows[-500:], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _hit_event(rec: dict[str, Any]) -> dict[str, Any] | None:
+    if str(rec.get("acao", "")).lower() != "comprar":
+        return None
+
+    price = _safe_number(rec.get("preco_atual"))
+    entry = _safe_number(rec.get("entrada") or rec.get("entrada_ideal"))
+    loss = _safe_number(rec.get("loss"))
+    gain1 = _safe_number(rec.get("gain_1"))
+    gain2 = _safe_number(rec.get("gain_2"))
+    gain_final = _safe_number(rec.get("gain_final"))
+    if price is None or entry is None or entry <= 0:
+        return None
+
+    event = None
+    exit_price = None
+    if loss is not None and price <= loss:
+        event = "STOP"
+        exit_price = loss
+    elif gain_final is not None and price >= gain_final:
+        event = "TAKE FINAL"
+        exit_price = gain_final
+    elif gain2 is not None and price >= gain2:
+        event = "TAKE 2"
+        exit_price = gain2
+    elif gain1 is not None and price >= gain1:
+        event = "TAKE 1"
+        exit_price = gain1
+
+    if not event or exit_price is None:
+        return None
+
+    result_pct = ((exit_price / entry) - 1) * 100
+    return {
+        "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "ativo": rec.get("ativo", "---"),
+        "tipo": rec.get("tipo", "---"),
+        "bloco": rec.get("bloco", "---"),
+        "evento": event,
+        "entrada": round(entry, 4),
+        "saida": round(exit_price, 4),
+        "preco_atual": round(price, 4),
+        "resultado_pct": round(result_pct, 2),
+        "score": rec.get("score_atual", "---"),
+        "acao_origem": rec.get("acao", "---"),
+    }
+
+
+def update_watchlist_results(recommendations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Register take/stop hits for actionable watchlist recommendations."""
+    rows = _load_watchlist_results()
+    seen = {
+        f"{r.get('ativo')}|{r.get('tipo')}|{r.get('bloco')}|{r.get('evento')}|{r.get('entrada')}|{r.get('saida')}"
+        for r in rows
+    }
+    changed = False
+    for rec in recommendations:
+        hit = _hit_event(rec)
+        if not hit:
+            continue
+        key = f"{hit.get('ativo')}|{hit.get('tipo')}|{hit.get('bloco')}|{hit.get('evento')}|{hit.get('entrada')}|{hit.get('saida')}"
+        if key in seen:
+            continue
+        rows.append(hit)
+        seen.add(key)
+        changed = True
+    if changed:
+        _save_watchlist_results(rows)
+    return rows
