@@ -4286,10 +4286,12 @@ def pagina_watchlist():
           .wl-kpi {{background:#0B1220; border:1px solid #1F2937; border-radius:8px; padding:12px;}}
           .wl-kpi span {{display:block; color:#94A3B8; font-size:.72rem; font-weight:800; text-transform:uppercase;}}
           .wl-kpi strong {{display:block; color:#F8FAFC; font-size:1.1rem; margin-top:5px;}}
-          .wl-card {{border:1px solid #263244; border-radius:8px; background:#0B1220; padding:13px 14px; margin-bottom:10px;}}
+          .wl-card {{border:1px solid #263244; border-radius:8px; background:#0B1220; padding:13px 14px; margin-bottom:10px; position:relative;}}
+          .wl-card.selected {{border-color:rgba(0,255,163,.72); border-left:5px solid #00FFA3; background:linear-gradient(90deg, rgba(0,255,163,.10), #0B1220 38%); box-shadow:0 0 0 1px rgba(0,255,163,.10), 0 10px 28px rgba(0,0,0,.24);}}
           .wl-head {{display:flex; justify-content:space-between; gap:12px; align-items:flex-start;}}
           .wl-symbol {{font-size:1.05rem; color:#FFF; font-weight:950;}}
           .wl-meta {{color:#94A3B8; font-size:.76rem; margin-top:3px;}}
+          .wl-selected-badge {{display:inline-block; margin-left:8px; border:1px solid rgba(0,255,163,.55); border-radius:999px; padding:2px 7px; color:#00FFA3; background:rgba(0,255,163,.08); font-size:.66rem; font-weight:950; vertical-align:middle;}}
           .wl-score {{font-size:1.35rem; font-weight:950; text-align:right;}}
           .wl-grid {{display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; margin-top:12px;}}
           .wl-box {{background:#111827; border:1px solid #1F2937; border-radius:7px; padding:8px;}}
@@ -4317,12 +4319,16 @@ def pagina_watchlist():
         for item in sorted(items, key=lambda r: r.get("score_atual", 0), reverse=True)[:limit]:
             score = item.get("score_atual", 0)
             color = score_color(score)
+            action_text = str(item.get("acao", "---"))
+            selected = action_text in {"comprar", "comprar parcial"} or float(score or 0) >= 72
+            card_class = "wl-card selected" if selected else "wl-card"
+            selected_badge = '<span class="wl-selected-badge">SELECIONADA</span>' if selected else ""
             html_cards.append(
                 f"""
-                <div class="wl-card">
+                <div class="{card_class}">
                   <div class="wl-head">
                     <div>
-                      <div class="wl-symbol">{html.escape(str(item.get('ativo', '---')))} <span style="color:#94A3B8;font-size:.78rem;">{html.escape(str(item.get('tipo', '---')))}</span></div>
+                      <div class="wl-symbol">{html.escape(str(item.get('ativo', '---')))} <span style="color:#94A3B8;font-size:.78rem;">{html.escape(str(item.get('tipo', '---')))}</span>{selected_badge}</div>
                       <div class="wl-meta">{html.escape(str(item.get('bloco', '---')))} | {html.escape(str(item.get('setor', '---')))} | {html.escape(str(item.get('status', '---')))}</div>
                     </div>
                     <div>
