@@ -4326,7 +4326,7 @@ def pagina_watchlist():
           .wl-meta {{color:#94A3B8; font-size:.76rem; margin-top:3px;}}
           .wl-selected-badge {{display:inline-block; margin-left:8px; border:1px solid rgba(0,255,163,.55); border-radius:999px; padding:2px 7px; color:#00FFA3; background:rgba(0,255,163,.08); font-size:.66rem; font-weight:950; vertical-align:middle;}}
           .wl-score {{font-size:1.35rem; font-weight:950; text-align:right;}}
-          .wl-grid {{display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:8px; margin-top:12px;}}
+          .wl-grid {{display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; margin-top:12px;}}
           .wl-box {{background:#111827; border:1px solid #1F2937; border-radius:7px; padding:8px; min-height:58px;}}
           .wl-box span {{color:#94A3B8; font-size:.68rem; display:block;}}
           .wl-box b {{color:#F8FAFC; font-size:.88rem; display:block; margin-top:3px;}}
@@ -4370,10 +4370,10 @@ def pagina_watchlist():
             score = item.get("score_atual", 0)
             color = score_color(score)
             action_text = str(item.get("acao", "---"))
-            selected = action_text in {"comprar", "comprar parcial"} or float(score or 0) >= 72
+            selected = action_text == "comprar" or float(score or 0) >= 72
             card_class = "wl-card selected" if selected else "wl-card"
             selected_badge = '<span class="wl-selected-badge">SELECIONADA</span>' if selected else ""
-            ref_entry = item.get("entrada_parcial") or item.get("entrada_ideal")
+            ref_entry = item.get("entrada") or item.get("entrada_ideal")
             result_pct = pct_from_base(item.get("preco_atual"), ref_entry)
             result_class = pct_class(result_pct)
             gain_1_pct = pct_from_base(item.get("gain_1"), ref_entry)
@@ -4395,9 +4395,8 @@ def pagina_watchlist():
                   </div>
                   <div class="wl-grid">
                     <div class="wl-box price"><span>Preco atual</span><b>{fmt_price(item.get('preco_atual'))}</b><small>referencia viva</small></div>
-                    <div class="wl-box result {result_class}"><span>Resultado</span><b class="wl-pct-{result_class}">{fmt_pct(result_pct)}</b><small>vs entrada parcial</small></div>
-                    <div class="wl-box entry"><span>Entrada ideal</span><b>{fmt_price(item.get('entrada_ideal'))}</b><small>zona preferida</small></div>
-                    <div class="wl-box entry"><span>Entrada parcial</span><b>{fmt_price(item.get('entrada_parcial'))}</b><small>base do %</small></div>
+                    <div class="wl-box result {result_class}"><span>Resultado</span><b class="wl-pct-{result_class}">{fmt_pct(result_pct)}</b><small>vs entrada</small></div>
+                    <div class="wl-box entry"><span>Entrada</span><b>{fmt_price(ref_entry)}</b><small>preco unico</small></div>
                     <div class="wl-box gain"><span>Gain 1 / 2</span><b>{fmt_price(item.get('gain_1'))} / {fmt_price(item.get('gain_2'))}</b><small>{fmt_pct(gain_1_pct)} / {fmt_pct(gain_2_pct)}</small></div>
                     <div class="wl-box gain"><span>Gain final</span><b>{fmt_price(item.get('gain_final'))}</b><small>{fmt_pct(gain_final_pct)}</small></div>
                     <div class="wl-box loss"><span>Loss</span><b>{fmt_price(item.get('loss'))}</b><small>{fmt_pct(loss_pct)}</small></div>

@@ -244,14 +244,13 @@ def _recommendation(s: AssetSnapshot, macro: dict, style: str) -> dict[str, Any]
     stop_mult = 1.8 if style == "Swing" else 2.8
     target_mults = (1.4, 2.4, 3.6) if style == "Swing" else (2.0, 3.5, 5.0)
     entry_ideal = min(s.price, s.ma20) if s.ma20 > 0 else s.price * 0.99
-    entry_partial = s.price
     loss = entry_ideal - atr * stop_mult
     gain1 = entry_ideal + atr * target_mults[0]
     gain2 = entry_ideal + atr * target_mults[1]
     gain_final = entry_ideal + atr * target_mults[2]
     rr = (gain2 - entry_ideal) / max(entry_ideal - loss, 0.01)
     if score >= 72 and s.price <= gain1:
-        action = "comprar parcial" if s.price > entry_ideal * 1.015 else "comprar"
+        action = "comprar"
         status = "ativo"
     elif score >= 62:
         action = "aguardar entrada"
@@ -274,8 +273,8 @@ def _recommendation(s: AssetSnapshot, macro: dict, style: str) -> dict[str, Any]
         "score_inicial": round(score, 1),
         "score_atual": round(score, 1),
         "preco_atual": round(s.price, 2),
+        "entrada": round(entry_ideal, 2),
         "entrada_ideal": round(entry_ideal, 2),
-        "entrada_parcial": round(entry_partial, 2),
         "entrada_executada": None,
         "gain_1": round(gain1, 2),
         "gain_2": round(gain2, 2),
