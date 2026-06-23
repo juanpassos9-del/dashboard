@@ -4233,7 +4233,7 @@ def pagina_market_report():
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def get_watchlist_payload_cached(global_data):
+def get_watchlist_payload_cached(global_data, schema_version="watchlist_v3_multi_asset"):
     from execution.watchlist_ai import generate_watchlist
 
     return generate_watchlist(global_data)
@@ -4249,7 +4249,7 @@ def pagina_watchlist():
         get_watchlist_payload_cached.clear()
 
     try:
-        payload = get_watchlist_payload_cached(global_data)
+        payload = get_watchlist_payload_cached(global_data, "watchlist_v3_multi_asset")
     except Exception as e:
         st.error(f"Nao foi possivel gerar a WATCHLIST agora: {e}")
         return
@@ -4471,6 +4471,12 @@ def pagina_watchlist():
         ("Metais", "Metais", "Preciosos + industriais", "metais", 4),
     ]
 
+    def block_comment(comment_key, title):
+        text = comments.get(comment_key)
+        if text:
+            return text
+        return f"Radar {title} aguardando novo ciclo de dados. Clique em Atualizar Watchlist agora se o cache antigo ainda estiver ativo."
+
     def render_panel(block_prefix, title, subtitle, comment_key, limit):
         st.markdown(
             f"""
@@ -4478,7 +4484,7 @@ def pagina_watchlist():
               <h3>{html.escape(title)}</h3>
               <span>{html.escape(subtitle)}</span>
             </div>
-            <div class="wl-comment">{html.escape(str(comments.get(comment_key, '---')))}</div>
+            <div class="wl-comment">{html.escape(str(block_comment(comment_key, title)))}</div>
             """,
             unsafe_allow_html=True,
         )
@@ -4546,7 +4552,7 @@ def pagina_watchlist():
             render_recommendations(rec_filter(tipo="Position", bloco=block_prefix), limit=6)
     with tabs[9]:
         for _, title, _, comment_key, _ in watchlist_blocks:
-            st.markdown(f"#### {title}\n{comments.get(comment_key, '---')}")
+            st.markdown(f"#### {title}\n{block_comment(comment_key, title)}")
 
 def pagina_graficos():
     """Página com integração TradingView Advanced Chart."""

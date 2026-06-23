@@ -457,6 +457,7 @@ def generate_watchlist(global_data: dict | None = None) -> dict[str, Any]:
 
     recommendations.sort(key=lambda r: (r["tipo"], r["bloco"], -r["score_atual"]))
     return {
+        "schema_version": "watchlist_v3_multi_asset",
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "macro": macro,
         "recommendations": recommendations,
