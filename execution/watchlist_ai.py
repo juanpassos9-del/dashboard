@@ -48,37 +48,37 @@ US_SECTOR_ETFS = {
 }
 
 CRYPTO_ASSETS = {
-    "BTC": {"ticker": "BTC-USD", "sector": "Crypto major", "driver": "liquidez global, DXY, Nasdaq, apetite por risco"},
-    "ETH": {"ticker": "ETH-USD", "sector": "Crypto beta", "driver": "liquidez, tecnologia, fluxo em altcoins"},
-    "SOL": {"ticker": "SOL-USD", "sector": "Crypto beta", "driver": "beta cripto, fluxo de risco, momentum"},
-    "BNB": {"ticker": "BNB-USD", "sector": "Crypto exchange", "driver": "cripto beta, fluxo em exchanges"},
-    "LINK": {"ticker": "LINK-USD", "sector": "Crypto infra", "driver": "infra cripto, altseason, apetite por risco"},
+    "BTC": {"ticker": "BTC-USD", "aliases": ["BITCOIN", "BTCUSDT"], "sector": "Crypto major", "driver": "liquidez global, DXY, Nasdaq, apetite por risco"},
+    "ETH": {"ticker": "ETH-USD", "aliases": ["ETHEREUM", "ETHUSDT"], "sector": "Crypto beta", "driver": "liquidez, tecnologia, fluxo em altcoins"},
+    "SOL": {"ticker": "SOL-USD", "aliases": ["SOLANA", "SOLUSDT"], "sector": "Crypto beta", "driver": "beta cripto, fluxo de risco, momentum"},
+    "BNB": {"ticker": "BNB-USD", "aliases": ["BNBUSDT"], "sector": "Crypto exchange", "driver": "cripto beta, fluxo em exchanges"},
+    "LINK": {"ticker": "LINK-USD", "aliases": ["LINKUSDT"], "sector": "Crypto infra", "driver": "infra cripto, altseason, apetite por risco"},
 }
 
 FX_ASSETS = {
-    "EURUSD": {"ticker": "EURUSD=X", "sector": "G10 FX", "driver": "diferencial de juros EUA/Europa, DXY, BCE/Fed"},
-    "GBPUSD": {"ticker": "GBPUSD=X", "sector": "G10 FX", "driver": "BoE, DXY, apetite por risco"},
-    "USDJPY": {"ticker": "JPY=X", "sector": "Carry FX", "driver": "US10Y, BoJ, diferencial de juros, carry trade"},
-    "USDBRL": {"ticker": "BRL=X", "sector": "Emerging FX", "driver": "DXY, fiscal Brasil, commodities, fluxo estrangeiro"},
-    "AUDUSD": {"ticker": "AUDUSD=X", "sector": "Commodity FX", "driver": "China, commodities, DXY, risco global"},
-    "USDCAD": {"ticker": "CAD=X", "sector": "Commodity FX", "driver": "petroleo, BoC, DXY"},
+    "EURUSD": {"ticker": "EURUSD=X", "aliases": ["EURUSD"], "sector": "G10 FX", "driver": "diferencial de juros EUA/Europa, DXY, BCE/Fed"},
+    "GBPUSD": {"ticker": "GBPUSD=X", "aliases": ["GBPUSD"], "sector": "G10 FX", "driver": "BoE, DXY, apetite por risco"},
+    "USDJPY": {"ticker": "JPY=X", "aliases": ["USDJPY"], "sector": "Carry FX", "driver": "US10Y, BoJ, diferencial de juros, carry trade"},
+    "USDBRL": {"ticker": "BRL=X", "aliases": ["USDBRL", "USDBRL (COMERCIAL)", "6L (REAL CME)"], "sector": "Emerging FX", "driver": "DXY, fiscal Brasil, commodities, fluxo estrangeiro"},
+    "AUDUSD": {"ticker": "AUDUSD=X", "aliases": ["AUDUSD"], "sector": "Commodity FX", "driver": "China, commodities, DXY, risco global"},
+    "USDCAD": {"ticker": "CAD=X", "aliases": ["USDCAD"], "sector": "Commodity FX", "driver": "petroleo, BoC, DXY"},
 }
 
 COMMODITY_ASSETS = {
-    "WTI": {"ticker": "CL=F", "sector": "Energia", "driver": "estoques, OPEP, geopolitica, crescimento global"},
-    "BRENT": {"ticker": "BZ=F", "sector": "Energia", "driver": "petroleo global, geopolitica, oferta/demanda"},
-    "NATGAS": {"ticker": "NG=F", "sector": "Energia", "driver": "clima, estoques, demanda industrial"},
-    "CORN": {"ticker": "ZC=F", "sector": "Graos", "driver": "clima, safra, dolar, demanda global"},
-    "SOYBEAN": {"ticker": "ZS=F", "sector": "Graos", "driver": "China, clima, safra EUA/Brasil"},
-    "WHEAT": {"ticker": "ZW=F", "sector": "Graos", "driver": "clima, Mar Negro, oferta global"},
+    "WTI": {"ticker": "CL=F", "aliases": ["WTI OIL", "CRUDE OIL WTI"], "sector": "Energia", "driver": "estoques, OPEP, geopolitica, crescimento global"},
+    "BRENT": {"ticker": "BZ=F", "aliases": ["BRENT OIL", "CRUDE BRENT"], "sector": "Energia", "driver": "petroleo global, geopolitica, oferta/demanda"},
+    "NATGAS": {"ticker": "NG=F", "aliases": ["NATURAL GAS", "GASOLINE RBOB"], "sector": "Energia", "driver": "clima, estoques, demanda industrial"},
+    "CORN": {"ticker": "ZC=F", "aliases": ["CORN"], "sector": "Graos", "driver": "clima, safra, dolar, demanda global"},
+    "SOYBEAN": {"ticker": "ZS=F", "aliases": ["SOYBEANS", "SOYBEAN"], "sector": "Graos", "driver": "China, clima, safra EUA/Brasil"},
+    "WHEAT": {"ticker": "ZW=F", "aliases": ["WHEAT"], "sector": "Graos", "driver": "clima, Mar Negro, oferta global"},
 }
 
 METAL_ASSETS = {
-    "GOLD": {"ticker": "GC=F", "sector": "Metal precioso", "driver": "juros reais, DXY, risco geopolitico, inflacao"},
-    "SILVER": {"ticker": "SI=F", "sector": "Metal precioso/industrial", "driver": "ouro, demanda industrial, DXY"},
-    "COPPER": {"ticker": "HG=F", "sector": "Metal industrial", "driver": "China, ciclo industrial, dolar"},
-    "PLATINUM": {"ticker": "PL=F", "sector": "Metal precioso/industrial", "driver": "industria, automotivo, dolar"},
-    "PALLADIUM": {"ticker": "PA=F", "sector": "Metal industrial", "driver": "automotivo, oferta, ciclo industrial"},
+    "GOLD": {"ticker": "GC=F", "aliases": ["GOLD", "XAUUSD"], "sector": "Metal precioso", "driver": "juros reais, DXY, risco geopolitico, inflacao"},
+    "SILVER": {"ticker": "SI=F", "aliases": ["SILVER", "XAGUSD"], "sector": "Metal precioso/industrial", "driver": "ouro, demanda industrial, DXY"},
+    "COPPER": {"ticker": "HG=F", "aliases": ["COPPER"], "sector": "Metal industrial", "driver": "China, ciclo industrial, dolar"},
+    "PLATINUM": {"ticker": "PL=F", "aliases": ["PLATINUM"], "sector": "Metal precioso/industrial", "driver": "industria, automotivo, dolar"},
+    "PALLADIUM": {"ticker": "PA=F", "aliases": ["PALLADIUM"], "sector": "Metal industrial", "driver": "automotivo, oferta, ciclo industrial"},
 }
 
 ASSET_GROUPS = {
@@ -347,6 +347,21 @@ def _global_asset_map(global_data: dict | None) -> dict[str, dict[str, Any]]:
     return mapped
 
 
+def _lookup_dashboard_asset(dashboard_assets: dict[str, dict[str, Any]], symbol: str, meta: dict) -> dict[str, Any] | None:
+    candidates = [meta.get("ticker"), symbol, *meta.get("aliases", [])]
+    for candidate in candidates:
+        if candidate and str(candidate).upper() in dashboard_assets:
+            return dashboard_assets[str(candidate).upper()]
+
+    normalized_candidates = [str(candidate).upper() for candidate in candidates if candidate]
+    for key, item in dashboard_assets.items():
+        name = str(item.get("name", key)).upper()
+        for candidate in normalized_candidates:
+            if candidate and (candidate in name or name in candidate):
+                return item
+    return None
+
+
 def _quick_snapshot_from_dashboard(
     symbol: str,
     meta: dict,
@@ -536,7 +551,7 @@ def generate_watchlist(global_data: dict | None = None) -> dict[str, Any]:
         for symbol, meta in group["assets"].items():
             snap = _build_snapshot(symbol, meta, block, data, benchmark_close)
             if not snap:
-                dashboard_item = dashboard_assets.get(str(meta["ticker"]).upper()) or dashboard_assets.get(symbol.upper())
+                dashboard_item = _lookup_dashboard_asset(dashboard_assets, symbol, meta)
                 if dashboard_item:
                     snap = _quick_snapshot_from_dashboard(symbol, meta, block, dashboard_item, benchmark_change)
             if snap:
