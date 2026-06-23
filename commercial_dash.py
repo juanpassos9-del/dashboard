@@ -4299,6 +4299,10 @@ def pagina_watchlist():
           .wl-box b {{color:#F8FAFC; font-size:.82rem;}}
           .wl-text {{color:#CBD5E1; font-size:.86rem; line-height:1.45; margin-top:10px;}}
           .wl-action {{display:inline-block; border:1px solid #334155; border-radius:999px; padding:4px 8px; font-size:.72rem; font-weight:900; color:#F8FAFC; background:#111827; margin-top:8px;}}
+          .wl-panel-title {{display:flex; justify-content:space-between; align-items:center; gap:10px; margin:4px 0 10px;}}
+          .wl-panel-title h3 {{margin:0; color:#F8FAFC; font-size:1.05rem;}}
+          .wl-panel-title span {{color:#94A3B8; font-size:.72rem; font-weight:800; text-transform:uppercase;}}
+          .wl-comment {{border:1px solid #1F2937; background:#090F1A; border-radius:8px; padding:11px 12px; color:#CBD5E1; font-size:.86rem; line-height:1.45; margin-bottom:10px;}}
           @media(max-width:900px) {{.wl-kpi-grid {{grid-template-columns:1fr 1fr;}} .wl-grid {{grid-template-columns:1fr 1fr;}}}}
         </style>
         <div class="wl-kpi-grid">
@@ -4360,6 +4364,36 @@ def pagina_watchlist():
             out = [r for r in out if str(r.get("bloco", "")).startswith(bloco)]
         return out
 
+    comments = payload.get("commentary", {})
+    st.markdown("#### Mesa WATCHLIST")
+    brasil_col, eua_col = st.columns(2, gap="large")
+    with brasil_col:
+        st.markdown(
+            f"""
+            <div class="wl-panel-title">
+              <h3>Brasil - Acoes</h3>
+              <span>Swing + Position</span>
+            </div>
+            <div class="wl-comment">{html.escape(str(comments.get('brasil', '---')))}</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        render_recommendations(rec_filter(bloco="Brasil"), limit=5)
+    with eua_col:
+        st.markdown(
+            f"""
+            <div class="wl-panel-title">
+              <h3>EUA - ETFs Setoriais</h3>
+              <span>Rotacao setorial</span>
+            </div>
+            <div class="wl-comment">{html.escape(str(comments.get('eua', '---')))}</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        render_recommendations(rec_filter(bloco="EUA"), limit=5)
+
+    st.markdown("---")
+
     tabs = st.tabs([
         "Visao Macro Global",
         "Brasil - Acoes",
@@ -4388,7 +4422,6 @@ def pagina_watchlist():
     with tabs[6]:
         render_recommendations(rec_filter(tipo="Position", bloco="EUA"), limit=8)
     with tabs[7]:
-        comments = payload.get("commentary", {})
         st.markdown(f"#### Brasil\n{comments.get('brasil', '---')}")
         st.markdown(f"#### EUA\n{comments.get('eua', '---')}")
 
