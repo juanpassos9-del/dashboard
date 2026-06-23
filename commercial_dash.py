@@ -4266,6 +4266,39 @@ def pagina_watchlist():
         except Exception:
             return str(value)
 
+    def as_float(value):
+        try:
+            if value is None or value == "":
+                return None
+            return float(value)
+        except Exception:
+            return None
+
+    def fmt_pct(value):
+        if value is None:
+            return "---"
+        try:
+            sign = "+" if float(value) > 0 else ""
+            return f"{sign}{float(value):.2f}%".replace(".", ",")
+        except Exception:
+            return "---"
+
+    def pct_from_base(target, base):
+        target_f = as_float(target)
+        base_f = as_float(base)
+        if target_f is None or base_f is None or base_f == 0:
+            return None
+        return ((target_f / base_f) - 1) * 100
+
+    def pct_class(value, neutral_band=0.05):
+        if value is None:
+            return "neutral"
+        if value > neutral_band:
+            return "positive"
+        if value < -neutral_band:
+            return "negative"
+        return "flat"
+
     def score_color(score):
         try:
             score = float(score)
@@ -4293,10 +4326,23 @@ def pagina_watchlist():
           .wl-meta {{color:#94A3B8; font-size:.76rem; margin-top:3px;}}
           .wl-selected-badge {{display:inline-block; margin-left:8px; border:1px solid rgba(0,255,163,.55); border-radius:999px; padding:2px 7px; color:#00FFA3; background:rgba(0,255,163,.08); font-size:.66rem; font-weight:950; vertical-align:middle;}}
           .wl-score {{font-size:1.35rem; font-weight:950; text-align:right;}}
-          .wl-grid {{display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; margin-top:12px;}}
-          .wl-box {{background:#111827; border:1px solid #1F2937; border-radius:7px; padding:8px;}}
+          .wl-grid {{display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:8px; margin-top:12px;}}
+          .wl-box {{background:#111827; border:1px solid #1F2937; border-radius:7px; padding:8px; min-height:58px;}}
           .wl-box span {{color:#94A3B8; font-size:.68rem; display:block;}}
-          .wl-box b {{color:#F8FAFC; font-size:.82rem;}}
+          .wl-box b {{color:#F8FAFC; font-size:.88rem; display:block; margin-top:3px;}}
+          .wl-box small {{display:block; color:#64748B; font-size:.64rem; margin-top:2px; line-height:1.2;}}
+          .wl-box.price {{border-color:#334155; background:linear-gradient(180deg,#111827,#0B1220);}}
+          .wl-box.entry {{border-color:rgba(56,189,248,.40); background:rgba(14,116,144,.12);}}
+          .wl-box.gain {{border-color:rgba(0,255,163,.36); background:rgba(0,255,163,.08);}}
+          .wl-box.loss {{border-color:rgba(255,75,75,.38); background:rgba(255,75,75,.08);}}
+          .wl-box.result.positive {{border-color:rgba(0,255,163,.62); background:linear-gradient(180deg,rgba(0,255,163,.16),rgba(0,255,163,.06));}}
+          .wl-box.result.negative {{border-color:rgba(255,75,75,.62); background:linear-gradient(180deg,rgba(255,75,75,.16),rgba(255,75,75,.06));}}
+          .wl-box.result.flat {{border-color:rgba(255,176,32,.58); background:linear-gradient(180deg,rgba(255,176,32,.14),rgba(255,176,32,.05));}}
+          .wl-box.result.neutral {{border-color:#334155;}}
+          .wl-pct-positive {{color:#00FFA3 !important;}}
+          .wl-pct-negative {{color:#FF4B4B !important;}}
+          .wl-pct-flat {{color:#FFB020 !important;}}
+          .wl-pct-neutral {{color:#94A3B8 !important;}}
           .wl-text {{color:#CBD5E1; font-size:.86rem; line-height:1.45; margin-top:10px;}}
           .wl-action {{display:inline-block; border:1px solid #334155; border-radius:999px; padding:4px 8px; font-size:.72rem; font-weight:900; color:#F8FAFC; background:#111827; margin-top:8px;}}
           .wl-panel-title {{display:flex; justify-content:space-between; align-items:center; gap:10px; margin:4px 0 10px;}}
@@ -4327,6 +4373,13 @@ def pagina_watchlist():
             selected = action_text in {"comprar", "comprar parcial"} or float(score or 0) >= 72
             card_class = "wl-card selected" if selected else "wl-card"
             selected_badge = '<span class="wl-selected-badge">SELECIONADA</span>' if selected else ""
+            ref_entry = item.get("entrada_parcial") or item.get("entrada_ideal")
+            result_pct = pct_from_base(item.get("preco_atual"), ref_entry)
+            result_class = pct_class(result_pct)
+            gain_1_pct = pct_from_base(item.get("gain_1"), ref_entry)
+            gain_2_pct = pct_from_base(item.get("gain_2"), ref_entry)
+            gain_final_pct = pct_from_base(item.get("gain_final"), ref_entry)
+            loss_pct = pct_from_base(item.get("loss"), ref_entry)
             html_cards.append(
                 f"""
                 <div class="{card_class}">
@@ -4341,12 +4394,13 @@ def pagina_watchlist():
                     </div>
                   </div>
                   <div class="wl-grid">
-                    <div class="wl-box"><span>Preco</span><b>{fmt_price(item.get('preco_atual'))}</b></div>
-                    <div class="wl-box"><span>Entrada ideal</span><b>{fmt_price(item.get('entrada_ideal'))}</b></div>
-                    <div class="wl-box"><span>Entrada parcial</span><b>{fmt_price(item.get('entrada_parcial'))}</b></div>
-                    <div class="wl-box"><span>Gain 1 / 2</span><b>{fmt_price(item.get('gain_1'))} / {fmt_price(item.get('gain_2'))}</b></div>
-                    <div class="wl-box"><span>Gain final</span><b>{fmt_price(item.get('gain_final'))}</b></div>
-                    <div class="wl-box"><span>Loss</span><b>{fmt_price(item.get('loss'))}</b></div>
+                    <div class="wl-box price"><span>Preco atual</span><b>{fmt_price(item.get('preco_atual'))}</b><small>referencia viva</small></div>
+                    <div class="wl-box result {result_class}"><span>Resultado</span><b class="wl-pct-{result_class}">{fmt_pct(result_pct)}</b><small>vs entrada parcial</small></div>
+                    <div class="wl-box entry"><span>Entrada ideal</span><b>{fmt_price(item.get('entrada_ideal'))}</b><small>zona preferida</small></div>
+                    <div class="wl-box entry"><span>Entrada parcial</span><b>{fmt_price(item.get('entrada_parcial'))}</b><small>base do %</small></div>
+                    <div class="wl-box gain"><span>Gain 1 / 2</span><b>{fmt_price(item.get('gain_1'))} / {fmt_price(item.get('gain_2'))}</b><small>{fmt_pct(gain_1_pct)} / {fmt_pct(gain_2_pct)}</small></div>
+                    <div class="wl-box gain"><span>Gain final</span><b>{fmt_price(item.get('gain_final'))}</b><small>{fmt_pct(gain_final_pct)}</small></div>
+                    <div class="wl-box loss"><span>Loss</span><b>{fmt_price(item.get('loss'))}</b><small>{fmt_pct(loss_pct)}</small></div>
                   </div>
                   <div class="wl-text"><b>Tese:</b> {html.escape(str(item.get('tese_principal', '')))}</div>
                   <div class="wl-text"><b>Confirmacoes:</b> {html.escape(str(item.get('confirmacoes', '')))}</div>
