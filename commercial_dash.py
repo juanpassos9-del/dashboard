@@ -4413,7 +4413,7 @@ def pagina_watchlist():
                 </div>
                 """
             )
-        return "".join(html_cards)
+        return "".join(line.strip() for line in "".join(html_cards).splitlines())
 
     def render_recommendations(items, limit=10):
         st.markdown(build_recommendation_cards(items, limit), unsafe_allow_html=True)
@@ -4487,19 +4487,17 @@ def pagina_watchlist():
 
     def render_panel(block_prefix, title, subtitle, comment_key, limit, color, rgb):
         cards_html = build_recommendation_cards(rec_filter(bloco=block_prefix), limit=limit)
-        st.markdown(
-            f"""
-            <div class="wl-category" style="--cat:{html.escape(color)}; --cat-rgb:{html.escape(rgb)};">
-              <div class="wl-category-header">
-                <div class="wl-category-name"><span class="wl-category-dot"></span>{html.escape(title)}</div>
-                <div class="wl-category-subtitle">{html.escape(subtitle)}</div>
-              </div>
-              <div class="wl-comment">{html.escape(str(block_comment(comment_key, title)))}</div>
-              {cards_html}
-            </div>
-            """,
-            unsafe_allow_html=True,
+        panel_html = (
+            f'<div class="wl-category" style="--cat:{html.escape(color)}; --cat-rgb:{html.escape(rgb)};">'
+            f'<div class="wl-category-header">'
+            f'<div class="wl-category-name"><span class="wl-category-dot"></span>{html.escape(title)}</div>'
+            f'<div class="wl-category-subtitle">{html.escape(subtitle)}</div>'
+            f'</div>'
+            f'<div class="wl-comment">{html.escape(str(block_comment(comment_key, title)))}</div>'
+            f'{cards_html}'
+            f'</div>'
         )
+        st.markdown(panel_html, unsafe_allow_html=True)
 
     st.markdown("#### Mesa WATCHLIST")
     for idx in range(0, len(watchlist_blocks), 2):
