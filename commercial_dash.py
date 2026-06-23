@@ -4242,7 +4242,7 @@ def get_watchlist_payload_cached(global_data):
 def pagina_watchlist():
     """Radar IA TTS Swing & Position."""
     st.title("WATCHLIST")
-    st.caption("Radar IA TTS para Swing & Position: Brasil Acoes e EUA ETFs Setoriais.")
+    st.caption("Radar IA TTS para Swing & Position: Brasil, EUA, Cripto, Moedas, Commodities e Metais.")
 
     global_data = get_global_markets_data()
     if st.button("Atualizar Watchlist agora", type="primary", use_container_width=True, key="watchlist_refresh_now"):
@@ -4316,6 +4316,7 @@ def pagina_watchlist():
         f"""
         <style>
           .wl-kpi-grid {{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:10px 0 16px;}}
+          .wl-panel-grid {{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px;}}
           .wl-kpi {{background:#0B1220; border:1px solid #1F2937; border-radius:8px; padding:12px;}}
           .wl-kpi span {{display:block; color:#94A3B8; font-size:.72rem; font-weight:800; text-transform:uppercase;}}
           .wl-kpi strong {{display:block; color:#F8FAFC; font-size:1.1rem; margin-top:5px;}}
@@ -4349,7 +4350,7 @@ def pagina_watchlist():
           .wl-panel-title h3 {{margin:0; color:#F8FAFC; font-size:1.05rem;}}
           .wl-panel-title span {{color:#94A3B8; font-size:.72rem; font-weight:800; text-transform:uppercase;}}
           .wl-comment {{border:1px solid #1F2937; background:#090F1A; border-radius:8px; padding:11px 12px; color:#CBD5E1; font-size:.86rem; line-height:1.45; margin-bottom:10px;}}
-          @media(max-width:900px) {{.wl-kpi-grid {{grid-template-columns:1fr 1fr;}} .wl-grid {{grid-template-columns:1fr 1fr;}}}}
+          @media(max-width:900px) {{.wl-kpi-grid {{grid-template-columns:1fr 1fr;}} .wl-panel-grid {{grid-template-columns:1fr;}} .wl-grid {{grid-template-columns:1fr 1fr;}}}}
         </style>
         <div class="wl-kpi-grid">
           <div class="wl-kpi"><span>Regime Macro</span><strong>{html.escape(str(macro.get('regime', '---')))}</strong></div>
@@ -4461,32 +4462,36 @@ def pagina_watchlist():
         st.dataframe(styled, hide_index=True, use_container_width=True, height=min(430, 38 + len(df_results) * 35))
 
     comments = payload.get("commentary", {})
+    watchlist_blocks = [
+        ("Brasil", "Brasil - Acoes", "Swing + Position", "brasil", 5),
+        ("EUA", "EUA - ETFs Setoriais", "Rotacao setorial", "eua", 5),
+        ("Cripto", "Cripto", "Liquidez + beta", "cripto", 4),
+        ("Moedas", "Moedas / Forex", "FX macro", "moedas", 4),
+        ("Commodities", "Commodities", "Energia + graos", "commodities", 4),
+        ("Metais", "Metais", "Preciosos + industriais", "metais", 4),
+    ]
+
+    def render_panel(block_prefix, title, subtitle, comment_key, limit):
+        st.markdown(
+            f"""
+            <div class="wl-panel-title">
+              <h3>{html.escape(title)}</h3>
+              <span>{html.escape(subtitle)}</span>
+            </div>
+            <div class="wl-comment">{html.escape(str(comments.get(comment_key, '---')))}</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        render_recommendations(rec_filter(bloco=block_prefix), limit=limit)
+
     st.markdown("#### Mesa WATCHLIST")
-    brasil_col, eua_col = st.columns(2, gap="large")
-    with brasil_col:
-        st.markdown(
-            f"""
-            <div class="wl-panel-title">
-              <h3>Brasil - Acoes</h3>
-              <span>Swing + Position</span>
-            </div>
-            <div class="wl-comment">{html.escape(str(comments.get('brasil', '---')))}</div>
-            """,
-            unsafe_allow_html=True,
-        )
-        render_recommendations(rec_filter(bloco="Brasil"), limit=5)
-    with eua_col:
-        st.markdown(
-            f"""
-            <div class="wl-panel-title">
-              <h3>EUA - ETFs Setoriais</h3>
-              <span>Rotacao setorial</span>
-            </div>
-            <div class="wl-comment">{html.escape(str(comments.get('eua', '---')))}</div>
-            """,
-            unsafe_allow_html=True,
-        )
-        render_recommendations(rec_filter(bloco="EUA"), limit=5)
+    for idx in range(0, len(watchlist_blocks), 2):
+        left, right = st.columns(2, gap="large")
+        with left:
+            render_panel(*watchlist_blocks[idx])
+        if idx + 1 < len(watchlist_blocks):
+            with right:
+                render_panel(*watchlist_blocks[idx + 1])
 
     st.markdown("---")
     try:
@@ -4504,10 +4509,12 @@ def pagina_watchlist():
         "Visao Macro Global",
         "Brasil - Acoes",
         "EUA - Rotacao Setorial",
-        "Radar Swing Brasil",
-        "Radar Swing EUA",
-        "Radar Position Brasil",
-        "Radar Position EUA",
+        "Cripto",
+        "Moedas",
+        "Commodities",
+        "Metais",
+        "Swing",
+        "Position",
         "Comentario da IA",
     ])
 
@@ -4520,16 +4527,26 @@ def pagina_watchlist():
     with tabs[2]:
         render_recommendations(rec_filter(bloco="EUA"), limit=10)
     with tabs[3]:
-        render_recommendations(rec_filter(tipo="Swing", bloco="Brasil"), limit=10)
+        render_recommendations(rec_filter(bloco="Cripto"), limit=10)
     with tabs[4]:
-        render_recommendations(rec_filter(tipo="Swing", bloco="EUA"), limit=8)
+        render_recommendations(rec_filter(bloco="Moedas"), limit=10)
     with tabs[5]:
-        render_recommendations(rec_filter(tipo="Position", bloco="Brasil"), limit=10)
+        render_recommendations(rec_filter(bloco="Commodities"), limit=10)
     with tabs[6]:
-        render_recommendations(rec_filter(tipo="Position", bloco="EUA"), limit=8)
+        render_recommendations(rec_filter(bloco="Metais"), limit=10)
     with tabs[7]:
-        st.markdown(f"#### Brasil\n{comments.get('brasil', '---')}")
-        st.markdown(f"#### EUA\n{comments.get('eua', '---')}")
+        st.markdown("#### Radar Swing")
+        for block_prefix, title, *_ in watchlist_blocks:
+            st.markdown(f"##### {title}")
+            render_recommendations(rec_filter(tipo="Swing", bloco=block_prefix), limit=6)
+    with tabs[8]:
+        st.markdown("#### Radar Position")
+        for block_prefix, title, *_ in watchlist_blocks:
+            st.markdown(f"##### {title}")
+            render_recommendations(rec_filter(tipo="Position", bloco=block_prefix), limit=6)
+    with tabs[9]:
+        for _, title, _, comment_key, _ in watchlist_blocks:
+            st.markdown(f"#### {title}\n{comments.get(comment_key, '---')}")
 
 def pagina_graficos():
     """Página com integração TradingView Advanced Chart."""

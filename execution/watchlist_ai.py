@@ -47,6 +47,49 @@ US_SECTOR_ETFS = {
     "XLI": {"ticker": "XLI", "sector": "Industrials", "driver": "crescimento, PMIs, infraestrutura, ciclo economico"},
 }
 
+CRYPTO_ASSETS = {
+    "BTC": {"ticker": "BTC-USD", "sector": "Crypto major", "driver": "liquidez global, DXY, Nasdaq, apetite por risco"},
+    "ETH": {"ticker": "ETH-USD", "sector": "Crypto beta", "driver": "liquidez, tecnologia, fluxo em altcoins"},
+    "SOL": {"ticker": "SOL-USD", "sector": "Crypto beta", "driver": "beta cripto, fluxo de risco, momentum"},
+    "BNB": {"ticker": "BNB-USD", "sector": "Crypto exchange", "driver": "cripto beta, fluxo em exchanges"},
+    "LINK": {"ticker": "LINK-USD", "sector": "Crypto infra", "driver": "infra cripto, altseason, apetite por risco"},
+}
+
+FX_ASSETS = {
+    "EURUSD": {"ticker": "EURUSD=X", "sector": "G10 FX", "driver": "diferencial de juros EUA/Europa, DXY, BCE/Fed"},
+    "GBPUSD": {"ticker": "GBPUSD=X", "sector": "G10 FX", "driver": "BoE, DXY, apetite por risco"},
+    "USDJPY": {"ticker": "JPY=X", "sector": "Carry FX", "driver": "US10Y, BoJ, diferencial de juros, carry trade"},
+    "USDBRL": {"ticker": "BRL=X", "sector": "Emerging FX", "driver": "DXY, fiscal Brasil, commodities, fluxo estrangeiro"},
+    "AUDUSD": {"ticker": "AUDUSD=X", "sector": "Commodity FX", "driver": "China, commodities, DXY, risco global"},
+    "USDCAD": {"ticker": "CAD=X", "sector": "Commodity FX", "driver": "petroleo, BoC, DXY"},
+}
+
+COMMODITY_ASSETS = {
+    "WTI": {"ticker": "CL=F", "sector": "Energia", "driver": "estoques, OPEP, geopolitica, crescimento global"},
+    "BRENT": {"ticker": "BZ=F", "sector": "Energia", "driver": "petroleo global, geopolitica, oferta/demanda"},
+    "NATGAS": {"ticker": "NG=F", "sector": "Energia", "driver": "clima, estoques, demanda industrial"},
+    "CORN": {"ticker": "ZC=F", "sector": "Graos", "driver": "clima, safra, dolar, demanda global"},
+    "SOYBEAN": {"ticker": "ZS=F", "sector": "Graos", "driver": "China, clima, safra EUA/Brasil"},
+    "WHEAT": {"ticker": "ZW=F", "sector": "Graos", "driver": "clima, Mar Negro, oferta global"},
+}
+
+METAL_ASSETS = {
+    "GOLD": {"ticker": "GC=F", "sector": "Metal precioso", "driver": "juros reais, DXY, risco geopolitico, inflacao"},
+    "SILVER": {"ticker": "SI=F", "sector": "Metal precioso/industrial", "driver": "ouro, demanda industrial, DXY"},
+    "COPPER": {"ticker": "HG=F", "sector": "Metal industrial", "driver": "China, ciclo industrial, dolar"},
+    "PLATINUM": {"ticker": "PL=F", "sector": "Metal precioso/industrial", "driver": "industria, automotivo, dolar"},
+    "PALLADIUM": {"ticker": "PA=F", "sector": "Metal industrial", "driver": "automotivo, oferta, ciclo industrial"},
+}
+
+ASSET_GROUPS = {
+    "Brasil": {"assets": BRAZIL_ASSETS, "benchmarks": ["BOVA11.SA", "^BVSP"], "label": "Brasil Acoes", "class": "Acao"},
+    "EUA": {"assets": US_SECTOR_ETFS, "benchmarks": ["SPY"], "label": "EUA ETFs Setoriais", "class": "ETF Setorial"},
+    "Cripto": {"assets": CRYPTO_ASSETS, "benchmarks": ["BTC-USD"], "label": "Cripto", "class": "Cripto"},
+    "Moedas": {"assets": FX_ASSETS, "benchmarks": ["DX-Y.NYB"], "label": "Moedas Forex", "class": "Moeda"},
+    "Commodities": {"assets": COMMODITY_ASSETS, "benchmarks": ["DBC"], "label": "Commodities", "class": "Commodity"},
+    "Metais": {"assets": METAL_ASSETS, "benchmarks": ["GC=F"], "label": "Metais", "class": "Metal"},
+}
+
 WATCHLIST_RESULTS_PATH = Path(".tmp") / "watchlist_results.json"
 
 
@@ -83,23 +126,38 @@ def _safe_float(value, default=0.0) -> float:
 
 
 def _download_prices(tickers: list[str]) -> pd.DataFrame:
-    for attempt in range(2):
-        try:
-            data = yf.download(
-                sorted(set(tickers)),
-                period="1y",
-                interval="1d",
-                group_by="ticker",
-                progress=False,
-                auto_adjust=False,
-                threads=False,
-                timeout=18,
-            )
-            if data is not None and not data.empty:
-                return data
-        except Exception:
-            time.sleep(1 + attempt)
-    return pd.DataFrame()
+    unique = sorted(set(tickers))
+    frames: dict[str, pd.DataFrame] = {}
+    chunk_size = 5
+    for start in range(0, len(unique), chunk_size):
+        chunk = unique[start:start + chunk_size]
+        data = pd.DataFrame()
+        for attempt in range(2):
+            try:
+                data = yf.download(
+                    chunk,
+                    period="1y",
+                    interval="1d",
+                    group_by="ticker",
+                    progress=False,
+                    auto_adjust=False,
+                    threads=False,
+                    timeout=15,
+                )
+                if data is not None and not data.empty:
+                    break
+            except Exception:
+                time.sleep(1 + attempt)
+        if data is None or data.empty:
+            continue
+        for ticker in chunk:
+            df = _ticker_frame(data, ticker)
+            if not df.empty:
+                frames[ticker] = df
+        time.sleep(0.4)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, axis=1)
 
 
 def _ticker_frame(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
@@ -181,21 +239,52 @@ def _macro_regime(global_data: dict | None) -> dict[str, Any]:
 
 def _regime_component(block: str, sector: str, regime: str) -> float:
     sector_l = sector.lower()
+    risk_sensitive = block in {"Cripto", "Commodities", "Metais"}
     if regime == "Risk-on forte":
         if block == "Brasil":
             return 85 if any(x in sector_l for x in ["mineracao", "petroleo", "bancos", "industria"]) else 65
+        if block == "Cripto":
+            return 82
+        if block == "Moedas":
+            return 72 if "commodity" in sector_l or "emerging" in sector_l else 55
+        if block == "Commodities":
+            return 75
+        if block == "Metais":
+            return 76 if "industrial" in sector_l else 58
         return 85 if sector in {"Technology", "Industrials", "Materials"} else 60
     if regime == "Risk-on moderado":
         if block == "Brasil":
             return 75 if any(x in sector_l for x in ["bancos", "papel", "mineracao"]) else 60
+        if block == "Cripto":
+            return 72
+        if block == "Moedas":
+            return 68 if "commodity" in sector_l or "emerging" in sector_l else 55
+        if risk_sensitive:
+            return 66
         return 75 if sector in {"Technology", "Industrials"} else 58
     if regime == "Risk-off moderado":
         if block == "Brasil":
             return 72 if any(x in sector_l for x in ["eletricas", "defensivo"]) else 45
+        if block == "Cripto":
+            return 35
+        if block == "Moedas":
+            return 70 if "g10" in sector_l or "carry" in sector_l else 42
+        if block == "Commodities":
+            return 48
+        if block == "Metais":
+            return 70 if "precioso" in sector_l else 45
         return 78 if sector == "Consumer Staples" else 45
     if regime == "Risk-off forte":
         if block == "Brasil":
             return 62 if any(x in sector_l for x in ["eletricas", "defensivo"]) else 30
+        if block == "Cripto":
+            return 25
+        if block == "Moedas":
+            return 68 if "g10" in sector_l or "carry" in sector_l else 35
+        if block == "Commodities":
+            return 35
+        if block == "Metais":
+            return 78 if "precioso" in sector_l else 35
         return 70 if sector == "Consumer Staples" else 30
     return 55
 
@@ -235,8 +324,16 @@ def _score_snapshot(s: AssetSnapshot, macro: dict, style: str) -> float:
     regime = _regime_component(s.block, s.sector, macro["regime"])
     if s.block == "Brasil":
         score = regime * 0.25 + s.trend_score * 0.20 + s.relative_score * 0.15 + 58 * 0.15 + 50 * 0.10 + s.volatility_score * 0.10 + 50 * 0.05
-    else:
+    elif s.block == "EUA":
         score = regime * 0.25 + s.relative_score * 0.20 + s.trend_score * 0.15 + 58 * 0.15 + s.volatility_score * 0.10 + 52 * 0.10 + 50 * 0.05
+    elif s.block == "Cripto":
+        score = regime * 0.30 + s.trend_score * 0.24 + s.relative_score * 0.18 + s.volatility_score * 0.08 + 55 * 0.12 + 50 * 0.08
+    elif s.block == "Moedas":
+        score = regime * 0.18 + s.trend_score * 0.25 + s.relative_score * 0.18 + s.volatility_score * 0.16 + 58 * 0.13 + 50 * 0.10
+    elif s.block == "Commodities":
+        score = regime * 0.22 + s.trend_score * 0.24 + s.relative_score * 0.16 + s.volatility_score * 0.10 + 60 * 0.18 + 50 * 0.10
+    else:
+        score = regime * 0.24 + s.trend_score * 0.22 + s.relative_score * 0.16 + s.volatility_score * 0.12 + 62 * 0.16 + 50 * 0.10
     if style == "Position":
         score = score * 0.72 + s.trend_score * 0.18 + regime * 0.10
     return max(0, min(100, score))
@@ -266,11 +363,14 @@ def _recommendation(s: AssetSnapshot, macro: dict, style: str) -> dict[str, Any]
         action = "evitar/reduzir"
         status = "fraco"
     position = "1.0x" if score >= 75 else "0.5x" if score >= 62 else "0.25x"
-    carteira = f"Carteira {style} {'Brasil - Acoes' if s.block == 'Brasil' else 'EUA - ETFs Setoriais'}"
+    group = ASSET_GROUPS.get(s.block, {})
+    block_label = group.get("label", s.block)
+    asset_class = group.get("class", s.block)
+    carteira = f"Carteira {style} {block_label}"
     return {
-        "bloco": f"{s.block} {'Acoes' if s.block == 'Brasil' else 'ETFs Setoriais'}",
+        "bloco": block_label,
         "ativo": s.symbol,
-        "classe": "Acao" if s.block == "Brasil" else "ETF Setorial",
+        "classe": asset_class,
         "setor": s.sector,
         "tipo": style,
         "direcao": "compra",
@@ -302,7 +402,8 @@ def _recommendation(s: AssetSnapshot, macro: dict, style: str) -> dict[str, Any]
 
 
 def _commentary(recs: list[dict[str, Any]], block: str, macro: dict) -> str:
-    subset = [r for r in recs if r["bloco"].startswith(block)]
+    label = ASSET_GROUPS.get(block, {}).get("label", block)
+    subset = [r for r in recs if r["bloco"].startswith(label)]
     top = []
     seen = set()
     for item in sorted(subset, key=lambda r: r["score_atual"], reverse=True):
@@ -317,29 +418,37 @@ def _commentary(recs: list[dict[str, Any]], block: str, macro: dict) -> str:
     names = ", ".join(r["ativo"] for r in top)
     if block == "Brasil":
         return f"Radar Brasil em regime {macro['regime']}. Destaques: {names}. A leitura favorece nomes com melhor tendencia e forca relativa contra Ibovespa; risco principal vem de DXY/juros locais e commodities."
-    return f"Rotacao setorial EUA em regime {macro['regime']}. Destaques: {names}. A leitura compara cada setor contra SPY; risco principal vem de US10Y, DXY, VIX e mudanca de apetite por risco."
+    if block == "EUA":
+        return f"Rotacao setorial EUA em regime {macro['regime']}. Destaques: {names}. A leitura compara cada setor contra SPY; risco principal vem de US10Y, DXY, VIX e mudanca de apetite por risco."
+    if block == "Cripto":
+        return f"Radar Cripto em regime {macro['regime']}. Destaques: {names}. Prioriza tendencia, forca contra BTC e sensibilidade a liquidez, Nasdaq e DXY."
+    if block == "Moedas":
+        return f"Radar Moedas em regime {macro['regime']}. Destaques: {names}. A leitura observa momentum contra DXY/cesta FX, diferencial de juros e apetite por risco."
+    if block == "Commodities":
+        return f"Radar Commodities em regime {macro['regime']}. Destaques: {names}. Foco em tendencia, pressao inflacionaria, China, geopolitica e dolar."
+    return f"Radar Metais em regime {macro['regime']}. Destaques: {names}. Foco em juros reais, DXY, ciclo industrial e demanda por protecao."
 
 
 def generate_watchlist(global_data: dict | None = None) -> dict[str, Any]:
-    tickers = [m["ticker"] for m in BRAZIL_ASSETS.values()] + [m["ticker"] for m in US_SECTOR_ETFS.values()] + ["^BVSP", "BOVA11.SA", "SPY"]
+    tickers = []
+    for group in ASSET_GROUPS.values():
+        tickers.extend(m["ticker"] for m in group["assets"].values())
+        tickers.extend(group.get("benchmarks", []))
     data = _download_prices(tickers)
     macro = _macro_regime(global_data)
-    benchmark_br = _ticker_frame(data, "BOVA11.SA")
-    if benchmark_br.empty:
-        benchmark_br = _ticker_frame(data, "^BVSP")
-    benchmark_us = _ticker_frame(data, "SPY")
-    br_close = benchmark_br["Close"].astype(float) if not benchmark_br.empty else pd.Series(dtype=float)
-    us_close = benchmark_us["Close"].astype(float) if not benchmark_us.empty else pd.Series(dtype=float)
 
     snapshots: list[AssetSnapshot] = []
-    for symbol, meta in BRAZIL_ASSETS.items():
-        snap = _build_snapshot(symbol, meta, "Brasil", data, br_close)
-        if snap:
-            snapshots.append(snap)
-    for symbol, meta in US_SECTOR_ETFS.items():
-        snap = _build_snapshot(symbol, meta, "EUA", data, us_close)
-        if snap:
-            snapshots.append(snap)
+    for block, group in ASSET_GROUPS.items():
+        benchmark = pd.DataFrame()
+        for benchmark_ticker in group.get("benchmarks", []):
+            benchmark = _ticker_frame(data, benchmark_ticker)
+            if not benchmark.empty:
+                break
+        benchmark_close = benchmark["Close"].astype(float) if not benchmark.empty else pd.Series(dtype=float)
+        for symbol, meta in group["assets"].items():
+            snap = _build_snapshot(symbol, meta, block, data, benchmark_close)
+            if snap:
+                snapshots.append(snap)
 
     recommendations = []
     for snap in snapshots:
@@ -352,8 +461,8 @@ def generate_watchlist(global_data: dict | None = None) -> dict[str, Any]:
         "macro": macro,
         "recommendations": recommendations,
         "commentary": {
-            "brasil": _commentary(recommendations, "Brasil", macro),
-            "eua": _commentary(recommendations, "EUA", macro),
+            block.lower(): _commentary(recommendations, block, macro)
+            for block in ASSET_GROUPS
         },
         "data_quality": {
             "assets_loaded": len(snapshots),
