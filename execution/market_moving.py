@@ -1,0 +1,268 @@
+"""Market Moving event detector.
+
+Builds market-moving news cards by matching high-impact headlines to proxy
+assets and measuring the intraday move after the headline timestamp.
+"""
+
+from __future__ import annotations
+
+import math
+import time
+from datetime import datetime, timedelta
+from typing import Any
+
+import pandas as pd
+import yfinance as yf
+
+
+ASSET_RULES = [
+    {
+        "tags": ["Energy", "Oil", "Geopolitics"],
+        "keywords": ["oil", "crude", "brent", "wti", "opec", "hormuz", "iran", "israel", "strait", "tanker"],
+        "assets": [
+            {"symbol": "WTI", "label": "WTI Crude Oil", "ticker": "CL=F"},
+            {"symbol": "BRENT", "label": "Brent Oil", "ticker": "BZ=F"},
+            {"symbol": "XLE", "label": "Energy ETF", "ticker": "XLE"},
+        ],
+    },
+    {
+        "tags": ["Rates", "USD", "US Bonds"],
+        "keywords": ["fed", "fomc", "powell", "treasury", "treasuries", "yield", "rate", "inflation", "cpi", "pce", "ppi"],
+        "assets": [
+            {"symbol": "DXY", "label": "DXY", "ticker": "DX-Y.NYB"},
+            {"symbol": "SPX", "label": "S&P 500", "ticker": "^GSPC"},
+            {"symbol": "GOLD", "label": "Gold", "ticker": "GC=F"},
+        ],
+    },
+    {
+        "tags": ["US Indexes", "Risk"],
+        "keywords": ["s&p", "spx", "nasdaq", "dow", "stocks", "futures", "risk", "tariff", "trump"],
+        "assets": [
+            {"symbol": "SPX", "label": "S&P 500", "ticker": "^GSPC"},
+            {"symbol": "NASDAQ", "label": "Nasdaq", "ticker": "^IXIC"},
+            {"symbol": "DXY", "label": "DXY", "ticker": "DX-Y.NYB"},
+        ],
+    },
+    {
+        "tags": ["Crypto", "Liquidity"],
+        "keywords": ["bitcoin", "btc", "ethereum", "crypto", "etf"],
+        "assets": [
+            {"symbol": "BTC", "label": "Bitcoin", "ticker": "BTC-USD"},
+            {"symbol": "ETH", "label": "Ethereum", "ticker": "ETH-USD"},
+            {"symbol": "NASDAQ", "label": "Nasdaq", "ticker": "^IXIC"},
+        ],
+    },
+    {
+        "tags": ["Brazil", "FX"],
+        "keywords": ["brazil", "brasil", "real", "ibovespa", "bcb", "copom", "selic"],
+        "assets": [
+            {"symbol": "IBOV", "label": "Ibovespa", "ticker": "^BVSP"},
+            {"symbol": "USDBRL", "label": "USD/BRL", "ticker": "BRL=X"},
+            {"symbol": "EWZ", "label": "Brazil ETF", "ticker": "EWZ"},
+        ],
+    },
+]
+
+
+def _title(item: dict[str, Any]) -> str:
+    return str(item.get("title_en") or item.get("title") or item.get("title_pt") or "").strip()
+
+
+def _summary(item: dict[str, Any]) -> str:
+    return str(item.get("summary") or item.get("description") or "").strip()
+
+
+def _event_dt(item: dict[str, Any]) -> datetime | None:
+    ts = item.get("timestamp")
+    try:
+        if ts:
+            value = float(ts)
+            if value > 10_000_000_000:
+                value = value / 1000
+            return datetime.fromtimestamp(value)
+    except Exception:
+        pass
+    for key in ["published_at", "published", "datetime", "time_br"]:
+        raw = item.get(key)
+        if not raw:
+            continue
+        try:
+            parsed = pd.to_datetime(raw)
+            if pd.notna(parsed):
+                return parsed.to_pydatetime().replace(tzinfo=None)
+        except Exception:
+            continue
+    return None
+
+
+def impact_score(item: dict[str, Any]) -> tuple[str, int]:
+    text = f"{_title(item)} {_summary(item)} {item.get('source', '')}".lower()
+    score = 0
+    rules = [
+        (5, ["fed", "fomc", "powell", "interest rate", "treasury", "yields"]),
+        (5, ["cpi", "pce", "ppi", "inflation", "payroll", "jobs", "gdp", "ism", "pmi"]),
+        (8, ["iran", "israel", "war", "strike", "strikes", "attack", "missile", "military", "sanction", "hormuz"]),
+        (4, ["oil", "crude", "brent", "wti", "opec", "dxy", "dollar"]),
+        (3, ["s&p", "nasdaq", "dow", "bitcoin", "crypto", "ibovespa", "brazil"]),
+    ]
+    for weight, keywords in rules:
+        if any(keyword in text for keyword in keywords):
+            score += weight
+    if any(word in text for word in ["breaking", "urgent", "alert", "unexpected", "surprise"]):
+        score += 3
+    if score >= 12:
+        return "URGENTE", score
+    if score >= 8:
+        return "ALTO IMPACTO", score
+    return "MEDIO", score
+
+
+def infer_assets(item: dict[str, Any], limit: int = 3) -> tuple[list[dict[str, str]], list[str]]:
+    text = f"{_title(item)} {_summary(item)}".lower()
+    selected: list[dict[str, str]] = []
+    tags: list[str] = []
+    for rule in ASSET_RULES:
+        if any(keyword in text for keyword in rule["keywords"]):
+            tags.extend(rule["tags"])
+            for asset in rule["assets"]:
+                if asset["ticker"] not in {a["ticker"] for a in selected}:
+                    selected.append(asset)
+    if not selected:
+        selected = [
+            {"symbol": "SPX", "label": "S&P 500", "ticker": "^GSPC"},
+            {"symbol": "DXY", "label": "DXY", "ticker": "DX-Y.NYB"},
+        ]
+        tags.append("Macro")
+    unique_tags = []
+    for tag in tags:
+        if tag not in unique_tags:
+            unique_tags.append(tag)
+    return selected[:limit], unique_tags[:5]
+
+
+def _download_intraday(ticker: str) -> pd.DataFrame:
+    for attempt in range(2):
+        try:
+            df = yf.download(
+                ticker,
+                period="5d",
+                interval="1m",
+                progress=False,
+                auto_adjust=False,
+                prepost=True,
+                threads=False,
+                timeout=12,
+            )
+            if df is not None and not df.empty:
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.get_level_values(0)
+                return df.dropna(subset=["Close"]).copy()
+        except Exception:
+            time.sleep(0.5 + attempt)
+    return pd.DataFrame()
+
+
+def _candles_around_event(df: pd.DataFrame, event_dt: datetime) -> pd.DataFrame:
+    if df.empty:
+        return df
+    idx = df.index
+    if getattr(idx, "tz", None) is not None:
+        event_ts = pd.Timestamp(event_dt, tz=idx.tz)
+    else:
+        event_ts = pd.Timestamp(event_dt)
+    start = event_ts - pd.Timedelta(minutes=90)
+    end = event_ts + pd.Timedelta(minutes=90)
+    sliced = df.loc[(idx >= start) & (idx <= end)].copy()
+    if sliced.empty:
+        return df.tail(180).copy()
+    return sliced
+
+
+def _serialize_candles(df: pd.DataFrame) -> list[dict[str, Any]]:
+    candles = []
+    for ts, row in df.iterrows():
+        try:
+            timestamp = int(pd.Timestamp(ts).timestamp())
+            candles.append({
+                "time": timestamp,
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": float(row["Close"]),
+            })
+        except Exception:
+            continue
+    return candles
+
+
+def _reaction_metrics(df: pd.DataFrame, event_dt: datetime) -> dict[str, Any]:
+    if df.empty:
+        return {}
+    idx = df.index
+    event_ts = pd.Timestamp(event_dt, tz=idx.tz) if getattr(idx, "tz", None) is not None else pd.Timestamp(event_dt)
+    after = df.loc[idx >= event_ts].copy()
+    before = df.loc[idx <= event_ts].copy()
+    if after.empty or before.empty:
+        return {}
+    base = float(after["Close"].iloc[0])
+    if not math.isfinite(base) or base <= 0:
+        return {}
+
+    def ret_after(minutes: int) -> float | None:
+        target = event_ts + pd.Timedelta(minutes=minutes)
+        window = df.loc[idx <= target]
+        if window.empty:
+            return None
+        return ((float(window["Close"].iloc[-1]) / base) - 1) * 100
+
+    high_after = float(after["High"].head(60).max())
+    low_after = float(after["Low"].head(60).min())
+    return {
+        "base": round(base, 4),
+        "ret_5m": None if ret_after(5) is None else round(ret_after(5), 2),
+        "ret_15m": None if ret_after(15) is None else round(ret_after(15), 2),
+        "ret_30m": None if ret_after(30) is None else round(ret_after(30), 2),
+        "max_60m": round(((high_after / base) - 1) * 100, 2),
+        "min_60m": round(((low_after / base) - 1) * 100, 2),
+    }
+
+
+def build_market_moving_events(news_items: list[dict[str, Any]], max_events: int = 6) -> list[dict[str, Any]]:
+    candidates = []
+    for item in news_items or []:
+        label, score = impact_score(item)
+        if score < 8:
+            continue
+        event_dt = _event_dt(item)
+        if not event_dt:
+            continue
+        assets, tags = infer_assets(item)
+        candidates.append((score, event_dt, item, label, assets, tags))
+    candidates.sort(key=lambda row: (row[0], row[1]), reverse=True)
+
+    events = []
+    for score, event_dt, item, label, assets, tags in candidates[:max_events]:
+        charts = []
+        for asset in assets:
+            df = _download_intraday(asset["ticker"])
+            window = _candles_around_event(df, event_dt)
+            candles = _serialize_candles(window)
+            if not candles:
+                continue
+            charts.append({
+                **asset,
+                "candles": candles,
+                "event_time": int(pd.Timestamp(event_dt).timestamp()),
+                "metrics": _reaction_metrics(window, event_dt),
+            })
+        events.append({
+            "title": _title(item),
+            "source": item.get("source") or "",
+            "impact": label,
+            "impact_score": score,
+            "event_dt": event_dt.strftime("%Y-%m-%d %H:%M:%S"),
+            "event_time_label": event_dt.strftime("%H:%M"),
+            "tags": tags,
+            "charts": charts,
+        })
+    return events

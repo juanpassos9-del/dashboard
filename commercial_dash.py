@@ -4,6 +4,7 @@ import streamlit.components.v1 as components
 import os
 import base64
 import html
+import json
 import time
 import pandas as pd
 from datetime import datetime, timedelta, timezone
@@ -4563,6 +4564,157 @@ def pagina_watchlist():
         for _block_prefix, title, _subtitle, comment_key, _limit, _color, _rgb in watchlist_blocks:
             st.markdown(f"#### {title}\n{block_comment(comment_key, title)}")
 
+
+@st.cache_data(ttl=240, show_spinner=False)
+def get_market_moving_events_cached(refresh_nonce: int = 0):
+    news_items, _sources, _warnings, _loaded_at = load_bloomberg_news_feed(refresh_nonce)
+    from execution.market_moving import build_market_moving_events
+
+    return build_market_moving_events(news_items, max_events=6)
+
+
+def _market_moving_chart_html(chart: dict, uid: str) -> str:
+    candles = chart.get("candles", [])
+    metrics = chart.get("metrics", {})
+    event_time = chart.get("event_time")
+    title = html.escape(str(chart.get("label") or chart.get("symbol") or "Ativo"))
+    symbol = html.escape(str(chart.get("symbol") or ""))
+    payload = json.dumps({"candles": candles, "eventTime": event_time}, ensure_ascii=False)
+    metric_html = " ".join(
+        f"<span>{label}: <b class='{('pos' if (value or 0) >= 0 else 'neg')}'>{value:+.2f}%</b></span>"
+        for label, value in [
+            ("5m", metrics.get("ret_5m")),
+            ("15m", metrics.get("ret_15m")),
+            ("30m", metrics.get("ret_30m")),
+        ]
+        if isinstance(value, (int, float))
+    )
+    if not metric_html:
+        metric_html = "<span>Sem candle suficiente para medir reação.</span>"
+    return f"""
+    <div class="mm-chart-card">
+      <div class="mm-chart-title"><span>{symbol}</span>{title}</div>
+      <div id="mm-chart-{uid}" class="mm-chart"></div>
+      <div class="mm-metrics">{metric_html}</div>
+    </div>
+    <script>
+    (function() {{
+      const payload = {payload};
+      const root = document.getElementById("mm-chart-{uid}");
+      if (!root || !window.LightweightCharts || !payload.candles || !payload.candles.length) return;
+      const chart = LightweightCharts.createChart(root, {{
+        layout: {{ background: {{ color: "#030712" }}, textColor: "#D1D5DB" }},
+        grid: {{ vertLines: {{ color: "rgba(148,163,184,.12)" }}, horzLines: {{ color: "rgba(148,163,184,.12)" }} }},
+        rightPriceScale: {{ borderColor: "rgba(148,163,184,.20)" }},
+        timeScale: {{ borderColor: "rgba(148,163,184,.20)", timeVisible: true, secondsVisible: false }},
+        crosshair: {{ mode: 1 }},
+      }});
+      let series;
+      if (chart.addSeries && LightweightCharts.CandlestickSeries) {{
+        series = chart.addSeries(LightweightCharts.CandlestickSeries, {{
+          upColor: "#00C896", downColor: "#FF3B30", borderVisible: false,
+          wickUpColor: "#00C896", wickDownColor: "#FF3B30"
+        }});
+      }} else {{
+        series = chart.addCandlestickSeries({{
+          upColor: "#00C896", downColor: "#FF3B30", borderVisible: false,
+          wickUpColor: "#00C896", wickDownColor: "#FF3B30"
+        }});
+      }}
+      series.setData(payload.candles);
+      const eventCandle = payload.candles.reduce((best, candle) => {{
+        if (!best) return candle;
+        return Math.abs(candle.time - payload.eventTime) < Math.abs(best.time - payload.eventTime) ? candle : best;
+      }}, null);
+      if (eventCandle && series.setMarkers) {{
+        series.setMarkers([{{
+          time: eventCandle.time, position: "belowBar", color: "#22D3EE",
+          shape: "circle", text: "NEWS"
+        }}]);
+      }}
+      if (eventCandle && series.createPriceLine) {{
+        series.createPriceLine({{
+          price: eventCandle.close, color: "#22D3EE", lineWidth: 1,
+          lineStyle: 2, axisLabelVisible: true, title: "NEWS"
+        }});
+      }}
+      chart.timeScale().fitContent();
+      new ResizeObserver(function() {{ chart.applyOptions({{ width: root.clientWidth }}); }}).observe(root);
+    }})();
+    </script>
+    """
+
+
+def pagina_market_moving():
+    """Pagina Market Moving: noticias relevantes e reacao nos ativos."""
+    st.title("Market Moving")
+    st.caption("Notícias de alta relevância com marcação do horário no gráfico e reação intraday pós-evento.")
+
+    c1, c2 = st.columns([1, 4])
+    with c1:
+        if st.button("Atualizar eventos", type="primary", use_container_width=True, key="market_moving_refresh"):
+            st.session_state["market_moving_refresh_nonce"] = st.session_state.get("market_moving_refresh_nonce", 0) + 1
+            get_market_moving_events_cached.clear()
+    nonce = int(st.session_state.get("market_moving_refresh_nonce", 0))
+
+    with st.spinner("Mapeando notícias e reação nos ativos..."):
+        events = get_market_moving_events_cached(nonce)
+
+    st.markdown(
+        """
+        <style>
+          .mm-card {background:#B80000; border:1px solid rgba(255,255,255,.20); border-radius:8px; padding:14px 14px 10px; margin:0 0 16px; color:#fff;}
+          .mm-head {display:grid; grid-template-columns:28px 1fr; gap:10px; align-items:start;}
+          .mm-dot {width:22px; height:22px; border:3px solid #22D3EE; border-radius:999px; margin-top:3px; box-shadow:0 0 18px rgba(34,211,238,.75);}
+          .mm-title {font-size:1rem; font-weight:900; line-height:1.25;}
+          .mm-sub {color:#FECACA; font-size:.74rem; font-weight:800; margin-top:5px;}
+          .mm-tags {display:flex; flex-wrap:wrap; gap:6px; margin:9px 0 10px 38px;}
+          .mm-tag {background:rgba(17,24,39,.55); color:#FECACA; border:1px solid rgba(255,255,255,.14); border-radius:999px; padding:3px 8px; font-size:.68rem; font-weight:900;}
+          .mm-grid {display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-left:38px;}
+          .mm-chart-card {background:#020617; border:1px solid rgba(255,255,255,.15); border-radius:6px; padding:8px; min-width:0;}
+          .mm-chart-title {display:flex; gap:7px; align-items:center; color:#E5E7EB; font-size:.82rem; font-weight:900; margin-bottom:5px;}
+          .mm-chart-title span {background:#111827; border-radius:999px; padding:2px 6px; color:#BFDBFE; font-size:.68rem;}
+          .mm-chart {height:260px; width:100%;}
+          .mm-metrics {display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; color:#CBD5E1; font-size:.70rem; font-weight:800;}
+          .mm-metrics .pos {color:#00FFA3;} .mm-metrics .neg {color:#FFB4A8;}
+          @media(max-width:1100px){.mm-grid{grid-template-columns:1fr; margin-left:0}.mm-tags{margin-left:0}.mm-chart{height:300px}}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if not events:
+        st.info("Sem notícias de alto impacto com candles disponíveis no momento.")
+        return
+
+    for event_idx, event in enumerate(events):
+        title = html.escape(str(event.get("title") or "---"))
+        source = html.escape(str(event.get("source") or ""))
+        impact = html.escape(str(event.get("impact") or "ALTO IMPACTO"))
+        event_dt = html.escape(str(event.get("event_dt") or ""))
+        tags = event.get("tags") or ["Macro"]
+        charts = event.get("charts") or []
+        tags_html = "".join(f"<span class='mm-tag'>{html.escape(str(tag))}</span>" for tag in [impact, *tags])
+        charts_html = "".join(_market_moving_chart_html(chart, f"{event_idx}-{chart_idx}") for chart_idx, chart in enumerate(charts))
+        if not charts_html:
+            charts_html = "<div class='mm-chart-card'><div class='mm-metrics'>Sem candles disponíveis para os ativos mapeados.</div></div>"
+        card_html = f"""
+        <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+        <div class="mm-card">
+          <div class="mm-head">
+            <div class="mm-dot"></div>
+            <div>
+              <div class="mm-title">{title}</div>
+              <div class="mm-sub">{event_dt} | {source}</div>
+            </div>
+          </div>
+          <div class="mm-tags">{tags_html}</div>
+          <div class="mm-grid">{charts_html}</div>
+        </div>
+        """
+        components.html(card_html, height=420 if len(charts) > 1 else 430, scrolling=False)
+
+
 def pagina_graficos():
     """Página com integração TradingView Advanced Chart."""
     st.markdown("### 📊 Gráficos Avançados TradingView")
@@ -6022,7 +6174,7 @@ with st.sidebar:
         st.session_state.pop("auth_loading_until", None)
         _auth_rerun()
     st.markdown("### 🧭 Navegação")
-    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📺 Terminal Bloomberg", "📰 Market Report", "WATCHLIST", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
+    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
     sidebar_clock()
     
     st.markdown("---")
@@ -6043,6 +6195,8 @@ elif page == "📺 Terminal Bloomberg":
     pagina_terminal_bloomberg()
 elif page == "📰 Market Report":
     pagina_market_report()
+elif page == "Market Moving":
+    pagina_market_moving()
 elif page == "WATCHLIST":
     pagina_watchlist()
 elif page == "📊 Gráficos Avançados":
