@@ -170,11 +170,11 @@ def _candles_around_event(df: pd.DataFrame, event_dt: datetime) -> pd.DataFrame:
         event_ts = pd.Timestamp(event_dt, tz=idx.tz)
     else:
         event_ts = pd.Timestamp(event_dt)
-    start = event_ts - pd.Timedelta(minutes=90)
-    end = event_ts + pd.Timedelta(minutes=90)
+    start = event_ts - pd.Timedelta(minutes=30)
+    end = event_ts + pd.Timedelta(minutes=180)
     sliced = df.loc[(idx >= start) & (idx <= end)].copy()
     if sliced.empty:
-        return df.tail(180).copy()
+        return df.tail(210).copy()
     return sliced
 
 

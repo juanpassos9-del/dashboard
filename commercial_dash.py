@@ -4579,7 +4579,12 @@ def _market_moving_chart_html(chart: dict, uid: str) -> str:
     event_time = chart.get("event_time")
     title = html.escape(str(chart.get("label") or chart.get("symbol") or "Ativo"))
     symbol = html.escape(str(chart.get("symbol") or ""))
-    payload = json.dumps({"candles": candles, "eventTime": event_time}, ensure_ascii=False)
+    payload = json.dumps({
+        "candles": candles,
+        "eventTime": event_time,
+        "visibleStart": (event_time - 30 * 60) if event_time else None,
+        "visibleEnd": candles[-1]["time"] if candles else None,
+    }, ensure_ascii=False)
     metric_html = " ".join(
         f"<span>{label}: <b class='{('pos' if (value or 0) >= 0 else 'neg')}'>{value:+.2f}%</b></span>"
         for label, value in [
@@ -4606,7 +4611,9 @@ def _market_moving_chart_html(chart: dict, uid: str) -> str:
         layout: {{ background: {{ color: "#030712" }}, textColor: "#D1D5DB" }},
         grid: {{ vertLines: {{ color: "rgba(148,163,184,.12)" }}, horzLines: {{ color: "rgba(148,163,184,.12)" }} }},
         rightPriceScale: {{ borderColor: "rgba(148,163,184,.20)" }},
-        timeScale: {{ borderColor: "rgba(148,163,184,.20)", timeVisible: true, secondsVisible: false }},
+        timeScale: {{ borderColor: "rgba(148,163,184,.20)", timeVisible: true, secondsVisible: false, rightOffset: 8, barSpacing: 7 }},
+        handleScroll: {{ mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false }},
+        handleScale: {{ axisPressedMouseMove: true, mouseWheel: true, pinch: true }},
         crosshair: {{ mode: 1 }},
       }});
       let series;
@@ -4651,7 +4658,11 @@ def _market_moving_chart_html(chart: dict, uid: str) -> str:
         root.style.setProperty("--event-x", x + "px");
       }}
       chart.timeScale().subscribeVisibleTimeRangeChange(positionEventMarker);
-      chart.timeScale().fitContent();
+      if (payload.visibleStart && payload.visibleEnd && chart.timeScale().setVisibleRange) {{
+        chart.timeScale().setVisibleRange({{ from: payload.visibleStart, to: payload.visibleEnd }});
+      }} else {{
+        chart.timeScale().fitContent();
+      }}
       positionEventMarker();
       new ResizeObserver(function() {{
         chart.applyOptions({{ width: root.clientWidth }});
