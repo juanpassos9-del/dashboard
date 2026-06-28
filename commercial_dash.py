@@ -839,6 +839,17 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
             warnings.append(f"Financial Juice direto indisponivel: {e}")
             mark_source("Financial Juice RSS", "error", message=str(e), source="Financial Juice")
 
+    try:
+        from execution.fetch_news_api import fetch_news_api_news
+        news_api_items = fetch_news_api_news(limit=25, max_age_seconds=900)
+        if news_api_items:
+            news_list.extend(news_api_items)
+            news_sources.append("News API")
+            mark_source("News API", "ok", message="Fonte complementar carregada.", rows=len(news_api_items), source="News API")
+    except Exception as e:
+        warnings.append(f"News API indisponivel: {e}")
+        mark_source("News API", "stale", message=str(e), source="News API")
+
     seen_news = set()
     unique_news = []
     for item in news_list:
