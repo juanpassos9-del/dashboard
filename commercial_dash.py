@@ -4729,7 +4729,7 @@ def pagina_market_moving():
         tags_html = "".join(f"<span class='mm-tag'>{html.escape(str(tag))}</span>" for tag in [impact, *tags])
         charts_html = "".join(_market_moving_chart_html(chart, f"{event_idx}-{chart_idx}") for chart_idx, chart in enumerate(charts))
         if not charts_html:
-            charts_html = "<div class='mm-chart-card'><div class='mm-metrics'>Sem candles disponíveis para os ativos mapeados.</div></div>"
+            charts_html = "<div class='mm-chart-card'><div class='mm-metrics'>Sem candles na janela do evento. Mercado possivelmente fechado ou fonte intraday indisponível.</div></div>"
         card_html = f"""
         {market_moving_css}
         <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>

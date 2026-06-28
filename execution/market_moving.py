@@ -65,6 +65,11 @@ ASSET_RULES = [
     },
 ]
 
+FALLBACK_24H_ASSETS = [
+    {"symbol": "BTC", "label": "Bitcoin 24/7 Risk Proxy", "ticker": "BTC-USD"},
+    {"symbol": "ETH", "label": "Ethereum 24/7 Risk Proxy", "ticker": "ETH-USD"},
+]
+
 
 def _title(item: dict[str, Any]) -> str:
     return str(item.get("title_en") or item.get("title") or item.get("title_pt") or "").strip()
@@ -281,20 +286,35 @@ def build_market_moving_events(news_items: list[dict[str, Any]], max_events: int
     for score, event_dt, item, label, assets, tags in candidates[:max_events]:
         charts = []
         display_dt = _display_dt_br(event_dt)
-        for asset in assets:
+        tried_tickers: set[str] = set()
+
+        def append_chart(asset: dict[str, str], is_fallback: bool = False) -> None:
+            if asset["ticker"] in tried_tickers:
+                return
+            tried_tickers.add(asset["ticker"])
             df = _download_intraday(asset["ticker"])
             window = _candles_around_event(df, event_dt)
             window_5m = _resample_5m(window)
             candles = _serialize_candles(window_5m)
             if not candles:
-                continue
+                return
+            label_text = asset["label"]
+            if is_fallback and "Proxy" not in label_text:
+                label_text = f"{label_text} 24/7 Proxy"
             charts.append({
                 **asset,
+                "label": label_text,
                 "candles": candles,
                 "event_time": int(pd.Timestamp(event_dt).timestamp()),
                 "timeframe": "5m",
                 "metrics": _reaction_metrics(window_5m, event_dt),
             })
+
+        for asset in assets:
+            append_chart(asset)
+        if not charts:
+            for asset in FALLBACK_24H_ASSETS:
+                append_chart(asset, is_fallback=True)
         events.append({
             "title": _title(item),
             "source": item.get("source") or "",
