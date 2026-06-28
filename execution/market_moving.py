@@ -34,6 +34,18 @@ ALPHA_VANTAGE_INTRADAY_MAP = {
     "^BVSP": {"symbol": "EWZ", "label": "Brazil ETF", "source": "Alpha Vantage"},
 }
 
+TWELVE_DATA_INTRADAY_MAP = {
+    "CL=F": {"symbol": "USO", "label": "WTI Oil ETF", "source": "Twelve Data"},
+    "BZ=F": {"symbol": "BNO", "label": "Brent Oil ETF", "source": "Twelve Data"},
+    "XLE": {"symbol": "XLE", "label": "Energy ETF", "source": "Twelve Data"},
+    "^GSPC": {"symbol": "SPY", "label": "S&P 500 ETF", "source": "Twelve Data"},
+    "^IXIC": {"symbol": "QQQ", "label": "Nasdaq ETF", "source": "Twelve Data"},
+    "DX-Y.NYB": {"symbol": "UUP", "label": "DXY ETF", "source": "Twelve Data"},
+    "GC=F": {"symbol": "GLD", "label": "Gold ETF", "source": "Twelve Data"},
+    "^BVSP": {"symbol": "EWZ", "label": "Brazil ETF", "source": "Twelve Data"},
+    "EWZ": {"symbol": "EWZ", "label": "Brazil ETF", "source": "Twelve Data"},
+}
+
 ASSET_RULES = [
     {
         "tags": ["Energy", "Oil", "Geopolitics"],
@@ -213,6 +225,18 @@ def _alpha_vantage_api_key() -> str:
     return os.getenv("ALPHA_VANTAGE_API_KEY", "")
 
 
+def _twelve_data_api_key() -> str:
+    try:
+        import streamlit as st
+
+        key = st.secrets.get("TWELVE_DATA_API_KEY", "")
+        if key:
+            return str(key)
+    except Exception:
+        pass
+    return os.getenv("TWELVE_DATA_API_KEY", "")
+
+
 @lru_cache(maxsize=64)
 def _download_alpha_intraday(symbol: str) -> pd.DataFrame:
     api_key = _alpha_vantage_api_key()
@@ -257,6 +281,52 @@ def _download_alpha_fallback(ticker: str) -> tuple[pd.DataFrame, dict[str, str] 
     if not mapping:
         return pd.DataFrame(), None
     return _download_alpha_intraday(mapping["symbol"]), mapping
+
+
+@lru_cache(maxsize=64)
+def _download_twelve_intraday(symbol: str) -> pd.DataFrame:
+    api_key = _twelve_data_api_key()
+    if not api_key:
+        return pd.DataFrame()
+    params = {
+        "symbol": symbol,
+        "interval": "5min",
+        "outputsize": 5000,
+        "apikey": api_key,
+        "timezone": "America/New_York",
+    }
+    try:
+        response = requests.get("https://api.twelvedata.com/time_series", params=params, timeout=18)
+        data = response.json()
+    except Exception:
+        return pd.DataFrame()
+    values = data.get("values")
+    if not isinstance(values, list) or not values:
+        return pd.DataFrame()
+    rows = []
+    for row in values:
+        try:
+            ts = pd.Timestamp(row["datetime"]).tz_localize(NY_TZ)
+            rows.append({
+                "time": ts,
+                "Open": float(row["open"]),
+                "High": float(row["high"]),
+                "Low": float(row["low"]),
+                "Close": float(row["close"]),
+                "Volume": float(row.get("volume", 0) or 0),
+            })
+        except Exception:
+            continue
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).set_index("time").sort_index()
+
+
+def _download_twelve_fallback(ticker: str) -> tuple[pd.DataFrame, dict[str, str] | None]:
+    mapping = TWELVE_DATA_INTRADAY_MAP.get(ticker)
+    if not mapping:
+        return pd.DataFrame(), None
+    return _download_twelve_intraday(mapping["symbol"]), mapping
 
 
 def _candles_around_event(df: pd.DataFrame, event_dt: datetime, after_minutes: int = 180) -> pd.DataFrame:
@@ -369,6 +439,23 @@ def build_market_moving_events(news_items: list[dict[str, Any]], max_events: int
                 marker_label = "ABERTURA"
             source_label = "yfinance"
             chart_asset = asset
+            if window.empty:
+                twelve_df, twelve_mapping = _download_twelve_fallback(asset["ticker"])
+                twelve_window = _candles_around_event(twelve_df, event_dt)
+                twelve_marker_label = "NEWS"
+                if twelve_window.empty:
+                    twelve_window = _candles_around_event(twelve_df, event_dt, after_minutes=2160)
+                    twelve_marker_label = "ABERTURA"
+                if not twelve_window.empty and twelve_mapping:
+                    window = twelve_window
+                    marker_label = twelve_marker_label
+                    source_label = twelve_mapping["source"]
+                    chart_asset = {
+                        **asset,
+                        "symbol": twelve_mapping["symbol"],
+                        "label": twelve_mapping["label"],
+                        "ticker": twelve_mapping["symbol"],
+                    }
             if window.empty:
                 alpha_df, alpha_mapping = _download_alpha_fallback(asset["ticker"])
                 alpha_window = _candles_around_event(alpha_df, event_dt)
