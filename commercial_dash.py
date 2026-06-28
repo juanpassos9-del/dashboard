@@ -4635,12 +4635,6 @@ def _market_moving_chart_html(chart: dict, uid: str) -> str:
           shape: "circle", text: "EVENTO"
         }}]);
       }}
-      if (eventCandle && series.createPriceLine) {{
-        series.createPriceLine({{
-          price: eventCandle.close, color: "#22D3EE", lineWidth: 1,
-          lineStyle: 2, axisLabelVisible: true, title: "NEWS"
-        }});
-      }}
       function positionEventMarker() {{
         if (!eventCandle) return;
         const marker = document.getElementById("mm-event-{uid}");
