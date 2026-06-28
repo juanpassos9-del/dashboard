@@ -4594,7 +4594,7 @@ def _market_moving_chart_html(chart: dict, uid: str) -> str:
     return f"""
     <div class="mm-chart-card">
       <div class="mm-chart-title"><span>{symbol}</span>{title}</div>
-      <div id="mm-chart-{uid}" class="mm-chart"></div>
+      <div id="mm-chart-{uid}" class="mm-chart"><div id="mm-event-{uid}" class="mm-event-marker"><div class="mm-event-arrow">↓</div><div class="mm-event-label">NEWS</div></div></div>
       <div class="mm-metrics">{metric_html}</div>
     </div>
     <script>
@@ -4628,8 +4628,11 @@ def _market_moving_chart_html(chart: dict, uid: str) -> str:
       }}, null);
       if (eventCandle && series.setMarkers) {{
         series.setMarkers([{{
+          time: eventCandle.time, position: "aboveBar", color: "#22D3EE",
+          shape: "arrowDown", text: "NEWS"
+        }}, {{
           time: eventCandle.time, position: "belowBar", color: "#22D3EE",
-          shape: "circle", text: "NEWS"
+          shape: "circle", text: "EVENTO"
         }}]);
       }}
       if (eventCandle && series.createPriceLine) {{
@@ -4638,8 +4641,28 @@ def _market_moving_chart_html(chart: dict, uid: str) -> str:
           lineStyle: 2, axisLabelVisible: true, title: "NEWS"
         }});
       }}
+      function positionEventMarker() {{
+        if (!eventCandle) return;
+        const marker = document.getElementById("mm-event-{uid}");
+        if (!marker) return;
+        const x = chart.timeScale().timeToCoordinate(eventCandle.time);
+        const y = series.priceToCoordinate(eventCandle.high);
+        if (x == null || y == null) {{
+          marker.style.display = "none";
+          return;
+        }}
+        marker.style.display = "block";
+        marker.style.left = Math.max(12, Math.min(root.clientWidth - 54, x - 24)) + "px";
+        marker.style.top = Math.max(6, y - 78) + "px";
+        root.style.setProperty("--event-x", x + "px");
+      }}
+      chart.timeScale().subscribeVisibleTimeRangeChange(positionEventMarker);
       chart.timeScale().fitContent();
-      new ResizeObserver(function() {{ chart.applyOptions({{ width: root.clientWidth }}); }}).observe(root);
+      positionEventMarker();
+      new ResizeObserver(function() {{
+        chart.applyOptions({{ width: root.clientWidth }});
+        setTimeout(positionEventMarker, 50);
+      }}).observe(root);
     }})();
     </script>
     """
@@ -4674,7 +4697,11 @@ def pagina_market_moving():
           .mm-chart-card {background:#020617; border:1px solid rgba(255,255,255,.15); border-radius:6px; padding:8px; min-width:0;}
           .mm-chart-title {display:flex; gap:7px; align-items:center; color:#E5E7EB; font-size:.82rem; font-weight:900; margin-bottom:5px;}
           .mm-chart-title span {background:#111827; border-radius:999px; padding:2px 6px; color:#BFDBFE; font-size:.68rem;}
-          .mm-chart {height:260px; width:100%;}
+          .mm-chart {height:260px; width:100%; position:relative; overflow:hidden;}
+          .mm-chart::after {content:""; position:absolute; left:var(--event-x, -100px); top:0; bottom:0; width:3px; background:#22D3EE; box-shadow:0 0 18px rgba(34,211,238,.95); opacity:.95; pointer-events:none; z-index:5;}
+          .mm-event-marker {display:none; position:absolute; z-index:9; width:48px; text-align:center; pointer-events:none; filter:drop-shadow(0 0 12px rgba(34,211,238,.95));}
+          .mm-event-arrow {font-size:48px; line-height:38px; color:#22D3EE; font-weight:950;}
+          .mm-event-label {display:inline-block; margin-top:1px; padding:3px 7px; border-radius:999px; background:#22D3EE; color:#00111A; font-size:.62rem; font-weight:950; letter-spacing:.04em;}
           .mm-metrics {display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; color:#CBD5E1; font-size:.70rem; font-weight:800;}
           .mm-metrics .pos {color:#00FFA3;} .mm-metrics .neg {color:#FFB4A8;}
           @media(max-width:1100px){.mm-grid{grid-template-columns:1fr; margin-left:0}.mm-tags{margin-left:0}.mm-chart{height:300px}}
