@@ -4660,9 +4660,9 @@ def pagina_market_moving():
     with st.spinner("Mapeando notícias e reação nos ativos..."):
         events = get_market_moving_events_cached(nonce)
 
-    st.markdown(
-        """
+    market_moving_css = """
         <style>
+          body {margin:0; background:transparent; font-family:"Inter","Segoe UI",Arial,sans-serif;}
           .mm-card {background:#B80000; border:1px solid rgba(255,255,255,.20); border-radius:8px; padding:14px 14px 10px; margin:0 0 16px; color:#fff;}
           .mm-head {display:grid; grid-template-columns:28px 1fr; gap:10px; align-items:start;}
           .mm-dot {width:22px; height:22px; border:3px solid #22D3EE; border-radius:999px; margin-top:3px; box-shadow:0 0 18px rgba(34,211,238,.75);}
@@ -4679,9 +4679,7 @@ def pagina_market_moving():
           .mm-metrics .pos {color:#00FFA3;} .mm-metrics .neg {color:#FFB4A8;}
           @media(max-width:1100px){.mm-grid{grid-template-columns:1fr; margin-left:0}.mm-tags{margin-left:0}.mm-chart{height:300px}}
         </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    """
 
     if not events:
         st.info("Sem notícias de alto impacto com candles disponíveis no momento.")
@@ -4699,6 +4697,7 @@ def pagina_market_moving():
         if not charts_html:
             charts_html = "<div class='mm-chart-card'><div class='mm-metrics'>Sem candles disponíveis para os ativos mapeados.</div></div>"
         card_html = f"""
+        {market_moving_css}
         <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
         <div class="mm-card">
           <div class="mm-head">
@@ -4712,7 +4711,8 @@ def pagina_market_moving():
           <div class="mm-grid">{charts_html}</div>
         </div>
         """
-        components.html(card_html, height=420 if len(charts) > 1 else 430, scrolling=False)
+        card_html = "".join(line.strip() for line in card_html.splitlines())
+        components.html(card_html, height=420 if charts else 190, scrolling=False)
 
 
 def pagina_graficos():
