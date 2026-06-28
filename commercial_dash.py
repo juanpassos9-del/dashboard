@@ -4726,7 +4726,18 @@ def pagina_market_moving():
         st.info("Sem notícias de alto impacto com candles disponíveis no momento.")
         return
 
-    for event_idx, event in enumerate(events):
+    ready_events = [event for event in events if event.get("charts")]
+    pending_events = [event for event in events if not event.get("charts")]
+    if pending_events:
+        st.info(
+            f"{len(pending_events)} evento(s) de alto impacto aguardando abertura/candle dos ativos mapeados. "
+            "Eles aparecerão automaticamente quando houver candle pós-evento."
+        )
+    if not ready_events:
+        st.warning("Nenhum evento com candle pós-notícia disponível agora. Atualize após a abertura do mercado dos ativos mapeados.")
+        return
+
+    for event_idx, event in enumerate(ready_events):
         title = html.escape(str(event.get("title") or "---"))
         source = html.escape(str(event.get("source") or ""))
         impact = html.escape(str(event.get("impact") or "ALTO IMPACTO"))
@@ -4735,8 +4746,6 @@ def pagina_market_moving():
         charts = event.get("charts") or []
         tags_html = "".join(f"<span class='mm-tag'>{html.escape(str(tag))}</span>" for tag in [impact, *tags])
         charts_html = "".join(_market_moving_chart_html(chart, f"{event_idx}-{chart_idx}") for chart_idx, chart in enumerate(charts))
-        if not charts_html:
-            charts_html = "<div class='mm-chart-card'><div class='mm-metrics'>Sem candles na janela do evento. Mercado possivelmente fechado ou fonte intraday indisponível.</div></div>"
         card_html = f"""
         {market_moving_css}
         <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>

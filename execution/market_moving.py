@@ -501,6 +501,8 @@ def build_market_moving_events(news_items: list[dict[str, Any]], max_events: int
             "impact_score": score,
             "event_dt": display_dt.strftime("%Y-%m-%d %H:%M:%S"),
             "event_time_label": display_dt.strftime("%H:%M"),
+            "status": "ready" if charts else "pending_open",
+            "status_message": "" if charts else "Aguardando primeiro candle negociado dos ativos mapeados.",
             "tags": tags,
             "charts": charts,
         })
