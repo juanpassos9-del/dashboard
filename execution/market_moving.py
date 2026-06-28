@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import math
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
 
+BR_TZ = ZoneInfo("America/Sao_Paulo")
 
 ASSET_RULES = [
     {
@@ -79,7 +81,7 @@ def _event_dt(item: dict[str, Any]) -> datetime | None:
             value = float(ts)
             if value > 10_000_000_000:
                 value = value / 1000
-            return datetime.fromtimestamp(value)
+            return datetime.fromtimestamp(value, timezone.utc)
     except Exception:
         pass
     for key in ["published_at", "published", "datetime", "time_br"]:
@@ -89,10 +91,31 @@ def _event_dt(item: dict[str, Any]) -> datetime | None:
         try:
             parsed = pd.to_datetime(raw)
             if pd.notna(parsed):
-                return parsed.to_pydatetime().replace(tzinfo=None)
+                dt = parsed.to_pydatetime()
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=BR_TZ)
+                return dt.astimezone(timezone.utc)
         except Exception:
             continue
     return None
+
+
+def _event_timestamp_for_index(event_dt: datetime, idx: pd.Index) -> pd.Timestamp:
+    """Convert the news instant to the candle index timezone without changing the instant."""
+    event_ts = pd.Timestamp(event_dt)
+    if event_ts.tzinfo is None:
+        event_ts = event_ts.tz_localize("UTC")
+    idx_tz = getattr(idx, "tz", None)
+    if idx_tz is not None:
+        return event_ts.tz_convert(idx_tz)
+    return event_ts.tz_convert("UTC").tz_localize(None)
+
+
+def _display_dt_br(event_dt: datetime) -> datetime:
+    event_ts = pd.Timestamp(event_dt)
+    if event_ts.tzinfo is None:
+        event_ts = event_ts.tz_localize("UTC")
+    return event_ts.tz_convert(BR_TZ).to_pydatetime()
 
 
 def impact_score(item: dict[str, Any]) -> tuple[str, int]:
@@ -166,15 +189,12 @@ def _candles_around_event(df: pd.DataFrame, event_dt: datetime) -> pd.DataFrame:
     if df.empty:
         return df
     idx = df.index
-    if getattr(idx, "tz", None) is not None:
-        event_ts = pd.Timestamp(event_dt, tz=idx.tz)
-    else:
-        event_ts = pd.Timestamp(event_dt)
+    event_ts = _event_timestamp_for_index(event_dt, idx)
     start = event_ts - pd.Timedelta(minutes=30)
     end = event_ts + pd.Timedelta(minutes=180)
     sliced = df.loc[(idx >= start) & (idx <= end)].copy()
     if sliced.empty:
-        return df.tail(210).copy()
+        return pd.DataFrame()
     return sliced
 
 
@@ -216,7 +236,7 @@ def _reaction_metrics(df: pd.DataFrame, event_dt: datetime) -> dict[str, Any]:
     if df.empty:
         return {}
     idx = df.index
-    event_ts = pd.Timestamp(event_dt, tz=idx.tz) if getattr(idx, "tz", None) is not None else pd.Timestamp(event_dt)
+    event_ts = _event_timestamp_for_index(event_dt, idx)
     after = df.loc[idx >= event_ts].copy()
     before = df.loc[idx <= event_ts].copy()
     if after.empty or before.empty:
@@ -260,6 +280,7 @@ def build_market_moving_events(news_items: list[dict[str, Any]], max_events: int
     events = []
     for score, event_dt, item, label, assets, tags in candidates[:max_events]:
         charts = []
+        display_dt = _display_dt_br(event_dt)
         for asset in assets:
             df = _download_intraday(asset["ticker"])
             window = _candles_around_event(df, event_dt)
@@ -279,8 +300,8 @@ def build_market_moving_events(news_items: list[dict[str, Any]], max_events: int
             "source": item.get("source") or "",
             "impact": label,
             "impact_score": score,
-            "event_dt": event_dt.strftime("%Y-%m-%d %H:%M:%S"),
-            "event_time_label": event_dt.strftime("%H:%M"),
+            "event_dt": display_dt.strftime("%Y-%m-%d %H:%M:%S"),
+            "event_time_label": display_dt.strftime("%H:%M"),
             "tags": tags,
             "charts": charts,
         })
