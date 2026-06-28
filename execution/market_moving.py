@@ -178,6 +178,23 @@ def _candles_around_event(df: pd.DataFrame, event_dt: datetime) -> pd.DataFrame:
     return sliced
 
 
+def _resample_5m(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    try:
+        out = df.resample("5min").agg({
+            "Open": "first",
+            "High": "max",
+            "Low": "min",
+            "Close": "last",
+        })
+        if "Volume" in df.columns:
+            out["Volume"] = df["Volume"].resample("5min").sum()
+        return out.dropna(subset=["Open", "High", "Low", "Close"])
+    except Exception:
+        return df
+
+
 def _serialize_candles(df: pd.DataFrame) -> list[dict[str, Any]]:
     candles = []
     for ts, row in df.iterrows():
@@ -246,14 +263,16 @@ def build_market_moving_events(news_items: list[dict[str, Any]], max_events: int
         for asset in assets:
             df = _download_intraday(asset["ticker"])
             window = _candles_around_event(df, event_dt)
-            candles = _serialize_candles(window)
+            window_5m = _resample_5m(window)
+            candles = _serialize_candles(window_5m)
             if not candles:
                 continue
             charts.append({
                 **asset,
                 "candles": candles,
                 "event_time": int(pd.Timestamp(event_dt).timestamp()),
-                "metrics": _reaction_metrics(window, event_dt),
+                "timeframe": "5m",
+                "metrics": _reaction_metrics(window_5m, event_dt),
             })
         events.append({
             "title": _title(item),

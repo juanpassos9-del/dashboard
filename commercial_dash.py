@@ -4577,6 +4577,7 @@ def _market_moving_chart_html(chart: dict, uid: str) -> str:
     candles = chart.get("candles", [])
     metrics = chart.get("metrics", {})
     event_time = chart.get("event_time")
+    timeframe = html.escape(str(chart.get("timeframe") or "5m"))
     title = html.escape(str(chart.get("label") or chart.get("symbol") or "Ativo"))
     symbol = html.escape(str(chart.get("symbol") or ""))
     payload = json.dumps({
@@ -4598,7 +4599,7 @@ def _market_moving_chart_html(chart: dict, uid: str) -> str:
         metric_html = "<span>Sem candle suficiente para medir reação.</span>"
     return f"""
     <div class="mm-chart-card">
-      <div class="mm-chart-title"><span>{symbol}</span>{title}</div>
+      <div class="mm-chart-title"><span>{symbol}</span>{title}<em>{timeframe}</em></div>
       <div id="mm-chart-{uid}" class="mm-chart"><div id="mm-event-{uid}" class="mm-event-marker"><div class="mm-event-arrow">↓</div><div class="mm-event-label">NEWS</div></div></div>
       <div class="mm-metrics">{metric_html}</div>
     </div>
@@ -4702,6 +4703,7 @@ def pagina_market_moving():
           .mm-chart-card {background:#020617; border:1px solid rgba(255,255,255,.15); border-radius:6px; padding:8px; min-width:0;}
           .mm-chart-title {display:flex; gap:7px; align-items:center; color:#E5E7EB; font-size:.82rem; font-weight:900; margin-bottom:5px;}
           .mm-chart-title span {background:#111827; border-radius:999px; padding:2px 6px; color:#BFDBFE; font-size:.68rem;}
+          .mm-chart-title em {margin-left:auto; font-style:normal; background:#22D3EE; color:#00111A; border-radius:999px; padding:2px 7px; font-size:.62rem; font-weight:950;}
           .mm-chart {height:260px; width:100%; position:relative; overflow:hidden;}
           .mm-chart::after {content:""; position:absolute; left:var(--event-x, -100px); top:0; bottom:0; width:3px; background:#22D3EE; box-shadow:0 0 18px rgba(34,211,238,.95); opacity:.95; pointer-events:none; z-index:5;}
           .mm-event-marker {display:none; position:absolute; z-index:9; width:48px; text-align:center; pointer-events:none; filter:drop-shadow(0 0 12px rgba(34,211,238,.95));}
