@@ -7,15 +7,32 @@ assets and measuring the intraday move after the headline timestamp.
 from __future__ import annotations
 
 import math
+import os
 import time
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import requests
 import yfinance as yf
+from dotenv import load_dotenv
 
 BR_TZ = ZoneInfo("America/Sao_Paulo")
+NY_TZ = ZoneInfo("America/New_York")
+load_dotenv(dotenv_path=".env")
+
+ALPHA_VANTAGE_INTRADAY_MAP = {
+    "CL=F": {"symbol": "USO", "label": "WTI Oil ETF", "source": "Alpha Vantage"},
+    "BZ=F": {"symbol": "BNO", "label": "Brent Oil ETF", "source": "Alpha Vantage"},
+    "XLE": {"symbol": "XLE", "label": "Energy ETF", "source": "Alpha Vantage"},
+    "^GSPC": {"symbol": "SPY", "label": "S&P 500 ETF", "source": "Alpha Vantage"},
+    "^IXIC": {"symbol": "QQQ", "label": "Nasdaq ETF", "source": "Alpha Vantage"},
+    "DX-Y.NYB": {"symbol": "UUP", "label": "DXY ETF", "source": "Alpha Vantage"},
+    "GC=F": {"symbol": "GLD", "label": "Gold ETF", "source": "Alpha Vantage"},
+    "^BVSP": {"symbol": "EWZ", "label": "Brazil ETF", "source": "Alpha Vantage"},
+}
 
 ASSET_RULES = [
     {
@@ -184,13 +201,71 @@ def _download_intraday(ticker: str) -> pd.DataFrame:
     return pd.DataFrame()
 
 
-def _candles_around_event(df: pd.DataFrame, event_dt: datetime) -> pd.DataFrame:
+def _alpha_vantage_api_key() -> str:
+    try:
+        import streamlit as st
+
+        key = st.secrets.get("ALPHA_VANTAGE_API_KEY", "")
+        if key:
+            return str(key)
+    except Exception:
+        pass
+    return os.getenv("ALPHA_VANTAGE_API_KEY", "")
+
+
+@lru_cache(maxsize=64)
+def _download_alpha_intraday(symbol: str) -> pd.DataFrame:
+    api_key = _alpha_vantage_api_key()
+    if not api_key:
+        return pd.DataFrame()
+    params = {
+        "function": "TIME_SERIES_INTRADAY",
+        "symbol": symbol,
+        "interval": "5min",
+        "outputsize": "full",
+        "apikey": api_key,
+    }
+    try:
+        response = requests.get("https://www.alphavantage.co/query", params=params, timeout=18)
+        data = response.json()
+    except Exception:
+        return pd.DataFrame()
+    series = data.get("Time Series (5min)")
+    if not isinstance(series, dict) or not series:
+        return pd.DataFrame()
+    rows = []
+    for raw_ts, values in series.items():
+        try:
+            ts = pd.Timestamp(raw_ts).tz_localize(NY_TZ)
+            rows.append({
+                "time": ts,
+                "Open": float(values["1. open"]),
+                "High": float(values["2. high"]),
+                "Low": float(values["3. low"]),
+                "Close": float(values["4. close"]),
+                "Volume": float(values.get("5. volume", 0) or 0),
+            })
+        except Exception:
+            continue
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).set_index("time").sort_index()
+
+
+def _download_alpha_fallback(ticker: str) -> tuple[pd.DataFrame, dict[str, str] | None]:
+    mapping = ALPHA_VANTAGE_INTRADAY_MAP.get(ticker)
+    if not mapping:
+        return pd.DataFrame(), None
+    return _download_alpha_intraday(mapping["symbol"]), mapping
+
+
+def _candles_around_event(df: pd.DataFrame, event_dt: datetime, after_minutes: int = 180) -> pd.DataFrame:
     if df.empty:
         return df
     idx = df.index
     event_ts = _event_timestamp_for_index(event_dt, idx)
     start = event_ts - pd.Timedelta(minutes=30)
-    end = event_ts + pd.Timedelta(minutes=180)
+    end = event_ts + pd.Timedelta(minutes=after_minutes)
     sliced = df.loc[(idx >= start) & (idx <= end)].copy()
     if sliced.empty:
         return pd.DataFrame()
@@ -288,15 +363,45 @@ def build_market_moving_events(news_items: list[dict[str, Any]], max_events: int
             tried_tickers.add(asset["ticker"])
             df = _download_intraday(asset["ticker"])
             window = _candles_around_event(df, event_dt)
+            marker_label = "NEWS"
+            if window.empty:
+                window = _candles_around_event(df, event_dt, after_minutes=2160)
+                marker_label = "ABERTURA"
+            source_label = "yfinance"
+            chart_asset = asset
+            if window.empty:
+                alpha_df, alpha_mapping = _download_alpha_fallback(asset["ticker"])
+                alpha_window = _candles_around_event(alpha_df, event_dt)
+                alpha_marker_label = "NEWS"
+                if alpha_window.empty:
+                    alpha_window = _candles_around_event(alpha_df, event_dt, after_minutes=2160)
+                    alpha_marker_label = "ABERTURA"
+                if not alpha_window.empty and alpha_mapping:
+                    window = alpha_window
+                    marker_label = alpha_marker_label
+                    source_label = alpha_mapping["source"]
+                    chart_asset = {
+                        **asset,
+                        "symbol": alpha_mapping["symbol"],
+                        "label": alpha_mapping["label"],
+                        "ticker": alpha_mapping["symbol"],
+                    }
             window_5m = _resample_5m(window)
             candles = _serialize_candles(window_5m)
             if not candles:
                 return
+            event_time = int(pd.Timestamp(event_dt).timestamp())
+            marker_time = event_time
+            if marker_label == "ABERTURA" and candles:
+                marker_time = candles[0]["time"]
             charts.append({
-                **asset,
+                **chart_asset,
                 "candles": candles,
-                "event_time": int(pd.Timestamp(event_dt).timestamp()),
+                "event_time": event_time,
+                "marker_time": marker_time,
+                "marker_label": marker_label,
                 "timeframe": "5m",
+                "source": source_label,
                 "metrics": _reaction_metrics(window_5m, event_dt),
             })
 

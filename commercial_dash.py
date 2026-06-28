@@ -4577,13 +4577,18 @@ def _market_moving_chart_html(chart: dict, uid: str) -> str:
     candles = chart.get("candles", [])
     metrics = chart.get("metrics", {})
     event_time = chart.get("event_time")
+    marker_time = chart.get("marker_time") or event_time
+    marker_label = html.escape(str(chart.get("marker_label") or "NEWS"))
     timeframe = html.escape(str(chart.get("timeframe") or "5m"))
     title = html.escape(str(chart.get("label") or chart.get("symbol") or "Ativo"))
     symbol = html.escape(str(chart.get("symbol") or ""))
+    source = html.escape(str(chart.get("source") or ""))
     payload = json.dumps({
         "candles": candles,
         "eventTime": event_time,
-        "visibleStart": (event_time - 30 * 60) if event_time else None,
+        "markerTime": marker_time,
+        "markerLabel": marker_label,
+        "visibleStart": (marker_time - 30 * 60) if marker_time else None,
         "visibleEnd": candles[-1]["time"] if candles else None,
     }, ensure_ascii=False)
     metric_html = " ".join(
@@ -4599,8 +4604,8 @@ def _market_moving_chart_html(chart: dict, uid: str) -> str:
         metric_html = "<span>Sem candle suficiente para medir reação.</span>"
     return f"""
     <div class="mm-chart-card">
-      <div class="mm-chart-title"><span>{symbol}</span>{title}<em>{timeframe}</em></div>
-      <div id="mm-chart-{uid}" class="mm-chart"><div id="mm-event-{uid}" class="mm-event-marker"><div class="mm-event-arrow">↓</div><div class="mm-event-label">NEWS</div></div></div>
+      <div class="mm-chart-title"><span>{symbol}</span>{title}{f"<small>{source}</small>" if source else ""}<em>{timeframe}</em></div>
+      <div id="mm-chart-{uid}" class="mm-chart"><div id="mm-event-{uid}" class="mm-event-marker"><div class="mm-event-arrow">↓</div><div class="mm-event-label">{marker_label}</div></div></div>
       <div class="mm-metrics">{metric_html}</div>
     </div>
     <script>
@@ -4630,14 +4635,15 @@ def _market_moving_chart_html(chart: dict, uid: str) -> str:
         }});
       }}
       series.setData(payload.candles);
+      const markerTime = payload.markerTime || payload.eventTime;
       const eventCandle = payload.candles.reduce((best, candle) => {{
         if (!best) return candle;
-        return Math.abs(candle.time - payload.eventTime) < Math.abs(best.time - payload.eventTime) ? candle : best;
+        return Math.abs(candle.time - markerTime) < Math.abs(best.time - markerTime) ? candle : best;
       }}, null);
       if (eventCandle && series.setMarkers) {{
         series.setMarkers([{{
           time: eventCandle.time, position: "aboveBar", color: "#22D3EE",
-          shape: "arrowDown", text: "NEWS"
+          shape: "arrowDown", text: payload.markerLabel || "NEWS"
         }}, {{
           time: eventCandle.time, position: "belowBar", color: "#22D3EE",
           shape: "circle", text: "EVENTO"
@@ -4703,6 +4709,7 @@ def pagina_market_moving():
           .mm-chart-card {background:#020617; border:1px solid rgba(255,255,255,.15); border-radius:6px; padding:8px; min-width:0;}
           .mm-chart-title {display:flex; gap:7px; align-items:center; color:#E5E7EB; font-size:.82rem; font-weight:900; margin-bottom:5px;}
           .mm-chart-title span {background:#111827; border-radius:999px; padding:2px 6px; color:#BFDBFE; font-size:.68rem;}
+          .mm-chart-title small {color:#93C5FD; font-size:.58rem; font-weight:900; text-transform:uppercase; opacity:.88;}
           .mm-chart-title em {margin-left:auto; font-style:normal; background:#22D3EE; color:#00111A; border-radius:999px; padding:2px 7px; font-size:.62rem; font-weight:950;}
           .mm-chart {height:260px; width:100%; position:relative; overflow:hidden;}
           .mm-chart::after {content:""; position:absolute; left:var(--event-x, -100px); top:0; bottom:0; width:3px; background:#22D3EE; box-shadow:0 0 18px rgba(34,211,238,.95); opacity:.95; pointer-events:none; z-index:5;}
