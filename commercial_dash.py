@@ -4255,6 +4255,117 @@ def get_watchlist_payload_cached(global_data, schema_version="watchlist_v4_posit
     return generate_watchlist(global_data)
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_watchlist_chart_candles(ticker: str, period: str = "1y", interval: str = "1d"):
+    if not ticker:
+        return []
+    try:
+        import yfinance as yf
+
+        df = yf.download(
+            ticker,
+            period=period,
+            interval=interval,
+            progress=False,
+            auto_adjust=False,
+            threads=False,
+            timeout=10,
+        )
+        if df is None or df.empty:
+            return []
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        df = df.dropna(subset=["Open", "High", "Low", "Close"]).tail(180)
+        candles = []
+        for ts, row in df.iterrows():
+            candles.append({
+                "time": int(pd.Timestamp(ts).timestamp()),
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": float(row["Close"]),
+            })
+        return candles
+    except Exception:
+        return []
+
+
+def _watchlist_chart_html(item: dict, uid: str) -> str:
+    ticker = str(item.get("ticker") or "").strip()
+    candles = get_watchlist_chart_candles(ticker)
+    if not candles:
+        return "<div class='wl-chart-empty'>Grafico indisponivel para este ativo.</div>"
+
+    def level(label, key, color, style=0):
+        value = item.get(key)
+        try:
+            value = float(value)
+            if value <= 0:
+                return None
+            return {"label": label, "price": value, "color": color, "style": style}
+        except Exception:
+            return None
+
+    levels = [
+        level("Atual", "preco_atual", "#F8FAFC", 2),
+        level("Entrada", "entrada", "#22D3EE", 0),
+        level("Gain 1", "gain_1", "#00FFA3", 0),
+        level("Gain 2", "gain_2", "#34D399", 1),
+        level("Gain final", "gain_final", "#10B981", 0),
+        level("Loss", "loss", "#FF4B4B", 0),
+    ]
+    payload = json.dumps({
+        "candles": candles,
+        "levels": [item for item in levels if item],
+    }, ensure_ascii=False)
+    return f"""
+    <div id="wl-chart-{uid}" class="wl-chart"></div>
+    <script>
+    (function() {{
+      const payload = {payload};
+      const root = document.getElementById("wl-chart-{uid}");
+      if (!root || !window.LightweightCharts || !payload.candles || !payload.candles.length) return;
+      const chart = LightweightCharts.createChart(root, {{
+        layout: {{ background: {{ color: "#020617" }}, textColor: "#CBD5E1" }},
+        grid: {{ vertLines: {{ color: "rgba(148,163,184,.10)" }}, horzLines: {{ color: "rgba(148,163,184,.10)" }} }},
+        rightPriceScale: {{ borderColor: "rgba(148,163,184,.20)" }},
+        timeScale: {{ borderColor: "rgba(148,163,184,.20)", timeVisible: false, rightOffset: 5, barSpacing: 5 }},
+        crosshair: {{ mode: 1 }},
+        handleScroll: false,
+        handleScale: true,
+      }});
+      let series;
+      if (chart.addSeries && LightweightCharts.CandlestickSeries) {{
+        series = chart.addSeries(LightweightCharts.CandlestickSeries, {{
+          upColor: "#00C896", downColor: "#FF4B4B", borderVisible: false,
+          wickUpColor: "#00C896", wickDownColor: "#FF4B4B"
+        }});
+      }} else {{
+        series = chart.addCandlestickSeries({{
+          upColor: "#00C896", downColor: "#FF4B4B", borderVisible: false,
+          wickUpColor: "#00C896", wickDownColor: "#FF4B4B"
+        }});
+      }}
+      series.setData(payload.candles);
+      (payload.levels || []).forEach(function(level) {{
+        series.createPriceLine({{
+          price: level.price,
+          color: level.color,
+          lineWidth: 2,
+          lineStyle: level.style || 0,
+          axisLabelVisible: true,
+          title: level.label,
+        }});
+      }});
+      chart.timeScale().fitContent();
+      new ResizeObserver(function() {{
+        chart.applyOptions({{ width: root.clientWidth }});
+      }}).observe(root);
+    }})();
+    </script>
+    """
+
+
 def pagina_watchlist():
     """Radar IA TTS Position Trade."""
     st.title("WATCHLIST")
@@ -4367,6 +4478,8 @@ def pagina_watchlist():
           .wl-pct-neutral {{color:#94A3B8 !important;}}
           .wl-text {{color:#CBD5E1; font-size:.86rem; line-height:1.45; margin-top:10px;}}
           .wl-action {{display:inline-block; border:1px solid #334155; border-radius:999px; padding:4px 8px; font-size:.72rem; font-weight:900; color:#F8FAFC; background:#111827; margin-top:8px;}}
+          .wl-chart {{height:230px; width:100%; margin-top:12px; border:1px solid rgba(148,163,184,.18); border-radius:8px; background:#020617; overflow:hidden;}}
+          .wl-chart-empty {{margin-top:12px; border:1px solid rgba(148,163,184,.18); border-radius:8px; background:#020617; color:#94A3B8; padding:14px; font-size:.78rem; font-weight:800;}}
           .wl-panel-title {{display:flex; justify-content:space-between; align-items:center; gap:10px; margin:4px 0 10px;}}
           .wl-panel-title h3 {{margin:0; color:#F8FAFC; font-size:1.05rem;}}
           .wl-panel-title span {{color:#94A3B8; font-size:.72rem; font-weight:800; text-transform:uppercase;}}
@@ -4384,11 +4497,49 @@ def pagina_watchlist():
         unsafe_allow_html=True,
     )
 
-    def build_recommendation_cards(items, limit=10):
+    wl_component_css = """
+    <style>
+      body {margin:0; background:transparent; font-family:"Inter","Segoe UI",Arial,sans-serif; color:#F8FAFC;}
+      .wl-category {--cat:#38BDF8; --cat-rgb:56,189,248; border:1px solid rgba(var(--cat-rgb),.42); border-top:3px solid var(--cat); border-radius:10px; background:linear-gradient(180deg,rgba(var(--cat-rgb),.13),rgba(11,18,32,.48) 24%,rgba(11,18,32,.12)); padding:14px; margin:0 0 18px; box-shadow:0 12px 32px rgba(0,0,0,.18);}
+      .wl-category-header {display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px;}
+      .wl-category-name {display:flex; align-items:center; gap:8px; color:#F8FAFC; font-size:1rem; font-weight:950; letter-spacing:.02em; text-transform:uppercase;}
+      .wl-category-dot {width:9px; height:9px; border-radius:999px; background:var(--cat); box-shadow:0 0 16px rgba(var(--cat-rgb),.82); flex:0 0 auto;}
+      .wl-category-subtitle {color:var(--cat); font-size:.7rem; font-weight:950; text-transform:uppercase; text-align:right;}
+      .wl-comment {border:1px solid rgba(var(--cat-rgb),.34); background:rgba(9,15,26,.68); border-radius:8px; padding:11px 12px; color:#CBD5E1; font-size:.86rem; line-height:1.45; margin-bottom:10px;}
+      .wl-card {border:1px solid #263244; border-radius:8px; background:#0B1220; padding:13px 14px; margin-bottom:10px; position:relative;}
+      .wl-card.selected {border-color:rgba(0,255,163,.72); border-left:5px solid #00FFA3; background:linear-gradient(90deg, rgba(0,255,163,.10), #0B1220 38%); box-shadow:0 0 0 1px rgba(0,255,163,.10), 0 10px 28px rgba(0,0,0,.24);}
+      .wl-head {display:flex; justify-content:space-between; gap:12px; align-items:flex-start;}
+      .wl-symbol {font-size:1.05rem; color:#FFF; font-weight:950;}
+      .wl-meta {color:#94A3B8; font-size:.76rem; margin-top:3px;}
+      .wl-selected-badge {display:inline-block; margin-left:8px; border:1px solid rgba(0,255,163,.55); border-radius:999px; padding:2px 7px; color:#00FFA3; background:rgba(0,255,163,.08); font-size:.66rem; font-weight:950; vertical-align:middle;}
+      .wl-score {font-size:1.35rem; font-weight:950; text-align:right;}
+      .wl-grid {display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; margin-top:12px;}
+      .wl-box {background:#111827; border:1px solid #1F2937; border-radius:7px; padding:8px; min-height:58px;}
+      .wl-box span {color:#94A3B8; font-size:.68rem; display:block;}
+      .wl-box b {color:#F8FAFC; font-size:.88rem; display:block; margin-top:3px;}
+      .wl-box small {display:block; color:#64748B; font-size:.64rem; margin-top:2px; line-height:1.2;}
+      .wl-box.price {border-color:#334155; background:linear-gradient(180deg,#111827,#0B1220);}
+      .wl-box.entry {border-color:rgba(56,189,248,.40); background:rgba(14,116,144,.12);}
+      .wl-box.gain {border-color:rgba(0,255,163,.36); background:rgba(0,255,163,.08);}
+      .wl-box.loss {border-color:rgba(255,75,75,.38); background:rgba(255,75,75,.08);}
+      .wl-box.result.positive {border-color:rgba(0,255,163,.62); background:linear-gradient(180deg,rgba(0,255,163,.16),rgba(0,255,163,.06));}
+      .wl-box.result.negative {border-color:rgba(255,75,75,.62); background:linear-gradient(180deg,rgba(255,75,75,.16),rgba(255,75,75,.06));}
+      .wl-box.result.flat {border-color:rgba(255,176,32,.58); background:linear-gradient(180deg,rgba(255,176,32,.14),rgba(255,176,32,.05));}
+      .wl-pct-positive {color:#00FFA3 !important;} .wl-pct-negative {color:#FF4B4B !important;} .wl-pct-flat {color:#FFB020 !important;} .wl-pct-neutral {color:#94A3B8 !important;}
+      .wl-text {color:#CBD5E1; font-size:.86rem; line-height:1.45; margin-top:10px;}
+      .wl-action {display:inline-block; border:1px solid #334155; border-radius:999px; padding:4px 8px; font-size:.72rem; font-weight:900; color:#F8FAFC; background:#111827; margin-top:8px;}
+      .wl-chart {height:230px; width:100%; margin-top:12px; border:1px solid rgba(148,163,184,.18); border-radius:8px; background:#020617; overflow:hidden;}
+      .wl-chart-empty {margin-top:12px; border:1px solid rgba(148,163,184,.18); border-radius:8px; background:#020617; color:#94A3B8; padding:14px; font-size:.78rem; font-weight:800;}
+      .wl-empty {border:1px solid rgba(var(--cat-rgb),.26); background:rgba(var(--cat-rgb),.10); color:#BAE6FD; border-radius:8px; padding:13px 14px; font-size:.86rem;}
+      @media(max-width:900px){.wl-grid{grid-template-columns:1fr 1fr;}}
+    </style>
+    """
+
+    def build_recommendation_cards(items, limit=10, uid_prefix="wl"):
         if not items:
             return '<div class="wl-empty">Sem recomendacoes com dados suficientes para este bloco.</div>'
         html_cards = []
-        for item in sorted(items, key=lambda r: r.get("score_atual", 0), reverse=True)[:limit]:
+        for idx, item in enumerate(sorted(items, key=lambda r: r.get("score_atual", 0), reverse=True)[:limit]):
             score = item.get("score_atual", 0)
             color = score_color(score)
             action_text = str(item.get("acao", "---"))
@@ -4402,6 +4553,7 @@ def pagina_watchlist():
             gain_2_pct = pct_from_base(item.get("gain_2"), ref_entry)
             gain_final_pct = pct_from_base(item.get("gain_final"), ref_entry)
             loss_pct = pct_from_base(item.get("loss"), ref_entry)
+            chart_html = _watchlist_chart_html(item, f"{uid_prefix}-{idx}")
             html_cards.append(
                 f"""
                 <div class="{card_class}">
@@ -4426,13 +4578,20 @@ def pagina_watchlist():
                   <div class="wl-text"><b>Tese:</b> {html.escape(str(item.get('tese_principal', '')))}</div>
                   <div class="wl-text"><b>Confirmacoes:</b> {html.escape(str(item.get('confirmacoes', '')))}</div>
                   <span class="wl-action">{html.escape(str(item.get('acao', '---')).upper())} | RR {html.escape(str(item.get('risco_retorno', '---')))} | {html.escape(str(item.get('tamanho_sugerido', '---')))} | {html.escape(str(item.get('fonte_descricao', 'historico yfinance')))}</span>
+                  {chart_html}
                 </div>
                 """
             )
         return "".join(line.strip() for line in "".join(html_cards).splitlines())
 
-    def render_recommendations(items, limit=10):
-        st.markdown(build_recommendation_cards(items, limit), unsafe_allow_html=True)
+    def render_recommendations(items, limit=10, uid_prefix="wl-detail"):
+        selected_items = sorted(items, key=lambda r: r.get("score_atual", 0), reverse=True)[:limit]
+        html_cards = (
+            '<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>'
+            + wl_component_css
+            + build_recommendation_cards(selected_items, limit, uid_prefix)
+        )
+        components.html(html_cards, height=max(150, len(selected_items) * 485 + 40), scrolling=True)
 
     def rec_filter(tipo=None, bloco=None):
         out = recs
@@ -4502,9 +4661,12 @@ def pagina_watchlist():
         return f"Radar {title} aguardando novo ciclo de dados. Clique em Atualizar Watchlist agora se o cache antigo ainda estiver ativo."
 
     def render_panel(block_prefix, title, subtitle, comment_key, limit, color, rgb):
-        cards_html = build_recommendation_cards(rec_filter(bloco=block_prefix), limit=limit)
+        panel_items = rec_filter(bloco=block_prefix)
+        cards_html = build_recommendation_cards(panel_items, limit=limit, uid_prefix=f"panel-{block_prefix}")
         panel_html = (
-            f'<div class="wl-category" style="--cat:{html.escape(color)}; --cat-rgb:{html.escape(rgb)};">'
+            '<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>'
+            + wl_component_css
+            + f'<div class="wl-category" style="--cat:{html.escape(color)}; --cat-rgb:{html.escape(rgb)};">'
             f'<div class="wl-category-header">'
             f'<div class="wl-category-name"><span class="wl-category-dot"></span>{html.escape(title)}</div>'
             f'<div class="wl-category-subtitle">{html.escape(subtitle)}</div>'
@@ -4513,7 +4675,8 @@ def pagina_watchlist():
             f'{cards_html}'
             f'</div>'
         )
-        st.markdown(panel_html, unsafe_allow_html=True)
+        panel_count = min(len(panel_items), limit)
+        components.html(panel_html, height=max(210, panel_count * 515 + 95), scrolling=True)
 
     st.markdown("#### Mesa WATCHLIST")
     for idx in range(0, len(watchlist_blocks), 2):
@@ -4553,22 +4716,22 @@ def pagina_watchlist():
         st.write(f"Regime: **{macro.get('regime', '---')}** | SPX: `{macro.get('spx')}` | Nasdaq: `{macro.get('nasdaq')}` | VIX: `{macro.get('vix')}` | DXY: `{macro.get('dxy')}` | EWZ: `{macro.get('ewz')}` | IBOV: `{macro.get('ibov')}`")
         st.caption(f"Fonte: {quality.get('source', '---')}. Takes e stops acionados ficam registrados no historico local da WATCHLIST.")
     with tabs[1]:
-        render_recommendations(rec_filter(bloco="Brasil"), limit=16)
+        render_recommendations(rec_filter(bloco="Brasil"), limit=16, uid_prefix="tab-brasil")
     with tabs[2]:
-        render_recommendations(rec_filter(bloco="EUA"), limit=10)
+        render_recommendations(rec_filter(bloco="EUA"), limit=10, uid_prefix="tab-eua")
     with tabs[3]:
-        render_recommendations(rec_filter(bloco="Cripto"), limit=10)
+        render_recommendations(rec_filter(bloco="Cripto"), limit=10, uid_prefix="tab-cripto")
     with tabs[4]:
-        render_recommendations(rec_filter(bloco="Moedas"), limit=10)
+        render_recommendations(rec_filter(bloco="Moedas"), limit=10, uid_prefix="tab-moedas")
     with tabs[5]:
-        render_recommendations(rec_filter(bloco="Commodities"), limit=10)
+        render_recommendations(rec_filter(bloco="Commodities"), limit=10, uid_prefix="tab-commodities")
     with tabs[6]:
-        render_recommendations(rec_filter(bloco="Metais"), limit=10)
+        render_recommendations(rec_filter(bloco="Metais"), limit=10, uid_prefix="tab-metais")
     with tabs[7]:
         st.markdown("#### Radar Position")
         for block_prefix, title, *_rest in watchlist_blocks:
             st.markdown(f"##### {title}")
-            render_recommendations(rec_filter(tipo="Position", bloco=block_prefix), limit=6)
+            render_recommendations(rec_filter(tipo="Position", bloco=block_prefix), limit=6, uid_prefix=f"tab-position-{block_prefix}")
     with tabs[8]:
         for _block_prefix, title, _subtitle, comment_key, _limit, _color, _rgb in watchlist_blocks:
             st.markdown(f"#### {title}\n{block_comment(comment_key, title)}")

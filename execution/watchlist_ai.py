@@ -464,6 +464,7 @@ def _recommendation(s: AssetSnapshot, macro: dict, style: str) -> dict[str, Any]
     return {
         "bloco": block_label,
         "ativo": s.symbol,
+        "ticker": s.ticker,
         "classe": asset_class,
         "setor": s.sector,
         "tipo": style,
