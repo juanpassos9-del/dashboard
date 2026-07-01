@@ -4256,7 +4256,7 @@ def get_watchlist_payload_cached(global_data, schema_version="watchlist_v4_posit
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def get_watchlist_chart_candles(ticker: str, period: str = "1y", interval: str = "1d"):
+def get_watchlist_chart_candles(ticker: str, period: str = "6mo", interval: str = "1h"):
     if not ticker:
         return []
     try:
@@ -4275,7 +4275,13 @@ def get_watchlist_chart_candles(ticker: str, period: str = "1y", interval: str =
             return []
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
-        df = df.dropna(subset=["Open", "High", "Low", "Close"]).tail(180)
+        df = df.dropna(subset=["Open", "High", "Low", "Close"])
+        df = df.resample("4h").agg({
+            "Open": "first",
+            "High": "max",
+            "Low": "min",
+            "Close": "last",
+        }).dropna(subset=["Open", "High", "Low", "Close"]).tail(180)
         candles = []
         for ts, row in df.iterrows():
             candles.append({
