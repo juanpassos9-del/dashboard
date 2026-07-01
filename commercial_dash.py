@@ -4415,7 +4415,7 @@ def pagina_watchlist():
         st.error(f"Nao foi possivel gerar a WATCHLIST agora: {e}")
         return
 
-    recs = [rec for rec in payload.get("recommendations", []) if rec.get("tipo") == "Position"]
+    raw_recs = [rec for rec in payload.get("recommendations", []) if rec.get("tipo") == "Position"]
     macro = payload.get("macro", {})
     quality = payload.get("data_quality", {})
 
@@ -4459,6 +4459,19 @@ def pagina_watchlist():
         if value < -neutral_band:
             return "negative"
         return "flat"
+
+    def enrich_watchlist_recommendation(item):
+        enriched = dict(item)
+        activation = _watchlist_activation_info(
+            item,
+            get_watchlist_chart_candles(str(item.get("ticker") or "").strip()),
+        )
+        enriched["entrada_ativada"] = bool(activation.get("time"))
+        enriched["entrada_ativada_em"] = activation.get("label")
+        enriched["entrada_ativada_ts"] = activation.get("time")
+        return enriched
+
+    recs = [enrich_watchlist_recommendation(rec) for rec in raw_recs]
 
     def score_color(score):
         try:
@@ -4581,13 +4594,15 @@ def pagina_watchlist():
             card_class = "wl-card selected" if selected else "wl-card"
             selected_badge = '<span class="wl-selected-badge">SELECIONADA</span>' if selected else ""
             ref_entry = item.get("entrada") or item.get("entrada_ideal")
-            result_pct = pct_from_base(item.get("preco_atual"), ref_entry)
+            is_active = bool(item.get("entrada_ativada"))
+            result_pct = pct_from_base(item.get("preco_atual"), ref_entry) if is_active else None
             result_class = pct_class(result_pct)
+            result_text = fmt_pct(result_pct) if is_active else "Aguardando"
+            result_hint = "pos entrada" if is_active else "sem ativacao"
             gain_1_pct = pct_from_base(item.get("gain_1"), ref_entry)
-            gain_2_pct = pct_from_base(item.get("gain_2"), ref_entry)
             gain_final_pct = pct_from_base(item.get("gain_final"), ref_entry)
             loss_pct = pct_from_base(item.get("loss"), ref_entry)
-            activation = _watchlist_activation_info(item, get_watchlist_chart_candles(str(item.get("ticker") or "").strip()))
+            activation_label = item.get("entrada_ativada_em") or "Aguardando entrada"
             chart_html = _watchlist_chart_html(item, f"{uid_prefix}-{idx}")
             html_cards.append(
                 f"""
@@ -4604,13 +4619,13 @@ def pagina_watchlist():
                   </div>
                   <div class="wl-grid">
                     <div class="wl-box price"><span>Preco atual</span><b>{fmt_price(item.get('preco_atual'))}</b><small>referencia viva</small></div>
-                    <div class="wl-box result {result_class}"><span>Resultado</span><b class="wl-pct-{result_class}">{fmt_pct(result_pct)}</b><small>vs entrada</small></div>
+                    <div class="wl-box result {result_class}"><span>Resultado</span><b class="wl-pct-{result_class}">{html.escape(str(result_text))}</b><small>{result_hint}</small></div>
                     <div class="wl-box entry"><span>Entrada</span><b>{fmt_price(ref_entry)}</b><small>preco unico</small></div>
                     <div class="wl-box gain"><span>Gain parcial</span><b>{fmt_price(item.get('gain_1'))}</b><small>{fmt_pct(gain_1_pct)}</small></div>
                     <div class="wl-box gain"><span>Gain final</span><b>{fmt_price(item.get('gain_final'))}</b><small>{fmt_pct(gain_final_pct)}</small></div>
                     <div class="wl-box loss"><span>Loss</span><b>{fmt_price(item.get('loss'))}</b><small>{fmt_pct(loss_pct)}</small></div>
                   </div>
-                  <div class="wl-text"><b>Ativacao:</b> {html.escape(str(activation.get('label', 'Aguardando entrada')))}</div>
+                  <div class="wl-text"><b>Ativacao:</b> {html.escape(str(activation_label))}</div>
                   <div class="wl-text"><b>Tese:</b> {html.escape(str(item.get('tese_principal', '')))}</div>
                   <div class="wl-text"><b>Confirmacoes:</b> {html.escape(str(item.get('confirmacoes', '')))}</div>
                   <span class="wl-action">{html.escape(str(item.get('acao', '---')).upper())} | RR {html.escape(str(item.get('risco_retorno', '---')))} | {html.escape(str(item.get('tamanho_sugerido', '---')))} | {html.escape(str(item.get('fonte_descricao', 'historico yfinance')))}</span>

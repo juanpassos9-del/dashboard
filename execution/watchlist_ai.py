@@ -650,6 +650,8 @@ def _save_watchlist_results(rows: list[dict[str, Any]]) -> None:
 def _hit_event(rec: dict[str, Any]) -> dict[str, Any] | None:
     if str(rec.get("acao", "")).lower() != "comprar":
         return None
+    if not rec.get("entrada_ativada"):
+        return None
 
     price = _safe_number(rec.get("preco_atual"))
     entry = _safe_number(rec.get("entrada") or rec.get("entrada_ideal"))
