@@ -128,6 +128,66 @@ def _event_dt(item: dict[str, Any]) -> datetime | None:
     return None
 
 
+def _calendar_event_dt(event: dict[str, Any]) -> datetime | None:
+    try:
+        parsed = pd.to_datetime(f"{event.get('date')} {event.get('time')}", format="%Y-%m-%d %H:%M", errors="coerce")
+        if pd.isna(parsed):
+            return None
+        return parsed.to_pydatetime().replace(tzinfo=BR_TZ).astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _is_us_or_brl_calendar_event(event: dict[str, Any]) -> bool:
+    currency = str(event.get("currency", "")).upper()
+    text = f"{event.get('event', '')} {event.get('country', '')}".lower()
+    br_terms = ["brasil", "brazil", "bcb", "copom", "selic", "ipca", "igp", "real", "fiscal"]
+    us_terms = ["fed", "fomc", "powell", "treasury", "payroll", "jobless", "jolts", "pce", "cpi", "ppi", "ism", "pmi", "gdp"]
+    return currency in {"USD", "BRL"} or any(term in text for term in br_terms + us_terms)
+
+
+def _calendar_impact_score(event: dict[str, Any]) -> tuple[str, int]:
+    bull_count = int(event.get("bull_count", 0) or 0)
+    impact = str(event.get("impact", "")).upper()
+    if impact == "HIGH" or bull_count >= 3:
+        return "DADO HIGH", 13
+    if impact == "MEDIUM" or bull_count >= 2:
+        return "DADO MEDIUM", 10
+    return "DADO LOW", 8
+
+
+def _calendar_assets(event: dict[str, Any], limit: int = 3) -> tuple[list[dict[str, str]], list[str]]:
+    currency = str(event.get("currency", "")).upper()
+    text = str(event.get("event", "")).lower()
+    if currency == "BRL":
+        return [
+            {"symbol": "EWZ", "label": "Brazil ETF", "ticker": "EWZ"},
+            {"symbol": "USDBRL", "label": "USD/BRL", "ticker": "BRL=X"},
+            {"symbol": "IBOV", "label": "Ibovespa", "ticker": "^BVSP"},
+        ][:limit], ["Calendario", "BRL", "Brasil"]
+    assets = [
+        {"symbol": "SPX", "label": "S&P 500", "ticker": "^GSPC"},
+        {"symbol": "NASDAQ", "label": "Nasdaq", "ticker": "^IXIC"},
+        {"symbol": "DXY", "label": "DXY", "ticker": "DX-Y.NYB"},
+    ]
+    tags = ["Calendario", "USD", "Macro"]
+    if any(term in text for term in ["oil", "petroleum", "crude", "gasoline", "estoques", "eia"]):
+        assets = [
+            {"symbol": "WTI", "label": "WTI Crude Oil", "ticker": "CL=F"},
+            {"symbol": "BRENT", "label": "Brent Oil", "ticker": "BZ=F"},
+            {"symbol": "XLE", "label": "Energy ETF", "ticker": "XLE"},
+        ]
+        tags.append("Energy")
+    elif any(term in text for term in ["cpi", "pce", "ppi", "inflation", "fed", "fomc", "treasury", "rate"]):
+        assets = [
+            {"symbol": "DXY", "label": "DXY", "ticker": "DX-Y.NYB"},
+            {"symbol": "GOLD", "label": "Gold", "ticker": "GC=F"},
+            {"symbol": "SPX", "label": "S&P 500", "ticker": "^GSPC"},
+        ]
+        tags.append("Rates")
+    return assets[:limit], tags[:5]
+
+
 def _event_timestamp_for_index(event_dt: datetime, idx: pd.Index) -> pd.Timestamp:
     """Convert the news instant to the candle index timezone without changing the instant."""
     event_ts = pd.Timestamp(event_dt)
@@ -408,7 +468,11 @@ def _reaction_metrics(df: pd.DataFrame, event_dt: datetime) -> dict[str, Any]:
     }
 
 
-def build_market_moving_events(news_items: list[dict[str, Any]], max_events: int = 6) -> list[dict[str, Any]]:
+def build_market_moving_events(
+    news_items: list[dict[str, Any]],
+    calendar_events: list[dict[str, Any]] | None = None,
+    max_events: int = 6,
+) -> list[dict[str, Any]]:
     candidates = []
     for item in news_items or []:
         label, score = impact_score(item)
@@ -418,11 +482,28 @@ def build_market_moving_events(news_items: list[dict[str, Any]], max_events: int
         if not event_dt:
             continue
         assets, tags = infer_assets(item)
-        candidates.append((score, event_dt, item, label, assets, tags))
+        candidates.append((score, event_dt, item, label, assets, tags, "NEWS", "news"))
+    now_utc = datetime.now(timezone.utc)
+    for event in calendar_events or []:
+        if not _is_us_or_brl_calendar_event(event):
+            continue
+        event_dt = _calendar_event_dt(event)
+        if not event_dt or event_dt > now_utc:
+            continue
+        label, score = _calendar_impact_score(event)
+        assets, tags = _calendar_assets(event)
+        title = f"{event.get('currency', '---')} | {event.get('event', 'Evento economico')}"
+        item = {
+            "title": title,
+            "source": event.get("source") or "Calendario economico",
+            "event": event.get("event"),
+            "currency": event.get("currency"),
+        }
+        candidates.append((score, event_dt, item, label, assets, tags, "DATA", "calendar"))
     candidates.sort(key=lambda row: (row[0], row[1]), reverse=True)
 
     events = []
-    for score, event_dt, item, label, assets, tags in candidates[:max_events]:
+    for score, event_dt, item, label, assets, tags, base_marker_label, event_kind in candidates[:max_events]:
         charts = []
         display_dt = _display_dt_br(event_dt)
         tried_tickers: set[str] = set()
@@ -433,7 +514,7 @@ def build_market_moving_events(news_items: list[dict[str, Any]], max_events: int
             tried_tickers.add(asset["ticker"])
             df = _download_intraday(asset["ticker"])
             window = _candles_around_event(df, event_dt)
-            marker_label = "NEWS"
+            marker_label = base_marker_label
             if window.empty:
                 window = _candles_around_event(df, event_dt, after_minutes=2160)
                 marker_label = "ABERTURA"
@@ -442,7 +523,7 @@ def build_market_moving_events(news_items: list[dict[str, Any]], max_events: int
             if window.empty:
                 twelve_df, twelve_mapping = _download_twelve_fallback(asset["ticker"])
                 twelve_window = _candles_around_event(twelve_df, event_dt)
-                twelve_marker_label = "NEWS"
+                twelve_marker_label = base_marker_label
                 if twelve_window.empty:
                     twelve_window = _candles_around_event(twelve_df, event_dt, after_minutes=2160)
                     twelve_marker_label = "ABERTURA"
@@ -459,7 +540,7 @@ def build_market_moving_events(news_items: list[dict[str, Any]], max_events: int
             if window.empty:
                 alpha_df, alpha_mapping = _download_alpha_fallback(asset["ticker"])
                 alpha_window = _candles_around_event(alpha_df, event_dt)
-                alpha_marker_label = "NEWS"
+                alpha_marker_label = base_marker_label
                 if alpha_window.empty:
                     alpha_window = _candles_around_event(alpha_df, event_dt, after_minutes=2160)
                     alpha_marker_label = "ABERTURA"
@@ -503,6 +584,7 @@ def build_market_moving_events(news_items: list[dict[str, Any]], max_events: int
             "event_time_label": display_dt.strftime("%H:%M"),
             "status": "ready" if charts else "pending_open",
             "status_message": "" if charts else "Aguardando primeiro candle negociado dos ativos mapeados.",
+            "kind": event_kind,
             "tags": tags,
             "charts": charts,
         })

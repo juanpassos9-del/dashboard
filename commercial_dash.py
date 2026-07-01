@@ -4583,9 +4583,10 @@ def pagina_watchlist():
 @st.cache_data(ttl=240, show_spinner=False)
 def get_market_moving_events_cached(refresh_nonce: int = 0):
     news_items, _sources, _warnings, _loaded_at = load_bloomberg_news_feed(refresh_nonce)
+    calendar_events = get_calendar_data() or []
     from execution.market_moving import build_market_moving_events
 
-    return build_market_moving_events(news_items, max_events=6)
+    return build_market_moving_events(news_items, calendar_events=calendar_events, max_events=8)
 
 
 def _market_moving_chart_html(chart: dict, uid: str) -> str:
@@ -4620,7 +4621,7 @@ def _market_moving_chart_html(chart: dict, uid: str) -> str:
     return f"""
     <div class="mm-chart-card">
       <div class="mm-chart-title"><span>{symbol}</span>{title}{f"<small>{source}</small>" if source else ""}<em>{timeframe}</em></div>
-      <div id="mm-chart-{uid}" class="mm-chart"><div id="mm-event-{uid}" class="mm-event-marker"><div class="mm-event-arrow">↓</div><div class="mm-event-label">{marker_label}</div></div></div>
+      <div id="mm-chart-{uid}" class="mm-chart"><div id="mm-event-{uid}" class="mm-event-marker"><div class="mm-event-ring"></div><div class="mm-event-label">{marker_label}</div></div></div>
       <div class="mm-metrics">{metric_html}</div>
     </div>
     <script>
@@ -4651,17 +4652,24 @@ def _market_moving_chart_html(chart: dict, uid: str) -> str:
       }}
       series.setData(payload.candles);
       const markerTime = payload.markerTime || payload.eventTime;
-      const eventCandle = payload.candles.reduce((best, candle) => {{
-        if (!best) return candle;
-        return Math.abs(candle.time - markerTime) < Math.abs(best.time - markerTime) ? candle : best;
-      }}, null);
+      function pickEventCandle(candles, eventTime) {{
+        if (!candles || !candles.length || !eventTime) return null;
+        const containing = candles.find(function(candle, idx) {{
+          const next = candles[idx + 1];
+          const end = next ? next.time : candle.time + 300;
+          return candle.time <= eventTime && eventTime < end;
+        }});
+        if (containing) return containing;
+        return candles.reduce((best, candle) => {{
+          if (!best) return candle;
+          return Math.abs(candle.time - eventTime) < Math.abs(best.time - eventTime) ? candle : best;
+        }}, null);
+      }}
+      const eventCandle = pickEventCandle(payload.candles, markerTime);
       if (eventCandle && series.setMarkers) {{
         series.setMarkers([{{
           time: eventCandle.time, position: "aboveBar", color: "#22D3EE",
-          shape: "arrowDown", text: payload.markerLabel || "NEWS"
-        }}, {{
-          time: eventCandle.time, position: "belowBar", color: "#22D3EE",
-          shape: "circle", text: "EVENTO"
+          shape: "circle", text: payload.markerLabel || "EVENTO"
         }}]);
       }}
       function positionEventMarker() {{
@@ -4675,9 +4683,8 @@ def _market_moving_chart_html(chart: dict, uid: str) -> str:
           return;
         }}
         marker.style.display = "block";
-        marker.style.left = Math.max(12, Math.min(root.clientWidth - 54, x - 24)) + "px";
-        marker.style.top = Math.max(6, y - 78) + "px";
-        root.style.setProperty("--event-x", x + "px");
+        marker.style.left = Math.max(12, Math.min(root.clientWidth - 62, x - 31)) + "px";
+        marker.style.top = Math.max(6, y - 44) + "px";
       }}
       chart.timeScale().subscribeVisibleTimeRangeChange(positionEventMarker);
       if (payload.visibleStart && payload.visibleEnd && chart.timeScale().setVisibleRange) {{
@@ -4727,10 +4734,9 @@ def pagina_market_moving():
           .mm-chart-title small {color:#93C5FD; font-size:.58rem; font-weight:900; text-transform:uppercase; opacity:.88;}
           .mm-chart-title em {margin-left:auto; font-style:normal; background:#22D3EE; color:#00111A; border-radius:999px; padding:2px 7px; font-size:.62rem; font-weight:950;}
           .mm-chart {height:260px; width:100%; position:relative; overflow:hidden;}
-          .mm-chart::after {content:""; position:absolute; left:var(--event-x, -100px); top:0; bottom:0; width:3px; background:#22D3EE; box-shadow:0 0 18px rgba(34,211,238,.95); opacity:.95; pointer-events:none; z-index:5;}
-          .mm-event-marker {display:none; position:absolute; z-index:9; width:48px; text-align:center; pointer-events:none; filter:drop-shadow(0 0 12px rgba(34,211,238,.95));}
-          .mm-event-arrow {font-size:48px; line-height:38px; color:#22D3EE; font-weight:950;}
-          .mm-event-label {display:inline-block; margin-top:1px; padding:3px 7px; border-radius:999px; background:#22D3EE; color:#00111A; font-size:.62rem; font-weight:950; letter-spacing:.04em;}
+          .mm-event-marker {display:none; position:absolute; z-index:9; width:62px; text-align:center; pointer-events:none; filter:drop-shadow(0 0 14px rgba(34,211,238,.95));}
+          .mm-event-ring {width:48px; height:48px; margin:0 auto; border:5px solid #22D3EE; border-radius:999px; background:rgba(34,211,238,.12); box-shadow:0 0 0 7px rgba(34,211,238,.16), 0 0 24px rgba(34,211,238,.95);}
+          .mm-event-label {display:inline-block; margin-top:3px; padding:3px 7px; border-radius:999px; background:#22D3EE; color:#00111A; font-size:.62rem; font-weight:950; letter-spacing:.04em;}
           .mm-metrics {display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; color:#CBD5E1; font-size:.70rem; font-weight:800;}
           .mm-metrics .pos {color:#00FFA3;} .mm-metrics .neg {color:#FFB4A8;}
           @media(max-width:1100px){.mm-grid{grid-template-columns:1fr; margin-left:0}.mm-tags{margin-left:0}.mm-chart{height:300px}}
