@@ -4249,28 +4249,28 @@ def pagina_market_report():
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def get_watchlist_payload_cached(global_data, schema_version="watchlist_v3_multi_asset"):
+def get_watchlist_payload_cached(global_data, schema_version="watchlist_v4_position_only"):
     from execution.watchlist_ai import generate_watchlist
 
     return generate_watchlist(global_data)
 
 
 def pagina_watchlist():
-    """Radar IA TTS Swing & Position."""
+    """Radar IA TTS Position Trade."""
     st.title("WATCHLIST")
-    st.caption("Radar IA TTS para Swing & Position: Brasil, EUA, Cripto, Moedas, Commodities e Metais.")
+    st.caption("Radar IA TTS para Position Trade: Brasil, EUA, Cripto, Moedas, Commodities e Metais.")
 
     global_data = get_global_markets_data()
     if st.button("Atualizar Watchlist agora", type="primary", use_container_width=True, key="watchlist_refresh_now"):
         get_watchlist_payload_cached.clear()
 
     try:
-        payload = get_watchlist_payload_cached(global_data, "watchlist_v3_multi_asset")
+        payload = get_watchlist_payload_cached(global_data, "watchlist_v4_position_only")
     except Exception as e:
         st.error(f"Nao foi possivel gerar a WATCHLIST agora: {e}")
         return
 
-    recs = payload.get("recommendations", [])
+    recs = [rec for rec in payload.get("recommendations", []) if rec.get("tipo") == "Position"]
     macro = payload.get("macro", {})
     quality = payload.get("data_quality", {})
 
@@ -4487,7 +4487,7 @@ def pagina_watchlist():
 
     comments = payload.get("commentary", {})
     watchlist_blocks = [
-        ("Brasil", "Brasil - Acoes", "Swing + Position", "brasil", 5, "#00FFA3", "0,255,163"),
+        ("Brasil", "Brasil - Acoes", "Position Trade", "brasil", 5, "#00FFA3", "0,255,163"),
         ("EUA", "EUA - ETFs Setoriais", "Rotacao setorial", "eua", 5, "#38BDF8", "56,189,248"),
         ("Cripto", "Cripto", "Liquidez + beta", "cripto", 4, "#F59E0B", "245,158,11"),
         ("Moedas", "Moedas / Forex", "FX macro", "moedas", 4, "#22D3EE", "34,211,238"),
@@ -4544,7 +4544,6 @@ def pagina_watchlist():
         "Moedas",
         "Commodities",
         "Metais",
-        "Swing",
         "Position",
         "Comentario da IA",
     ])
@@ -4566,16 +4565,11 @@ def pagina_watchlist():
     with tabs[6]:
         render_recommendations(rec_filter(bloco="Metais"), limit=10)
     with tabs[7]:
-        st.markdown("#### Radar Swing")
-        for block_prefix, title, *_rest in watchlist_blocks:
-            st.markdown(f"##### {title}")
-            render_recommendations(rec_filter(tipo="Swing", bloco=block_prefix), limit=6)
-    with tabs[8]:
         st.markdown("#### Radar Position")
         for block_prefix, title, *_rest in watchlist_blocks:
             st.markdown(f"##### {title}")
             render_recommendations(rec_filter(tipo="Position", bloco=block_prefix), limit=6)
-    with tabs[9]:
+    with tabs[8]:
         for _block_prefix, title, _subtitle, comment_key, _limit, _color, _rgb in watchlist_blocks:
             st.markdown(f"#### {title}\n{block_comment(comment_key, title)}")
 

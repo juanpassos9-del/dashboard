@@ -1,4 +1,4 @@
-"""Deterministic Watchlist IA TTS for swing and position radar.
+"""Deterministic Watchlist IA TTS for position trade radar.
 
 This first version avoids external LLM calls. It builds a structured radar from
 yfinance prices plus the dashboard macro snapshot, keeping Brazil stocks and US
@@ -559,14 +559,13 @@ def generate_watchlist(global_data: dict | None = None) -> dict[str, Any]:
 
     recommendations = []
     for snap in snapshots:
-        recommendations.append(_recommendation(snap, macro, "Swing"))
         recommendations.append(_recommendation(snap, macro, "Position"))
 
     recommendations.sort(key=lambda r: (r["tipo"], r["bloco"], -r["score_atual"]))
     dashboard_count = sum(1 for snap in snapshots if snap.source == "dashboard")
     historical_count = sum(1 for snap in snapshots if snap.source == "historico")
     payload = {
-        "schema_version": "watchlist_v3_multi_asset",
+        "schema_version": "watchlist_v4_position_only",
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "macro": macro,
         "recommendations": recommendations,
