@@ -4017,7 +4017,11 @@ def secao_calendario_global_fragment():
 
                 interpreted_history = []
                 pending_history = []
-                for event in reversed(investing_events):
+                focus_history_events = [
+                    event for event in investing_events
+                    if str(event.get("currency", "")).upper() in {"USD", "BRL"}
+                ]
+                for event in reversed(focus_history_events):
                     result = interpret_event(event, macro_global_data)
                     if result.get("status") == "Interpretado":
                         interpreted_history.append((event, result))
@@ -4056,7 +4060,7 @@ def secao_calendario_global_fragment():
                     st.markdown("<div id='tg-historico'></div>", unsafe_allow_html=True)
                     st.markdown(
                         f"<div style='border:1px solid #334155; border-radius:8px; padding:16px; margin:0 0 16px 0; background:#0b1220;'>"
-                        f"<div style='font-size:0.78rem; color:#94A3B8; font-weight:800; text-transform:uppercase; margin-bottom:8px;'>Historico IA Macro TTS - ultimos 5 eventos Investing divulgados</div>"
+                        f"<div style='font-size:0.78rem; color:#94A3B8; font-weight:800; text-transform:uppercase; margin-bottom:8px;'>Historico IA Macro TTS - ultimos 5 eventos USD/BRL divulgados</div>"
                         f"{''.join(history_cards)}"
                         f"</div>",
                         unsafe_allow_html=True,
