@@ -4296,6 +4296,23 @@ def get_watchlist_chart_candles(ticker: str, period: str = "6mo", interval: str 
         return []
 
 
+def _watchlist_activation_info(item: dict, candles: list[dict]) -> dict:
+    try:
+        entry_price = float(item.get("entrada") or item.get("entrada_ideal"))
+        for candle in reversed(candles or []):
+            if float(candle["low"]) <= entry_price <= float(candle["high"]):
+                timestamp = int(candle["time"])
+                dt_br = datetime.fromtimestamp(timestamp, timezone.utc).astimezone(ZoneInfo("America/Sao_Paulo"))
+                return {
+                    "price": entry_price,
+                    "time": timestamp,
+                    "label": dt_br.strftime("%d/%m/%Y %H:%M"),
+                }
+    except Exception:
+        pass
+    return {"price": None, "time": None, "label": "Aguardando entrada"}
+
+
 def _watchlist_chart_html(item: dict, uid: str) -> str:
     ticker = str(item.get("ticker") or "").strip()
     candles = get_watchlist_chart_candles(ticker)
@@ -4319,21 +4336,12 @@ def _watchlist_chart_html(item: dict, uid: str) -> str:
         level("Gain final", "gain_final", "#10B981", 0),
         level("Loss", "loss", "#FF4B4B", 0),
     ]
-    entry_price = None
-    activation_time = None
-    try:
-        entry_price = float(item.get("entrada") or item.get("entrada_ideal"))
-        for candle in reversed(candles):
-            if float(candle["low"]) <= entry_price <= float(candle["high"]):
-                activation_time = candle["time"]
-                break
-    except Exception:
-        entry_price = None
+    activation = _watchlist_activation_info(item, candles)
     payload = json.dumps({
         "candles": candles,
         "levels": [item for item in levels if item],
-        "entryPrice": entry_price,
-        "activationTime": activation_time,
+        "entryPrice": activation.get("price"),
+        "activationTime": activation.get("time"),
     }, ensure_ascii=False)
     return f"""
     <div id="wl-chart-{uid}" class="wl-chart"></div>
@@ -4579,6 +4587,7 @@ def pagina_watchlist():
             gain_2_pct = pct_from_base(item.get("gain_2"), ref_entry)
             gain_final_pct = pct_from_base(item.get("gain_final"), ref_entry)
             loss_pct = pct_from_base(item.get("loss"), ref_entry)
+            activation = _watchlist_activation_info(item, get_watchlist_chart_candles(str(item.get("ticker") or "").strip()))
             chart_html = _watchlist_chart_html(item, f"{uid_prefix}-{idx}")
             html_cards.append(
                 f"""
@@ -4601,6 +4610,7 @@ def pagina_watchlist():
                     <div class="wl-box gain"><span>Gain final</span><b>{fmt_price(item.get('gain_final'))}</b><small>{fmt_pct(gain_final_pct)}</small></div>
                     <div class="wl-box loss"><span>Loss</span><b>{fmt_price(item.get('loss'))}</b><small>{fmt_pct(loss_pct)}</small></div>
                   </div>
+                  <div class="wl-text"><b>Ativacao:</b> {html.escape(str(activation.get('label', 'Aguardando entrada')))}</div>
                   <div class="wl-text"><b>Tese:</b> {html.escape(str(item.get('tese_principal', '')))}</div>
                   <div class="wl-text"><b>Confirmacoes:</b> {html.escape(str(item.get('confirmacoes', '')))}</div>
                   <span class="wl-action">{html.escape(str(item.get('acao', '---')).upper())} | RR {html.escape(str(item.get('risco_retorno', '---')))} | {html.escape(str(item.get('tamanho_sugerido', '---')))} | {html.escape(str(item.get('fonte_descricao', 'historico yfinance')))}</span>
