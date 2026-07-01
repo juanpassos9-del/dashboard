@@ -4309,14 +4309,25 @@ def _watchlist_chart_html(item: dict, uid: str) -> str:
     levels = [
         level("Atual", "preco_atual", "#F8FAFC", 2),
         level("Entrada", "entrada", "#22D3EE", 0),
-        level("Gain 1", "gain_1", "#00FFA3", 0),
-        level("Gain 2", "gain_2", "#34D399", 1),
+        level("Gain parcial", "gain_1", "#00FFA3", 0),
         level("Gain final", "gain_final", "#10B981", 0),
         level("Loss", "loss", "#FF4B4B", 0),
     ]
+    entry_price = None
+    activation_time = None
+    try:
+        entry_price = float(item.get("entrada") or item.get("entrada_ideal"))
+        for candle in reversed(candles):
+            if float(candle["low"]) <= entry_price <= float(candle["high"]):
+                activation_time = candle["time"]
+                break
+    except Exception:
+        entry_price = None
     payload = json.dumps({
         "candles": candles,
         "levels": [item for item in levels if item],
+        "entryPrice": entry_price,
+        "activationTime": activation_time,
     }, ensure_ascii=False)
     return f"""
     <div id="wl-chart-{uid}" class="wl-chart"></div>
@@ -4347,6 +4358,15 @@ def _watchlist_chart_html(item: dict, uid: str) -> str:
         }});
       }}
       series.setData(payload.candles);
+      if (payload.activationTime && series.setMarkers) {{
+        series.setMarkers([{{
+          time: payload.activationTime,
+          position: "aboveBar",
+          color: "#22D3EE",
+          shape: "circle",
+          text: "ENTRADA"
+        }}]);
+      }}
       (payload.levels || []).forEach(function(level) {{
         series.createPriceLine({{
           price: level.price,
@@ -4571,7 +4591,7 @@ def pagina_watchlist():
                     <div class="wl-box price"><span>Preco atual</span><b>{fmt_price(item.get('preco_atual'))}</b><small>referencia viva</small></div>
                     <div class="wl-box result {result_class}"><span>Resultado</span><b class="wl-pct-{result_class}">{fmt_pct(result_pct)}</b><small>vs entrada</small></div>
                     <div class="wl-box entry"><span>Entrada</span><b>{fmt_price(ref_entry)}</b><small>preco unico</small></div>
-                    <div class="wl-box gain"><span>Gain 1 / 2</span><b>{fmt_price(item.get('gain_1'))} / {fmt_price(item.get('gain_2'))}</b><small>{fmt_pct(gain_1_pct)} / {fmt_pct(gain_2_pct)}</small></div>
+                    <div class="wl-box gain"><span>Gain parcial</span><b>{fmt_price(item.get('gain_1'))}</b><small>{fmt_pct(gain_1_pct)}</small></div>
                     <div class="wl-box gain"><span>Gain final</span><b>{fmt_price(item.get('gain_final'))}</b><small>{fmt_pct(gain_final_pct)}</small></div>
                     <div class="wl-box loss"><span>Loss</span><b>{fmt_price(item.get('loss'))}</b><small>{fmt_pct(loss_pct)}</small></div>
                   </div>
