@@ -4647,6 +4647,7 @@ def pagina_watchlist():
                   <div class="wl-text"><b>Ativacao:</b> {html.escape(str(activation_label))}</div>
                   <div class="wl-text"><b>Tese:</b> {html.escape(str(item.get('tese_principal', '')))}</div>
                   <div class="wl-text"><b>Confirmacoes:</b> {html.escape(str(item.get('confirmacoes', '')))}</div>
+                  <div class="wl-text"><b>Filtros:</b> {html.escape(str(item.get('filtros', '---')))}</div>
                   <span class="wl-action">{html.escape(str(item.get('acao', '---')).upper())} | RR {html.escape(str(item.get('risco_retorno', '---')))} | {html.escape(str(item.get('tamanho_sugerido', '---')))} | {html.escape(str(item.get('fonte_descricao', 'historico yfinance')))}</span>
                   {chart_html}
                 </div>

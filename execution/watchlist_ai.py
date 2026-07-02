@@ -114,6 +114,8 @@ class AssetSnapshot:
     ma50: float
     ma200: float
     avg_volume_20d: float
+    support_20d: float
+    resistance_20d: float
     source: str = "historico"
 
 
@@ -306,6 +308,8 @@ def _build_snapshot(symbol: str, meta: dict, block: str, data: pd.DataFrame, ben
     rel60 = mom60 - bench60
     ret = close.pct_change().dropna()
     annual_vol = _safe_float(ret.tail(63).std() * math.sqrt(252) * 100, 0.0)
+    recent_high = _safe_float(df["High"].astype(float).tail(20).max(), price)
+    recent_low = _safe_float(df["Low"].astype(float).tail(20).min(), price)
     trend = 35
     trend += 20 if price > ma20 else -8
     trend += 20 if ma20 > ma50 else -6
@@ -319,6 +323,7 @@ def _build_snapshot(symbol: str, meta: dict, block: str, data: pd.DataFrame, ben
         price=price, trend_score=max(0, min(100, trend)), relative_score=relative, volatility_score=vol_score,
         momentum_20d=mom20, momentum_60d=mom60, relative_60d=rel60, annual_vol=annual_vol,
         atr14=_atr14(df), ma20=ma20, ma50=ma50, ma200=ma200, avg_volume_20d=volume,
+        support_20d=recent_low, resistance_20d=recent_high,
     )
 
 
@@ -409,6 +414,8 @@ def _quick_snapshot_from_dashboard(
         ma50=synthetic_ma20,
         ma200=synthetic_ma20,
         avg_volume_20d=0.0,
+        support_20d=low,
+        resistance_20d=high,
         source="dashboard",
     )
 
@@ -452,6 +459,8 @@ def _short_score_snapshot(s: AssetSnapshot, macro: dict, style: str) -> float:
         ma50=s.ma50,
         ma200=s.ma200,
         avg_volume_20d=s.avg_volume_20d,
+        support_20d=s.support_20d,
+        resistance_20d=s.resistance_20d,
         source=s.source,
     )
     score = _score_snapshot(inverse, macro, style)
@@ -466,41 +475,120 @@ def _short_score_snapshot(s: AssetSnapshot, macro: dict, style: str) -> float:
     return max(0, min(100, score))
 
 
+def _regime_direction_bias(block: str, sector: str, regime: str, direction: str) -> float:
+    sector_l = sector.lower()
+    if direction == "compra":
+        return _regime_component(block, sector, regime)
+    if regime.startswith("Risk-off"):
+        if block == "Cripto":
+            return 82
+        if block == "Brasil":
+            return 76 if not any(x in sector_l for x in ["eletricas", "defensivo"]) else 45
+        if block == "EUA":
+            return 74 if sector not in {"Consumer Staples"} else 42
+        if block == "Metais":
+            return 42 if "precioso" in sector_l else 70
+        if block == "Commodities":
+            return 64
+        if block == "Moedas":
+            return 64 if "emerging" in sector_l or "commodity" in sector_l else 52
+    if regime.startswith("Risk-on"):
+        if block in {"Cripto", "Brasil"}:
+            return 35
+        if block == "EUA":
+            return 38
+        if block == "Metais" and "precioso" in sector_l:
+            return 58
+    return 52
+
+
+def _supports_short(block: str, sector: str) -> bool:
+    sector_l = sector.lower()
+    if block in {"Cripto", "EUA", "Brasil", "Commodities", "Metais"}:
+        return True
+    if block == "Moedas":
+        return "emerging" in sector_l or "commodity" in sector_l or "carry" in sector_l
+    return False
+
+
+def _hard_filter(s: AssetSnapshot, direction: str) -> tuple[bool, list[str]]:
+    reasons: list[str] = []
+    price_below_ma50 = s.price < s.ma50 if s.ma50 > 0 else False
+    price_above_ma50 = s.price > s.ma50 if s.ma50 > 0 else False
+    ma_stack_up = s.ma20 >= s.ma50 >= s.ma200 if min(s.ma20, s.ma50, s.ma200) > 0 else False
+    ma_stack_down = s.ma20 <= s.ma50 <= s.ma200 if min(s.ma20, s.ma50, s.ma200) > 0 else False
+    stretched_down = s.ma20 > 0 and s.price < s.ma20 - (2.2 * max(s.atr14, s.price * 0.01))
+    stretched_up = s.ma20 > 0 and s.price > s.ma20 + (2.2 * max(s.atr14, s.price * 0.01))
+    if direction == "venda":
+        if not _supports_short(s.block, s.sector):
+            return False, ["classe sem short habilitado"]
+        ok = price_below_ma50 or ma_stack_down or s.momentum_20d < -3 or s.relative_60d < -3
+        if not ok:
+            reasons.append("sem tendencia/forca relativa baixista suficiente")
+        if stretched_down:
+            reasons.append("ativo muito esticado para baixo; evitar venda atrasada")
+        return ok and not stretched_down, reasons
+    ok = price_above_ma50 or ma_stack_up or s.momentum_20d > 3 or s.relative_60d > 3
+    if not ok:
+        reasons.append("sem tendencia/forca relativa compradora suficiente")
+    if stretched_up:
+        reasons.append("ativo muito esticado para cima; evitar compra atrasada")
+    return ok and not stretched_up, reasons
+
+
 def _recommendation(s: AssetSnapshot, macro: dict, style: str) -> dict[str, Any]:
     long_score = _score_snapshot(s, macro, style)
     short_score = _short_score_snapshot(s, macro, style)
-    direction = "venda" if short_score >= 62 and short_score >= long_score + 4 else "compra"
+    long_ok, long_filter_reasons = _hard_filter(s, "compra")
+    short_ok, short_filter_reasons = _hard_filter(s, "venda")
+    long_trade_score = long_score + (_regime_direction_bias(s.block, s.sector, macro["regime"], "compra") - 55) * 0.20
+    short_trade_score = short_score + (_regime_direction_bias(s.block, s.sector, macro["regime"], "venda") - 55) * 0.20
+    if not long_ok:
+        long_trade_score -= 14
+    if not short_ok:
+        short_trade_score -= 14
+    direction = "venda" if short_ok and short_trade_score >= 62 and short_trade_score >= long_trade_score + 4 else "compra"
+    if direction == "compra" and not long_ok and short_ok and short_trade_score >= 62:
+        direction = "venda"
     score = short_score if direction == "venda" else long_score
+    trade_score = short_trade_score if direction == "venda" else long_trade_score
+    filter_reasons = short_filter_reasons if direction == "venda" else long_filter_reasons
     atr = s.atr14 if s.atr14 > 0 else max(s.price * 0.025, 0.01)
     stop_mult = 1.8 if style == "Swing" else 2.8
     target_mults = (1.4, 2.4, 3.6) if style == "Swing" else (2.0, 3.5, 5.0)
     if direction == "venda":
-        entry_ideal = max(s.price, s.ma20) if s.ma20 > 0 else s.price * 1.01
-        loss = entry_ideal + atr * stop_mult
+        pullback_refs = [value for value in [s.ma20, s.ma50, s.resistance_20d] if value and value > 0]
+        entry_ideal = min([value for value in pullback_refs if value >= s.price] or [max(s.price, s.ma20) if s.ma20 > 0 else s.price * 1.01])
+        technical_stop = max(s.resistance_20d, entry_ideal + atr * 0.75)
+        atr_stop = entry_ideal + atr * stop_mult
+        loss = max(technical_stop, atr_stop)
         gain1 = entry_ideal - atr * target_mults[0]
         gain2 = entry_ideal - atr * target_mults[1]
         gain_final = entry_ideal - atr * target_mults[2]
         rr = (entry_ideal - gain2) / max(loss - entry_ideal, 0.01)
     else:
-        entry_ideal = min(s.price, s.ma20) if s.ma20 > 0 else s.price * 0.99
-        loss = entry_ideal - atr * stop_mult
+        pullback_refs = [value for value in [s.ma20, s.ma50, s.support_20d] if value and value > 0]
+        entry_ideal = max([value for value in pullback_refs if value <= s.price] or [min(s.price, s.ma20) if s.ma20 > 0 else s.price * 0.99])
+        technical_stop = min(s.support_20d, entry_ideal - atr * 0.75) if s.support_20d > 0 else entry_ideal - atr * 0.75
+        atr_stop = entry_ideal - atr * stop_mult
+        loss = min(technical_stop, atr_stop)
         gain1 = entry_ideal + atr * target_mults[0]
         gain2 = entry_ideal + atr * target_mults[1]
         gain_final = entry_ideal + atr * target_mults[2]
         rr = (gain2 - entry_ideal) / max(entry_ideal - loss, 0.01)
-    if score >= 72:
+    if trade_score >= 72:
         action = "vender" if direction == "venda" else "comprar"
         status = "ativo"
-    elif score >= 62:
+    elif trade_score >= 62:
         action = "aguardar entrada"
         status = "watch"
-    elif score >= 52:
+    elif trade_score >= 52:
         action = "manter radar"
         status = "neutro"
     else:
         action = "evitar/reduzir"
         status = "fraco"
-    position = "1.0x" if score >= 75 else "0.5x" if score >= 62 else "0.25x"
+    position = "1.0x" if trade_score >= 75 else "0.5x" if trade_score >= 62 else "0.25x"
     group = ASSET_GROUPS.get(s.block, {})
     block_label = group.get("label", s.block)
     asset_class = group.get("class", s.block)
@@ -516,8 +604,9 @@ def _recommendation(s: AssetSnapshot, macro: dict, style: str) -> dict[str, Any]
         "direcao": direction,
         "score_compra": round(long_score, 1),
         "score_venda": round(short_score, 1),
+        "score_trade": round(trade_score, 1),
         "score_inicial": round(score, 1),
-        "score_atual": round(score, 1),
+        "score_atual": round(trade_score, 1),
         "preco_atual": round(s.price, 2),
         "entrada": round(entry_ideal, 2),
         "entrada_ideal": round(entry_ideal, 2),
@@ -532,6 +621,7 @@ def _recommendation(s: AssetSnapshot, macro: dict, style: str) -> dict[str, Any]
         "tese_principal": f"{s.symbol} depende de {s.driver}. Score combina regime {macro['regime']}, tendencia e forca relativa.",
         "confirmacoes": "Preco respeitar entrada/invalidação, forca relativa positiva e regime macro sem deterioracao.",
         "riscos": "Deterioracao do regime, gap de noticia, alta de volatilidade ou perda do suporte tecnico.",
+        "filtros": "; ".join(filter_reasons) if filter_reasons else "filtros tecnicos aprovados",
         "status": status,
         "carteira": carteira,
         "resultado": "sem posicao executada",
