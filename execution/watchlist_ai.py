@@ -432,19 +432,64 @@ def _score_snapshot(s: AssetSnapshot, macro: dict, style: str) -> float:
     return max(0, min(100, score))
 
 
+def _short_score_snapshot(s: AssetSnapshot, macro: dict, style: str) -> float:
+    inverse = AssetSnapshot(
+        symbol=s.symbol,
+        ticker=s.ticker,
+        block=s.block,
+        sector=s.sector,
+        driver=s.driver,
+        price=s.price,
+        trend_score=100 - s.trend_score,
+        relative_score=100 - s.relative_score,
+        volatility_score=s.volatility_score,
+        momentum_20d=-s.momentum_20d,
+        momentum_60d=-s.momentum_60d,
+        relative_60d=-s.relative_60d,
+        annual_vol=s.annual_vol,
+        atr14=s.atr14,
+        ma20=s.ma20,
+        ma50=s.ma50,
+        ma200=s.ma200,
+        avg_volume_20d=s.avg_volume_20d,
+        source=s.source,
+    )
+    score = _score_snapshot(inverse, macro, style)
+    if s.price < s.ma20 and s.ma20 <= s.ma50:
+        score += 4
+    if s.price < s.ma50:
+        score += 3
+    if s.momentum_20d < 0:
+        score += 3
+    if s.relative_60d < 0:
+        score += 3
+    return max(0, min(100, score))
+
+
 def _recommendation(s: AssetSnapshot, macro: dict, style: str) -> dict[str, Any]:
-    score = _score_snapshot(s, macro, style)
+    long_score = _score_snapshot(s, macro, style)
+    short_score = _short_score_snapshot(s, macro, style)
+    direction = "venda" if short_score >= 62 and short_score >= long_score + 4 else "compra"
+    score = short_score if direction == "venda" else long_score
     atr = s.atr14 if s.atr14 > 0 else max(s.price * 0.025, 0.01)
     stop_mult = 1.8 if style == "Swing" else 2.8
     target_mults = (1.4, 2.4, 3.6) if style == "Swing" else (2.0, 3.5, 5.0)
-    entry_ideal = min(s.price, s.ma20) if s.ma20 > 0 else s.price * 0.99
-    loss = entry_ideal - atr * stop_mult
-    gain1 = entry_ideal + atr * target_mults[0]
-    gain2 = entry_ideal + atr * target_mults[1]
-    gain_final = entry_ideal + atr * target_mults[2]
-    rr = (gain2 - entry_ideal) / max(entry_ideal - loss, 0.01)
-    if score >= 72 and s.price <= gain1:
-        action = "comprar"
+    if direction == "venda":
+        entry_ideal = max(s.price, s.ma20) if s.ma20 > 0 else s.price * 1.01
+        loss = entry_ideal + atr * stop_mult
+        gain1 = entry_ideal - atr * target_mults[0]
+        gain2 = entry_ideal - atr * target_mults[1]
+        gain_final = entry_ideal - atr * target_mults[2]
+        rr = (entry_ideal - gain2) / max(loss - entry_ideal, 0.01)
+    else:
+        entry_ideal = min(s.price, s.ma20) if s.ma20 > 0 else s.price * 0.99
+        loss = entry_ideal - atr * stop_mult
+        gain1 = entry_ideal + atr * target_mults[0]
+        gain2 = entry_ideal + atr * target_mults[1]
+        gain_final = entry_ideal + atr * target_mults[2]
+        rr = (gain2 - entry_ideal) / max(entry_ideal - loss, 0.01)
+    if score >= 72:
+        action = "vender" if direction == "venda" else "comprar"
         status = "ativo"
     elif score >= 62:
         action = "aguardar entrada"
@@ -468,7 +513,9 @@ def _recommendation(s: AssetSnapshot, macro: dict, style: str) -> dict[str, Any]
         "classe": asset_class,
         "setor": s.sector,
         "tipo": style,
-        "direcao": "compra",
+        "direcao": direction,
+        "score_compra": round(long_score, 1),
+        "score_venda": round(short_score, 1),
         "score_inicial": round(score, 1),
         "score_atual": round(score, 1),
         "preco_atual": round(s.price, 2),
@@ -648,7 +695,9 @@ def _save_watchlist_results(rows: list[dict[str, Any]]) -> None:
 
 
 def _hit_event(rec: dict[str, Any]) -> dict[str, Any] | None:
-    if str(rec.get("acao", "")).lower() != "comprar":
+    direction = str(rec.get("direcao", "compra")).lower()
+    action = str(rec.get("acao", "")).lower()
+    if action not in {"comprar", "vender"}:
         return None
     if not rec.get("entrada_ativada"):
         return None
@@ -664,23 +713,37 @@ def _hit_event(rec: dict[str, Any]) -> dict[str, Any] | None:
 
     event = None
     exit_price = None
-    if loss is not None and price <= loss:
-        event = "STOP"
-        exit_price = loss
-    elif gain_final is not None and price >= gain_final:
-        event = "TAKE FINAL"
-        exit_price = gain_final
-    elif gain2 is not None and price >= gain2:
-        event = "TAKE 2"
-        exit_price = gain2
-    elif gain1 is not None and price >= gain1:
-        event = "TAKE 1"
-        exit_price = gain1
+    if direction == "venda":
+        if loss is not None and price >= loss:
+            event = "STOP"
+            exit_price = loss
+        elif gain_final is not None and price <= gain_final:
+            event = "TAKE FINAL"
+            exit_price = gain_final
+        elif gain2 is not None and price <= gain2:
+            event = "TAKE 2"
+            exit_price = gain2
+        elif gain1 is not None and price <= gain1:
+            event = "TAKE 1"
+            exit_price = gain1
+    else:
+        if loss is not None and price <= loss:
+            event = "STOP"
+            exit_price = loss
+        elif gain_final is not None and price >= gain_final:
+            event = "TAKE FINAL"
+            exit_price = gain_final
+        elif gain2 is not None and price >= gain2:
+            event = "TAKE 2"
+            exit_price = gain2
+        elif gain1 is not None and price >= gain1:
+            event = "TAKE 1"
+            exit_price = gain1
 
     if not event or exit_price is None:
         return None
 
-    result_pct = ((exit_price / entry) - 1) * 100
+    result_pct = ((entry / exit_price) - 1) * 100 if direction == "venda" else ((exit_price / entry) - 1) * 100
     return {
         "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "ativo": rec.get("ativo", "---"),
@@ -692,6 +755,7 @@ def _hit_event(rec: dict[str, Any]) -> dict[str, Any] | None:
         "preco_atual": round(price, 4),
         "resultado_pct": round(result_pct, 2),
         "score": rec.get("score_atual", "---"),
+        "direcao": direction,
         "acao_origem": rec.get("acao", "---"),
     }
 

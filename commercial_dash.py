@@ -4451,6 +4451,15 @@ def pagina_watchlist():
             return None
         return ((target_f / base_f) - 1) * 100
 
+    def trade_pct(target, base, direction="compra"):
+        target_f = as_float(target)
+        base_f = as_float(base)
+        if target_f is None or base_f is None or base_f == 0 or target_f == 0:
+            return None
+        if str(direction).lower() == "venda":
+            return ((base_f / target_f) - 1) * 100
+        return ((target_f / base_f) - 1) * 100
+
     def pct_class(value, neutral_band=0.05):
         if value is None:
             return "neutral"
@@ -4501,8 +4510,12 @@ def pagina_watchlist():
           .wl-category-subtitle {{color:var(--cat); font-size:.7rem; font-weight:950; text-transform:uppercase; text-align:right;}}
           .wl-card {{border:1px solid #263244; border-radius:8px; background:#0B1220; padding:13px 14px; margin-bottom:10px; position:relative;}}
           .wl-card.selected {{border-color:rgba(0,255,163,.72); border-left:5px solid #00FFA3; background:linear-gradient(90deg, rgba(0,255,163,.10), #0B1220 38%); box-shadow:0 0 0 1px rgba(0,255,163,.10), 0 10px 28px rgba(0,0,0,.24);}}
+          .wl-card.selected.short {{border-color:rgba(255,75,75,.72); border-left-color:#FF4B4B; background:linear-gradient(90deg, rgba(255,75,75,.12), #0B1220 38%);}}
           .wl-head {{display:flex; justify-content:space-between; gap:12px; align-items:flex-start;}}
           .wl-symbol {{font-size:1.05rem; color:#FFF; font-weight:950;}}
+          .wl-direction {{display:inline-block; margin-left:6px; border-radius:999px; padding:2px 7px; font-size:.66rem; font-weight:950; vertical-align:middle;}}
+          .wl-direction.compra {{color:#00FFA3; border:1px solid rgba(0,255,163,.52); background:rgba(0,255,163,.08);}}
+          .wl-direction.venda {{color:#FFB4A8; border:1px solid rgba(255,75,75,.55); background:rgba(255,75,75,.10);}}
           .wl-meta {{color:#94A3B8; font-size:.76rem; margin-top:3px;}}
           .wl-selected-badge {{display:inline-block; margin-left:8px; border:1px solid rgba(0,255,163,.55); border-radius:999px; padding:2px 7px; color:#00FFA3; background:rgba(0,255,163,.08); font-size:.66rem; font-weight:950; vertical-align:middle;}}
           .wl-score {{font-size:1.35rem; font-weight:950; text-align:right;}}
@@ -4555,8 +4568,12 @@ def pagina_watchlist():
       .wl-comment {border:1px solid rgba(var(--cat-rgb),.34); background:rgba(9,15,26,.68); border-radius:8px; padding:11px 12px; color:#CBD5E1; font-size:.86rem; line-height:1.45; margin-bottom:10px;}
       .wl-card {border:1px solid #263244; border-radius:8px; background:#0B1220; padding:13px 14px; margin-bottom:10px; position:relative;}
       .wl-card.selected {border-color:rgba(0,255,163,.72); border-left:5px solid #00FFA3; background:linear-gradient(90deg, rgba(0,255,163,.10), #0B1220 38%); box-shadow:0 0 0 1px rgba(0,255,163,.10), 0 10px 28px rgba(0,0,0,.24);}
+      .wl-card.selected.short {border-color:rgba(255,75,75,.72); border-left-color:#FF4B4B; background:linear-gradient(90deg, rgba(255,75,75,.12), #0B1220 38%);}
       .wl-head {display:flex; justify-content:space-between; gap:12px; align-items:flex-start;}
       .wl-symbol {font-size:1.05rem; color:#FFF; font-weight:950;}
+      .wl-direction {display:inline-block; margin-left:6px; border-radius:999px; padding:2px 7px; font-size:.66rem; font-weight:950; vertical-align:middle;}
+      .wl-direction.compra {color:#00FFA3; border:1px solid rgba(0,255,163,.52); background:rgba(0,255,163,.08);}
+      .wl-direction.venda {color:#FFB4A8; border:1px solid rgba(255,75,75,.55); background:rgba(255,75,75,.10);}
       .wl-meta {color:#94A3B8; font-size:.76rem; margin-top:3px;}
       .wl-selected-badge {display:inline-block; margin-left:8px; border:1px solid rgba(0,255,163,.55); border-radius:999px; padding:2px 7px; color:#00FFA3; background:rgba(0,255,163,.08); font-size:.66rem; font-weight:950; vertical-align:middle;}
       .wl-score {font-size:1.35rem; font-weight:950; text-align:right;}
@@ -4590,18 +4607,20 @@ def pagina_watchlist():
             score = item.get("score_atual", 0)
             color = score_color(score)
             action_text = str(item.get("acao", "---"))
-            selected = action_text == "comprar" or float(score or 0) >= 72
-            card_class = "wl-card selected" if selected else "wl-card"
+            direction = str(item.get("direcao", "compra")).lower()
+            direction_label = "SHORT" if direction == "venda" else "LONG"
+            selected = action_text in {"comprar", "vender"} or float(score or 0) >= 72
+            card_class = "wl-card selected short" if selected and direction == "venda" else "wl-card selected" if selected else "wl-card"
             selected_badge = '<span class="wl-selected-badge">SELECIONADA</span>' if selected else ""
             ref_entry = item.get("entrada") or item.get("entrada_ideal")
             is_active = bool(item.get("entrada_ativada"))
-            result_pct = pct_from_base(item.get("preco_atual"), ref_entry) if is_active else None
+            result_pct = trade_pct(item.get("preco_atual"), ref_entry, direction) if is_active else None
             result_class = pct_class(result_pct)
             result_text = fmt_pct(result_pct) if is_active else "Aguardando"
             result_hint = "pos entrada" if is_active else "sem ativacao"
-            gain_1_pct = pct_from_base(item.get("gain_1"), ref_entry)
-            gain_final_pct = pct_from_base(item.get("gain_final"), ref_entry)
-            loss_pct = pct_from_base(item.get("loss"), ref_entry)
+            gain_1_pct = trade_pct(item.get("gain_1"), ref_entry, direction)
+            gain_final_pct = trade_pct(item.get("gain_final"), ref_entry, direction)
+            loss_pct = trade_pct(item.get("loss"), ref_entry, direction)
             activation_label = item.get("entrada_ativada_em") or "Aguardando entrada"
             chart_html = _watchlist_chart_html(item, f"{uid_prefix}-{idx}")
             html_cards.append(
@@ -4609,7 +4628,7 @@ def pagina_watchlist():
                 <div class="{card_class}">
                   <div class="wl-head">
                     <div>
-                      <div class="wl-symbol">{html.escape(str(item.get('ativo', '---')))} <span style="color:#94A3B8;font-size:.78rem;">{html.escape(str(item.get('tipo', '---')))}</span>{selected_badge}</div>
+                      <div class="wl-symbol">{html.escape(str(item.get('ativo', '---')))} <span class="wl-direction {direction}">{direction_label}</span> <span style="color:#94A3B8;font-size:.78rem;">{html.escape(str(item.get('tipo', '---')))}</span>{selected_badge}</div>
                       <div class="wl-meta">{html.escape(str(item.get('bloco', '---')))} | {html.escape(str(item.get('setor', '---')))} | {html.escape(str(item.get('status', '---')))}</div>
                     </div>
                     <div>
@@ -4658,11 +4677,12 @@ def pagina_watchlist():
             st.caption("Ainda nao houve recomendacao com take ou stop atingido.")
             return
         df_results = pd.DataFrame(rows).tail(30).iloc[::-1].copy()
-        cols = ["data", "ativo", "tipo", "bloco", "evento", "entrada", "saida", "preco_atual", "resultado_pct", "score"]
+        cols = ["data", "ativo", "direcao", "tipo", "bloco", "evento", "entrada", "saida", "preco_atual", "resultado_pct", "score"]
         df_results = df_results[[c for c in cols if c in df_results.columns]]
         rename = {
             "data": "Data",
             "ativo": "Ativo",
+            "direcao": "Direcao",
             "tipo": "Tipo",
             "bloco": "Bloco",
             "evento": "Evento",
