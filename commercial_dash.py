@@ -4809,6 +4809,91 @@ def pagina_watchlist():
             st.markdown(f"#### {title}\n{block_comment(comment_key, title)}")
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_watchlist_quant_cached(global_data, schema_version="watchlist_quant_v1"):
+    from execution.watchlist_quant import build_watchlist_quant
+
+    return build_watchlist_quant(global_data)
+
+
+def pagina_watchlist_quant():
+    """Quant screening using dashboard/watchlist universe."""
+    st.title("WATCHLIST QUANT")
+    st.caption("Screening quantitativo com Momentum, Reversao a Media e Pairs/StatArb usando o universo do dashboard.")
+
+    global_data = get_global_markets_data()
+    if st.button("Atualizar WATCHLIST QUANT", type="primary", use_container_width=True, key="watchlist_quant_refresh"):
+        get_watchlist_quant_cached.clear()
+
+    try:
+        payload = get_watchlist_quant_cached(global_data, "watchlist_quant_v1")
+    except Exception as e:
+        st.error(f"Nao foi possivel gerar o screening quant agora: {e}")
+        return
+
+    st.markdown(
+        f"""
+        <style>
+          .quant-kpis {{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:10px 0 18px;}}
+          .quant-kpi {{background:#0B1220; border:1px solid #1F2937; border-radius:8px; padding:12px;}}
+          .quant-kpi span {{display:block; color:#94A3B8; font-size:.72rem; font-weight:900; text-transform:uppercase;}}
+          .quant-kpi strong {{display:block; color:#F8FAFC; font-size:1.05rem; margin-top:5px;}}
+          .quant-note {{border:1px solid #263244; border-left:4px solid #22D3EE; background:#07111F; border-radius:8px; padding:11px 13px; color:#CBD5E1; margin-bottom:14px;}}
+        </style>
+        <div class="quant-kpis">
+          <div class="quant-kpi"><span>Ativos carregados</span><strong>{payload.get('assets_loaded', 0)}</strong></div>
+          <div class="quant-kpi"><span>Top Momentum</span><strong>{html.escape(str(payload.get('summary', {}).get('top_momentum', '---')))}</strong></div>
+          <div class="quant-kpi"><span>Top Reversao</span><strong>{html.escape(str(payload.get('summary', {}).get('top_reversion', '---')))}</strong></div>
+          <div class="quant-kpi"><span>Top Pair</span><strong>{html.escape(str(payload.get('summary', {}).get('top_pair', '---')))}</strong></div>
+        </div>
+        <div class="quant-note">Modelo local e deterministico. Os sinais sao rankings quantitativos para triagem, nao execucao automatica.</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    def fmt_quant_df(rows: list[dict[str, Any]], cols: list[str], rename: dict[str, str]):
+        if not rows:
+            st.info("Sem sinais suficientes neste bloco agora.")
+            return
+        df = pd.DataFrame(rows)
+        df = df[[col for col in cols if col in df.columns]].rename(columns=rename)
+        st.dataframe(df, hide_index=True, use_container_width=True, height=min(520, 38 + len(df) * 36))
+
+    tab1, tab2, tab3 = st.tabs(["Momentum", "Reversao a Media", "Pairs / StatArb"])
+    with tab1:
+        st.markdown("#### Momentum / Trend Following")
+        fmt_quant_df(
+            payload.get("momentum", []),
+            ["symbol", "block", "direction", "score", "price", "entry", "stop", "target", "ret20", "ret60", "vol20", "setup"],
+            {
+                "symbol": "Ativo", "block": "Classe", "direction": "Direcao", "score": "Score",
+                "price": "Preco", "entry": "Entrada", "stop": "Stop", "target": "Alvo",
+                "ret20": "Ret 20d %", "ret60": "Ret 60d %", "vol20": "Vol 20d %", "setup": "Setup",
+            },
+        )
+    with tab2:
+        st.markdown("#### Mean Reversion / Z-score")
+        fmt_quant_df(
+            payload.get("mean_reversion", []),
+            ["symbol", "block", "direction", "score", "price", "entry", "stop", "target", "z20", "vol20", "setup"],
+            {
+                "symbol": "Ativo", "block": "Classe", "direction": "Direcao", "score": "Score",
+                "price": "Preco", "entry": "Entrada", "stop": "Stop", "target": "Alvo",
+                "z20": "Z 20d", "vol20": "Vol 20d %", "setup": "Setup",
+            },
+        )
+    with tab3:
+        st.markdown("#### Pairs Trading / StatArb")
+        fmt_quant_df(
+            payload.get("pairs", []),
+            ["pair", "block", "long", "short", "corr", "zscore", "score", "setup"],
+            {
+                "pair": "Par", "block": "Classe", "long": "Comprar", "short": "Vender",
+                "corr": "Correlacao", "zscore": "Z Spread", "score": "Score", "setup": "Setup",
+            },
+        )
+
+
 @st.cache_data(ttl=240, show_spinner=False)
 def get_market_moving_events_cached(refresh_nonce: int = 0):
     news_items, _sources, _warnings, _loaded_at = load_bloomberg_news_feed(refresh_nonce)
@@ -6474,7 +6559,7 @@ with st.sidebar:
         st.session_state.pop("auth_loading_until", None)
         _auth_rerun()
     st.markdown("### 🧭 Navegação")
-    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
+    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
     sidebar_clock()
     
     st.markdown("---")
@@ -6499,6 +6584,8 @@ elif page == "Market Moving":
     pagina_market_moving()
 elif page == "WATCHLIST":
     pagina_watchlist()
+elif page == "WATCHLIST QUANT":
+    pagina_watchlist_quant()
 elif page == "📊 Gráficos Avançados":
     pagina_graficos()
 elif page == "⚖️ Painel de Correlação":
