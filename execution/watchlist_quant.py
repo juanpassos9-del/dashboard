@@ -184,6 +184,85 @@ def _mean_reversion_signal(s: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _event_driven_signal(s: dict[str, Any]) -> dict[str, Any] | None:
+    impulse = abs(s["ret20"])
+    if impulse < 4.0 and abs(s["z20"]) < 1.1:
+        return None
+    direction = "compra" if s["ret20"] > 0 and s["price"] >= s["ma20"] else "venda"
+    score = min(100, 48 + impulse * 2.1 + abs(s["z20"]) * 8 + min(s["vol20"], 80) * 0.12)
+    entry = s["price"]
+    risk = max(s["atr14"] * 1.8, entry * 0.025)
+    if direction == "venda":
+        stop = entry + risk
+        target = entry - risk * 1.8
+    else:
+        stop = entry - risk
+        target = entry + risk * 1.8
+    return {
+        **s,
+        "strategy": "Event-driven",
+        "direction": direction,
+        "score": round(score, 1),
+        "entry": round(entry, 4),
+        "stop": round(stop, 4),
+        "target": round(target, 4),
+        "setup": f"impulso 20d {s['ret20']:.2f}% com z-score {s['z20']:.2f}; monitorar continuidade pos-catalisador",
+    }
+
+
+def _volatility_signal(s: dict[str, Any]) -> dict[str, Any] | None:
+    if s["vol20"] <= 0 or s["atr14"] <= 0:
+        return None
+    compression = s["vol20"] < 24 and abs(s["z20"]) < 1.0
+    expansion = s["vol20"] >= 38 and abs(s["z20"]) >= 1.0
+    if not compression and not expansion:
+        return None
+    direction = "breakout" if compression else ("compra volatilidade" if s["z20"] < 0 else "venda volatilidade")
+    score = 58 + (24 - s["vol20"]) * 0.9 if compression else 54 + min(s["vol20"], 90) * 0.38 + abs(s["z20"]) * 6
+    entry = s["price"]
+    stop = entry - s["atr14"] * 1.5 if direction != "venda volatilidade" else entry + s["atr14"] * 1.5
+    target = entry + s["atr14"] * 2.4 if direction != "venda volatilidade" else entry - s["atr14"] * 2.4
+    return {
+        **s,
+        "strategy": "Volatility",
+        "direction": direction,
+        "score": round(max(0, min(100, score)), 1),
+        "entry": round(entry, 4),
+        "stop": round(stop, 4),
+        "target": round(target, 4),
+        "setup": "compressao de volatilidade; aguardar rompimento" if compression else "expansao de volatilidade; operar com stop mais curto",
+    }
+
+
+def _crypto_quant_signal(s: dict[str, Any]) -> dict[str, Any] | None:
+    block = str(s.get("block", "")).lower()
+    sector = str(s.get("sector", "")).lower()
+    ticker = str(s.get("ticker", "")).upper()
+    if not any(token in f"{block} {sector} {ticker}" for token in ["cripto", "crypto", "btc", "eth", "sol", "usdt"]):
+        return None
+    trend_bias = s["ret20"] * 1.4 + s["ret60"] * 0.7
+    direction = "compra" if trend_bias >= 0 else "venda"
+    score = min(100, 52 + abs(trend_bias) * 0.9 + abs(s["z20"]) * 6 + min(s["vol20"], 120) * 0.08)
+    entry = s["price"]
+    risk = max(s["atr14"] * 2.1, entry * 0.035)
+    if direction == "venda":
+        stop = entry + risk
+        target = entry - risk * 2.0
+    else:
+        stop = entry - risk
+        target = entry + risk * 2.0
+    return {
+        **s,
+        "strategy": "Crypto Quant",
+        "direction": direction,
+        "score": round(score, 1),
+        "entry": round(entry, 4),
+        "stop": round(stop, 4),
+        "target": round(target, 4),
+        "setup": f"cripto beta; ret20 {s['ret20']:.2f}% ret60 {s['ret60']:.2f}% vol20 {s['vol20']:.2f}%",
+    }
+
+
 def _pairs_signals(universe: list[dict[str, str]], frames: dict[str, pd.DataFrame], max_pairs: int = 12) -> list[dict[str, Any]]:
     signals: list[dict[str, Any]] = []
     by_ticker = {item["ticker"]: item for item in universe}
@@ -245,15 +324,36 @@ def build_watchlist_quant(global_data: dict | None = None, max_items: int = 12) 
         reverse=True,
     )[:max_items]
     pairs = _pairs_signals(universe, frames, max_pairs=max_items)
+    event_driven = sorted(
+        [signal for signal in (_event_driven_signal(s) for s in snapshots) if signal],
+        key=lambda row: row["score"],
+        reverse=True,
+    )[:max_items]
+    volatility = sorted(
+        [signal for signal in (_volatility_signal(s) for s in snapshots) if signal],
+        key=lambda row: row["score"],
+        reverse=True,
+    )[:max_items]
+    crypto_quant = sorted(
+        [signal for signal in (_crypto_quant_signal(s) for s in snapshots) if signal],
+        key=lambda row: row["score"],
+        reverse=True,
+    )[:max_items]
     return {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "assets_loaded": len(snapshots),
         "momentum": momentum,
         "mean_reversion": mean_reversion,
         "pairs": pairs,
+        "event_driven": event_driven,
+        "volatility": volatility,
+        "crypto_quant": crypto_quant,
         "summary": {
             "top_momentum": momentum[0]["symbol"] if momentum else "---",
             "top_reversion": mean_reversion[0]["symbol"] if mean_reversion else "---",
             "top_pair": pairs[0]["pair"] if pairs else "---",
+            "top_event": event_driven[0]["symbol"] if event_driven else "---",
+            "top_volatility": volatility[0]["symbol"] if volatility else "---",
+            "top_crypto": crypto_quant[0]["symbol"] if crypto_quant else "---",
         },
     }

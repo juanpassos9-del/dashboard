@@ -8,6 +8,7 @@ import json
 import time
 import pandas as pd
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from zoneinfo import ZoneInfo
 from supabase import create_client, Client
 
@@ -4810,7 +4811,7 @@ def pagina_watchlist():
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def get_watchlist_quant_cached(global_data, schema_version="watchlist_quant_v1"):
+def get_watchlist_quant_cached(global_data, schema_version="watchlist_quant_v2"):
     from execution.watchlist_quant import build_watchlist_quant
 
     return build_watchlist_quant(global_data)
@@ -4819,14 +4820,14 @@ def get_watchlist_quant_cached(global_data, schema_version="watchlist_quant_v1")
 def pagina_watchlist_quant():
     """Quant screening using dashboard/watchlist universe."""
     st.title("WATCHLIST QUANT")
-    st.caption("Screening quantitativo com Momentum, Reversao a Media e Pairs/StatArb usando o universo do dashboard.")
+    st.caption("Screening quantitativo com Momentum, Reversao a Media, Pairs/StatArb, Event-driven, Volatility e Crypto Quant.")
 
     global_data = get_global_markets_data()
     if st.button("Atualizar WATCHLIST QUANT", type="primary", use_container_width=True, key="watchlist_quant_refresh"):
         get_watchlist_quant_cached.clear()
 
     try:
-        payload = get_watchlist_quant_cached(global_data, "watchlist_quant_v1")
+        payload = get_watchlist_quant_cached(global_data, "watchlist_quant_v2")
     except Exception as e:
         st.error(f"Nao foi possivel gerar o screening quant agora: {e}")
         return
@@ -4834,17 +4835,20 @@ def pagina_watchlist_quant():
     st.markdown(
         f"""
         <style>
-          .quant-kpis {{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:10px 0 18px;}}
+          .quant-kpis {{display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; margin:10px 0 18px;}}
           .quant-kpi {{background:#0B1220; border:1px solid #1F2937; border-radius:8px; padding:12px;}}
           .quant-kpi span {{display:block; color:#94A3B8; font-size:.72rem; font-weight:900; text-transform:uppercase;}}
           .quant-kpi strong {{display:block; color:#F8FAFC; font-size:1.05rem; margin-top:5px;}}
           .quant-note {{border:1px solid #263244; border-left:4px solid #22D3EE; background:#07111F; border-radius:8px; padding:11px 13px; color:#CBD5E1; margin-bottom:14px;}}
+          @media (max-width: 1100px) {{.quant-kpis {{grid-template-columns:repeat(2,minmax(0,1fr));}}}}
         </style>
         <div class="quant-kpis">
           <div class="quant-kpi"><span>Ativos carregados</span><strong>{payload.get('assets_loaded', 0)}</strong></div>
           <div class="quant-kpi"><span>Top Momentum</span><strong>{html.escape(str(payload.get('summary', {}).get('top_momentum', '---')))}</strong></div>
           <div class="quant-kpi"><span>Top Reversao</span><strong>{html.escape(str(payload.get('summary', {}).get('top_reversion', '---')))}</strong></div>
-          <div class="quant-kpi"><span>Top Pair</span><strong>{html.escape(str(payload.get('summary', {}).get('top_pair', '---')))}</strong></div>
+          <div class="quant-kpi"><span>Top Event</span><strong>{html.escape(str(payload.get('summary', {}).get('top_event', '---')))}</strong></div>
+          <div class="quant-kpi"><span>Top Volatility</span><strong>{html.escape(str(payload.get('summary', {}).get('top_volatility', '---')))}</strong></div>
+          <div class="quant-kpi"><span>Top Crypto</span><strong>{html.escape(str(payload.get('summary', {}).get('top_crypto', '---')))}</strong></div>
         </div>
         <div class="quant-note">Modelo local e deterministico. Os sinais sao rankings quantitativos para triagem, nao execucao automatica.</div>
         """,
@@ -4859,7 +4863,7 @@ def pagina_watchlist_quant():
         df = df[[col for col in cols if col in df.columns]].rename(columns=rename)
         st.dataframe(df, hide_index=True, use_container_width=True, height=min(520, 38 + len(df) * 36))
 
-    tab1, tab2, tab3 = st.tabs(["Momentum", "Reversao a Media", "Pairs / StatArb"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Momentum", "Reversao a Media", "Pairs / StatArb", "Event-driven", "Volatility", "Crypto Quant"])
     with tab1:
         st.markdown("#### Momentum / Trend Following")
         fmt_quant_df(
@@ -4890,6 +4894,39 @@ def pagina_watchlist_quant():
             {
                 "pair": "Par", "block": "Classe", "long": "Comprar", "short": "Vender",
                 "corr": "Correlacao", "zscore": "Z Spread", "score": "Score", "setup": "Setup",
+            },
+        )
+    with tab4:
+        st.markdown("#### Event-driven")
+        fmt_quant_df(
+            payload.get("event_driven", []),
+            ["symbol", "block", "direction", "score", "price", "entry", "stop", "target", "ret20", "z20", "vol20", "setup"],
+            {
+                "symbol": "Ativo", "block": "Classe", "direction": "Direcao", "score": "Score",
+                "price": "Preco", "entry": "Entrada", "stop": "Stop", "target": "Alvo",
+                "ret20": "Impulso 20d %", "z20": "Z 20d", "vol20": "Vol 20d %", "setup": "Setup",
+            },
+        )
+    with tab5:
+        st.markdown("#### Volatility")
+        fmt_quant_df(
+            payload.get("volatility", []),
+            ["symbol", "block", "direction", "score", "price", "entry", "stop", "target", "vol20", "atr14", "z20", "setup"],
+            {
+                "symbol": "Ativo", "block": "Classe", "direction": "Regime", "score": "Score",
+                "price": "Preco", "entry": "Referencia", "stop": "Stop", "target": "Alvo",
+                "vol20": "Vol 20d %", "atr14": "ATR 14", "z20": "Z 20d", "setup": "Setup",
+            },
+        )
+    with tab6:
+        st.markdown("#### Crypto Quant")
+        fmt_quant_df(
+            payload.get("crypto_quant", []),
+            ["symbol", "block", "direction", "score", "price", "entry", "stop", "target", "ret20", "ret60", "vol20", "setup"],
+            {
+                "symbol": "Ativo", "block": "Classe", "direction": "Direcao", "score": "Score",
+                "price": "Preco", "entry": "Entrada", "stop": "Stop", "target": "Alvo",
+                "ret20": "Ret 20d %", "ret60": "Ret 60d %", "vol20": "Vol 20d %", "setup": "Setup",
             },
         )
 
