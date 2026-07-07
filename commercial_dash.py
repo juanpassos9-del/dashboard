@@ -1050,6 +1050,95 @@ def render_high_impact_news_ticker():
     )
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def get_macro_news_hub_cached(schema_version="macro_news_hub_v1"):
+    del schema_version
+    from execution.news_macro_hub import build_macro_news_hub
+
+    return build_macro_news_hub(limit=24)
+
+
+def render_macro_news_hub():
+    try:
+        hub = get_macro_news_hub_cached("macro_news_hub_v1")
+    except Exception as e:
+        st.warning(f"Hub de noticias macro indisponivel agora: {e}")
+        return
+
+    items = hub.get("items") or []
+    if not items:
+        st.info("Hub de noticias macro aguardando manchetes relevantes das fontes prioritarias.")
+        return
+
+    def chip_list(values):
+        return "".join(f"<span class='mnh-chip'>{sanitize_text(str(value))}</span>" for value in values[:4])
+
+    cards = []
+    for item in items[:12]:
+        impact = sanitize_text(str(item.get("impact", "BAIXO")))
+        impact_class = "high" if impact == "ALTO" else ("medium" if impact == "MEDIO" else "low")
+        link = html.escape(str(item.get("link") or "#"))
+        title = sanitize_text(str(item.get("title", "")))
+        source = sanitize_text(str(item.get("source", "")))
+        provider = sanitize_text(str(item.get("provider", "")))
+        published = sanitize_text(str(item.get("published_str", "")))
+        bias = sanitize_text(str(item.get("bias", "Neutro")))
+        score = sanitize_text(str(item.get("score", "")))
+        themes = chip_list(item.get("themes") or [])
+        assets = chip_list(item.get("assets") or [])
+        cards.append(f"""
+            <a class="mnh-card {impact_class}" href="{link}" target="_blank" rel="noopener noreferrer">
+              <div class="mnh-top">
+                <span class="mnh-impact">{impact}</span>
+                <span class="mnh-source">{source} · {provider} · {published}</span>
+              </div>
+              <div class="mnh-title">{title}</div>
+              <div class="mnh-row"><b>Vies:</b> {bias} <b>Score:</b> {score}</div>
+              <div class="mnh-tags">{themes}{assets}</div>
+            </a>
+        """)
+
+    counts = hub.get("counts") or {}
+    style = """
+    <style>
+      .mnh-wrap{border:1px solid #1F2937;background:#070B12;border-radius:9px;padding:14px;margin:14px 0 18px;}
+      .mnh-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:11px;}
+      .mnh-head h3{margin:0;color:#E5E7EB;font-size:1.05rem;}
+      .mnh-meta{color:#94A3B8;font-size:.75rem;font-weight:800;}
+      .mnh-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;}
+      .mnh-card{display:block;text-decoration:none;background:#0B1220;border:1px solid #263244;border-left:5px solid #64748B;border-radius:7px;padding:10px;color:#E5E7EB;min-height:132px;}
+      .mnh-card.high{border-left-color:#FF3333;background:#1A080B;}
+      .mnh-card.medium{border-left-color:#FF9800;}
+      .mnh-card.low{border-left-color:#38BDF8;}
+      .mnh-top{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:7px;}
+      .mnh-impact{font-size:.68rem;font-weight:950;color:#FFF;background:#263244;border-radius:999px;padding:3px 7px;}
+      .mnh-card.high .mnh-impact{background:#B91C1C;}
+      .mnh-card.medium .mnh-impact{background:#A16207;}
+      .mnh-source{color:#94A3B8;font-size:.68rem;font-weight:800;text-align:right;}
+      .mnh-title{font-size:.88rem;font-weight:900;line-height:1.25;color:#F8FAFC;margin-bottom:8px;}
+      .mnh-row{font-size:.72rem;color:#CBD5E1;margin-bottom:7px;}
+      .mnh-row b{color:#94A3B8;}
+      .mnh-tags{display:flex;gap:5px;flex-wrap:wrap;}
+      .mnh-chip{border:1px solid #334155;background:#111827;color:#BFDBFE;border-radius:999px;padding:3px 6px;font-size:.66rem;font-weight:850;}
+      @media(max-width:1200px){.mnh-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+      @media(max-width:760px){.mnh-grid{grid-template-columns:1fr;}}
+    </style>
+    """
+    markup = f"""
+    <div class="mnh-wrap">
+      <div class="mnh-head">
+        <div>
+          <h3>Hub Macro de Noticias</h3>
+          <div class="mnh-meta">Fontes prioritarias abertas · atualizado {sanitize_text(str(hub.get('updated_at', '---')))}{' · cache' if hub.get('stale') else ''}</div>
+        </div>
+        <div class="mnh-meta">ALTO {counts.get('alto', 0)} · MEDIO {counts.get('medio', 0)} · BAIXO {counts.get('baixo', 0)}</div>
+      </div>
+      <div class="mnh-grid">{''.join(cards)}</div>
+    </div>
+    """
+    st.markdown(style + markup, unsafe_allow_html=True)
+
+
 @st.fragment(run_every=30)
 def render_bloomberg_news_feed_fragment():
     """Atualiza somente o feed de noticias, sem redesenhar o terminal inteiro."""
@@ -1892,6 +1981,8 @@ def secao_market_report_fragment():
     ai_sync_warning = st.session_state.pop("ai_macro_sync_warning", "")
     if ai_sync_warning:
         st.warning(ai_sync_warning)
+
+    render_macro_news_hub()
 
     ai_card_html = ""
     ai_data = fetch_app_state_cached("ai_insight")
