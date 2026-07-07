@@ -1136,7 +1136,7 @@ def render_macro_news_hub():
       <div class="mnh-grid">{''.join(cards)}</div>
     </div>
     """
-    st.markdown(style + markup, unsafe_allow_html=True)
+    components.html(style + markup, height=620, scrolling=True)
 
 
 @st.fragment(run_every=30)
