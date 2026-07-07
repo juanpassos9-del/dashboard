@@ -44,21 +44,63 @@ where id = (
 
 alter table public.profiles enable row level security;
 
+create or replace function public.is_profile_admin()
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.profiles p
+    where p.user_id = auth.uid()
+      and p.role = 'admin'
+      and p.is_active = true
+  );
+$$;
+
+revoke all on function public.is_profile_admin() from public;
+grant execute on function public.is_profile_admin() to authenticated;
+
+drop policy if exists "profiles_select_own" on public.profiles;
 create policy "profiles_select_own"
 on public.profiles
 for select
 to authenticated
 using (auth.uid() = user_id);
 
+drop policy if exists "profiles_select_admin" on public.profiles;
+create policy "profiles_select_admin"
+on public.profiles
+for select
+to authenticated
+using (public.is_profile_admin());
+
+drop policy if exists "profiles_insert_own" on public.profiles;
 create policy "profiles_insert_own"
 on public.profiles
 for insert
 to authenticated
-with check (auth.uid() = user_id);
+with check (
+  auth.uid() = user_id
+  and role = 'member'
+);
 
+drop policy if exists "profiles_update_own" on public.profiles;
 create policy "profiles_update_own"
 on public.profiles
 for update
 to authenticated
 using (auth.uid() = user_id)
-with check (auth.uid() = user_id);
+with check (
+  auth.uid() = user_id
+  and role = 'member'
+);
+
+drop policy if exists "profiles_update_admin" on public.profiles;
+create policy "profiles_update_admin"
+on public.profiles
+for update
+to authenticated
+using (public.is_profile_admin())
+with check (public.is_profile_admin());

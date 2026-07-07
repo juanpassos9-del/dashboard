@@ -46,6 +46,20 @@ supabase = init_supabase()
 
 MAX_AUTH_USERS = 1000
 AUTH_REQUIRED = False
+APP_STATE_ALLOWED_KEYS = {
+    "ai_insight",
+    "ai_insight_history",
+    "boletim_focus",
+    "calendario_economico",
+    "dados_mercado",
+    "financial_juice_news",
+    "fluxo_estrangeiro_b3",
+    "manual_trades",
+    "market_report",
+    "market_report_daily",
+    "mercados_globais",
+    "risk_manual_trades",
+}
 
 
 def _auth_rerun():
@@ -676,6 +690,9 @@ def stop_post_auth_loading(placeholder):
 
 
 def fetch_app_state(key: str):
+    if key not in APP_STATE_ALLOWED_KEYS:
+        print(f"[SECURITY] app_state read blocked for unexpected key: {key}")
+        return None
     """Busca dados no Supabase com tratamento de erro e redundância."""
     if not supabase: return None
     try:
@@ -696,6 +713,8 @@ def has_supabase_service_role() -> bool:
 
 def sync_app_state_value(key: str, value) -> tuple[bool, str]:
     """Sincroniza app_state sem derrubar a UI quando o Supabase bloquear RLS."""
+    if key not in APP_STATE_ALLOWED_KEYS:
+        return False, f"Chave app_state nao permitida para sincronizacao: {key}"
     if not supabase:
         return False, "Supabase indisponivel."
     try:
@@ -1391,6 +1410,9 @@ def render_bloomberg_news_feed_fragment():
     """, unsafe_allow_html=True)
 
 def fetch_app_state_with_time(key: str):
+    if key not in APP_STATE_ALLOWED_KEYS:
+        print(f"[SECURITY] app_state timed read blocked for unexpected key: {key}")
+        return None, "Bloqueado", None
     """Busca dados no Supabase e retorna uma tupla (valor, data_atualizacao_formatada_local, dt_utc)."""
     if not supabase: return None, "Sem conexão", None
     try:
@@ -1414,15 +1436,8 @@ def fetch_app_state_with_time(key: str):
     return None, "Erro", None
 
 def save_credentials(creds):
-    if not supabase: return
-    try:
-        supabase.table("app_state").upsert({
-            "key": "user_credentials",
-            "value": creds,
-            "updated_at": "now()"
-        }).execute()
-    except Exception as e:
-        print(f"[ERROR] Save Creds: {e}")
+    print("[SECURITY] save_credentials bloqueado: nao grave credenciais em app_state.")
+    return None
 
 # ── Persistência de Trades Manuais ─────────────────────────────────────────
 _TRADES_KEY  = "risk_manual_trades"
@@ -1465,14 +1480,9 @@ def save_manual_trades(trades: list):
         print(f"[WARN] save_manual_trades local: {e}")
     # Salva Supabase
     if supabase:
-        try:
-            supabase.table("app_state").upsert({
-                "key": _TRADES_KEY,
-                "value": trades,
-                "updated_at": "now()"
-            }).execute()
-        except Exception as e:
-            print(f"[WARN] save_manual_trades supabase: {e}")
+        ok, warning = sync_app_state_value(_TRADES_KEY, trades)
+        if not ok and warning:
+            print(f"[WARN] save_manual_trades supabase: {warning}")
 
 def sanitize_text(text):
     """Proteção básica contra injeção de scripts."""
@@ -5739,11 +5749,10 @@ def pagina_painel_controle():
                         if os.path.exists(p):
                             with open(p, "r") as f:
                                 data = json.load(f)
-                                supabase.table("app_state").upsert({
-                                    "key": key,
-                                    "value": data,
-                                    "updated_at": "now()"
-                                }).execute()
+                                ok, warning = sync_app_state_value(key, data)
+                                if not ok:
+                                    st.warning(warning or f"Nao foi possivel sincronizar {name}.")
+                                    return
                             break
                             
                 elif key == "ai_insight":
@@ -5751,11 +5760,10 @@ def pagina_painel_controle():
                         if os.path.exists(p):
                             with open(p, "r", encoding="utf-8") as f:
                                 new_insight = json.load(f)
-                                supabase.table("app_state").upsert({
-                                    "key": key,
-                                    "value": new_insight,
-                                    "updated_at": "now()"
-                                }).execute()
+                                ok, warning = sync_app_state_value(key, new_insight)
+                                if not ok:
+                                    st.warning(warning or f"Nao foi possivel sincronizar {name}.")
+                                    return
                                 
                                 try:
                                     res = supabase.table("app_state").select("value").eq("key", "ai_insight_history").execute()
@@ -5774,11 +5782,9 @@ def pagina_painel_controle():
                                         "id": int(time.time())
                                     })
                                     history = history[-5:]
-                                    supabase.table("app_state").upsert({
-                                        "key": "ai_insight_history",
-                                        "value": history,
-                                        "updated_at": "now()"
-                                    }).execute()
+                                    ok, warning = sync_app_state_value("ai_insight_history", history)
+                                    if not ok and warning:
+                                        print(f"[WARN] ai_insight_history sync: {warning}")
                                 except Exception as he:
                                     print(f"Erro histórico: {he}")
                             break
@@ -5787,44 +5793,40 @@ def pagina_painel_controle():
                     for p in paths_map[key]:
                         if os.path.exists(p):
                             with open(p, "r", encoding="utf-8") as f:
-                                supabase.table("app_state").upsert({
-                                    "key": key,
-                                    "value": json.load(f),
-                                    "updated_at": "now()"
-                                }).execute()
+                                ok, warning = sync_app_state_value(key, json.load(f))
+                                if not ok:
+                                    st.warning(warning or f"Nao foi possivel sincronizar {name}.")
+                                    return
                             break
                             
                 elif key == "calendario_economico":
                     for p in paths_map[key]:
                         if os.path.exists(p):
                             with open(p, "r", encoding="utf-8") as f:
-                                supabase.table("app_state").upsert({
-                                    "key": key,
-                                    "value": json.load(f),
-                                    "updated_at": "now()"
-                                }).execute()
+                                ok, warning = sync_app_state_value(key, json.load(f))
+                                if not ok:
+                                    st.warning(warning or f"Nao foi possivel sincronizar {name}.")
+                                    return
                             break
                             
                 elif key == "fluxo_estrangeiro_b3":
                     for p in paths_map[key]:
                         if os.path.exists(p):
                             with open(p, "r", encoding="utf-8") as f:
-                                supabase.table("app_state").upsert({
-                                    "key": key,
-                                    "value": json.load(f),
-                                    "updated_at": "now()"
-                                }).execute()
+                                ok, warning = sync_app_state_value(key, json.load(f))
+                                if not ok:
+                                    st.warning(warning or f"Nao foi possivel sincronizar {name}.")
+                                    return
                             break
                             
                 elif key == "boletim_focus":
                     for p in paths_map[key]:
                         if os.path.exists(p):
                             with open(p, "r", encoding="utf-8") as f:
-                                supabase.table("app_state").upsert({
-                                    "key": key,
-                                    "value": json.load(f),
-                                    "updated_at": "now()"
-                                }).execute()
+                                ok, warning = sync_app_state_value(key, json.load(f))
+                                if not ok:
+                                    st.warning(warning or f"Nao foi possivel sincronizar {name}.")
+                                    return
                             break
                             
                 st.success(success_msg)
@@ -5856,11 +5858,10 @@ def pagina_painel_controle():
                         if os.path.exists(p):
                             with open(p, "r", encoding="utf-8") as f:
                                 new_insight = json.load(f)
-                                supabase.table("app_state").upsert({
-                                    "key": "ai_insight",
-                                    "value": new_insight,
-                                    "updated_at": "now()"
-                                }).execute()
+                                ok, warning = sync_app_state_value("ai_insight", new_insight)
+                                if not ok:
+                                    st.warning(warning or "Nao foi possivel sincronizar a analise da IA.")
+                                    return
                                 
                                 try:
                                     res = supabase.table("app_state").select("value").eq("key", "ai_insight_history").execute()
@@ -5879,11 +5880,9 @@ def pagina_painel_controle():
                                         "id": int(time.time())
                                     })
                                     history = history[-5:]
-                                    supabase.table("app_state").upsert({
-                                        "key": "ai_insight_history",
-                                        "value": history,
-                                        "updated_at": "now()"
-                                    }).execute()
+                                    ok, warning = sync_app_state_value("ai_insight_history", history)
+                                    if not ok and warning:
+                                        print(f"[WARN] ai_insight_history sync: {warning}")
                                 except Exception as he:
                                     print(f"Erro histórico: {he}")
                             break
@@ -5898,21 +5897,19 @@ def pagina_painel_controle():
                     for p in paths:
                         if os.path.exists(p):
                             with open(p, "r", encoding="utf-8") as f:
-                                supabase.table("app_state").upsert({
-                                    "key": "market_report",
-                                    "value": json.load(f),
-                                    "updated_at": "now()"
-                                }).execute()
+                                ok, warning = sync_app_state_value("market_report", json.load(f))
+                                if not ok:
+                                    st.warning(warning or "Nao foi possivel sincronizar Market Report.")
+                                    return
                             break
                     daily_paths = ["market_report_daily.json", "execution/market_report_daily.json"]
                     for p in daily_paths:
                         if os.path.exists(p):
                             with open(p, "r", encoding="utf-8") as f:
-                                supabase.table("app_state").upsert({
-                                    "key": "market_report_daily",
-                                    "value": json.load(f),
-                                    "updated_at": "now()"
-                                }).execute()
+                                ok, warning = sync_app_state_value("market_report_daily", json.load(f))
+                                if not ok:
+                                    st.warning(warning or "Nao foi possivel sincronizar historico diario do Market Report.")
+                                    return
                             break
                     st.success("✅ Market Report atualizado!")
                 except Exception as e:
