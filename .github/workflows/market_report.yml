@@ -32,7 +32,7 @@ jobs:
     - name: Generate and Sync Market Report
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
         GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         MARKET_REPORT_FORCE: ${{ github.event.inputs.force }}

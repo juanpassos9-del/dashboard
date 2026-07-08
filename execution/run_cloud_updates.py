@@ -7,27 +7,22 @@ from dotenv import load_dotenv
 # Adiciona o diretório deste script ao path para importação limpa
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from supabase import create_client
+from app_state_sync import get_service_client, sync_app_state_value
 
 # Carrega chaves
 load_dotenv()
 supabase_url = os.getenv("SUPABASE_URL")
-supabase_key = os.getenv("SUPABASE_SERVICE_ROLE") or os.getenv("SUPABASE_KEY")
+supabase_key = os.getenv("SUPABASE_SERVICE_ROLE")
 
 if not supabase_url or not supabase_key:
     print("[!] Chaves do Supabase não encontradas no ambiente.")
     exit(1)
 
-supabase = create_client(supabase_url, supabase_key)
+supabase = get_service_client()
 
 def sync_to_supabase(key, value):
     try:
-        data = {
-            "key": key,
-            "value": value,
-            "updated_at": "now()"
-        }
-        supabase.table("app_state").upsert(data).execute()
+        sync_app_state_value(key, value, supabase)
         print(f"[*] Sincronizado com sucesso: {key}")
     except Exception as e:
         print(f"[!] Erro ao sincronizar {key}: {e}")

@@ -3,7 +3,7 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from supabase import create_client
+from app_state_sync import get_service_client, sync_app_state_value
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -13,17 +13,8 @@ load_dotenv()
 
 
 def sync_to_supabase(key, value):
-    supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE") or os.getenv("SUPABASE_KEY")
-    if not supabase_url or not supabase_key:
-        raise RuntimeError("SUPABASE_URL/SUPABASE_KEY ausentes.")
-
-    supabase = create_client(supabase_url, supabase_key)
-    supabase.table("app_state").upsert({
-        "key": key,
-        "value": value,
-        "updated_at": "now()",
-    }).execute()
+    supabase = get_service_client()
+    sync_app_state_value(key, value, supabase)
     print(f"[*] Sincronizado: {key}")
 
 
