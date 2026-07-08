@@ -16,8 +16,11 @@ O Supabase será responsável por:
 
 ```env
 SUPABASE_URL=sua_url_aqui
-SUPABASE_KEY=sua_chave_aqui
+SUPABASE_KEY=sua_anon_key_aqui
+SUPABASE_SERVICE_ROLE=sua_service_role_key_aqui
 ```
+
+Use `SUPABASE_KEY` apenas como chave publica/anon para leitura e compatibilidade. Rotinas server-side que gravam em `app_state` devem usar `SUPABASE_SERVICE_ROLE` para respeitar o modelo de RLS seguro.
 
 ## 2. Estrutura do Banco de Dados
 

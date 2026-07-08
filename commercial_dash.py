@@ -5950,7 +5950,7 @@ def pagina_painel_controle():
         2. Vá em **Settings** (Configurações) > **Secrets and variables** > **Actions**.
         3. Clique em **New repository secret** (Novo segredo) e adicione as seguintes chaves:
            - Nome: `SUPABASE_URL` | Valor: *Sua URL do Supabase*
-           - Nome: `SUPABASE_KEY` | Valor: *Sua service_role key do Supabase*
+           - Nome: `SUPABASE_SERVICE_ROLE` | Valor: *Sua service_role key do Supabase*
            - Nome: `GEMINI_API_KEY` | Valor: *Sua API Key do Google Gemini*
         
         Pronto! Com isso cadastrado, o GitHub atualizará o seu site automaticamente 24 horas por dia, 7 dias por semana, sem que você precise deixar nenhum código rodando no seu computador!
