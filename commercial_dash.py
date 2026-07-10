@@ -62,6 +62,14 @@ APP_STATE_ALLOWED_KEYS = {
 }
 
 
+def safe_external_url(value: Any, fallback: str = "#") -> str:
+    """Return an escaped http(s) URL for HTML anchors."""
+    raw = str(value or "").strip()
+    if raw.startswith(("http://", "https://")):
+        return html.escape(raw, quote=True)
+    return html.escape(fallback, quote=True)
+
+
 def _auth_rerun():
     try:
         st.rerun()
@@ -1096,7 +1104,7 @@ def render_macro_news_hub():
     for item in items[:12]:
         impact = sanitize_text(str(item.get("impact", "BAIXO")))
         impact_class = "high" if impact == "ALTO" else ("medium" if impact == "MEDIO" else "low")
-        link = html.escape(str(item.get("link") or "#"))
+        link = safe_external_url(item.get("link"))
         title = sanitize_text(str(item.get("title", "")))
         source = sanitize_text(str(item.get("source", "")))
         provider = sanitize_text(str(item.get("provider", "")))
@@ -1354,7 +1362,7 @@ def render_bloomberg_news_feed_fragment():
         summary = esc(summary_raw)
         published = esc(item.get("published_str", "00:00"))
         source = esc(item.get("source", "Financial Juice"))
-        link = esc(item.get("link", "#"))
+        link = safe_external_url(item.get("link"))
         icon_text = esc("FJ" if source == "Financial Juice" else source[:2].upper())
         tags_html = "".join(f'<span class="bb-news-tag">{esc(tag)}</span>' for tag in infer_tags(item))
         impact_badge = (
@@ -1486,9 +1494,12 @@ def save_manual_trades(trades: list):
 
 def sanitize_text(text):
     """Proteção básica contra injeção de scripts."""
-    if text is None: return ""
-    if not isinstance(text, str): return str(text)
-    return text.replace("<script", "&lt;script").replace("javascript:", "")
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        text = str(text)
+    text = text.replace("javascript:", "")
+    return html.escape(text, quote=False)
 
 def clean_val(val):
     """Limpa strings com formatações variadas de milhar/decimal para float robusto."""
@@ -2079,7 +2090,7 @@ def secao_market_report_fragment():
                     <div style="color:#94A3B8; font-size:0.72rem; font-weight:900; text-transform:uppercase; letter-spacing:.04em;">Ultimo report</div>
                     <h3 style="margin:3px 0 0; color:#FF9800; font-family:'Inter', sans-serif;">{sanitize_text(latest.get('slot_label', 'Market Report')).upper()}</h3>
                 </div>
-                <span style="color:#777; font-size:0.75rem; font-family:'Roboto Mono', monospace;">{latest.get('updated_at', '---')} | {sanitize_text(latest.get('provider', 'IA'))}</span>
+                <span style="color:#777; font-size:0.75rem; font-family:'Roboto Mono', monospace;">{sanitize_text(latest.get('updated_at', '---'))} | {sanitize_text(latest.get('provider', 'IA'))}</span>
             </div>
         </div>
     """
@@ -3426,7 +3437,7 @@ def pagina_terminal_bloomberg():
             summary = esc(summary_raw)
             published = esc(item.get("published_str", "00:00"))
             source = esc(item.get("source", "Financial Juice"))
-            link = esc(item.get("link", "#"))
+            link = safe_external_url(item.get("link"))
             icon_text = esc("FJ" if source == "Financial Juice" else source[:2].upper())
             tags_html = "".join(f'<span class="bb-news-tag">{esc(tag)}</span>' for tag in infer_tags(item))
             impact_badge = (
@@ -4710,6 +4721,7 @@ def pagina_watchlist():
             color = score_color(score)
             action_text = str(item.get("acao", "---"))
             direction = str(item.get("direcao", "compra")).lower()
+            direction = "venda" if direction == "venda" else "compra"
             direction_label = "SHORT" if direction == "venda" else "LONG"
             selected = action_text in {"comprar", "vender"} or float(score or 0) >= 72
             card_class = "wl-card selected short" if selected and direction == "venda" else "wl-card selected" if selected else "wl-card"
@@ -5747,7 +5759,7 @@ def pagina_painel_controle():
                 if key == "mercados_globais":
                     for p in paths_map[key]:
                         if os.path.exists(p):
-                            with open(p, "r") as f:
+                            with open(p, "r", encoding="utf-8") as f:
                                 data = json.load(f)
                                 ok, warning = sync_app_state_value(key, data)
                                 if not ok:
@@ -6533,7 +6545,7 @@ def sidebar_news():
         title = esc(title_raw)
         published = esc(item.get("published_str", "--:--"))
         source = esc(item.get("source", "Financial Juice"))
-        link = esc(item.get("link", "#"))
+        link = safe_external_url(item.get("link"))
         impact_label, impact_color = compact_impact(item)
         st.markdown(
             f'''
