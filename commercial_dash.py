@@ -5362,10 +5362,14 @@ def pagina_crypto_terminal():
             )
     with c_right:
         st.markdown("#### Saude das fontes cripto")
-        health_rows = [
-            item for item in get_source_health()
-            if str(item.get("name", "")).lower().startswith("crypto")
-        ]
+        raw_health = get_source_health()
+        health_iter = raw_health.values() if isinstance(raw_health, dict) else raw_health
+        health_rows = []
+        for item in health_iter or []:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("name", "")).lower().startswith("crypto"):
+                health_rows.append(item)
         if health_rows:
             st.dataframe(pd.DataFrame(health_rows), hide_index=True, use_container_width=True, height=260)
         else:
