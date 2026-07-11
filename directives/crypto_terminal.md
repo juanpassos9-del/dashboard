@@ -47,6 +47,8 @@ Adicionar ao dashboard atual uma pagina `Crypto Terminal` com leitura operaciona
 ## Fase 4 Entregavel
 - Provider `execution/crypto_bgeometrics.py` para snapshot on-chain do Bitcoin via BGeometrics.
 - Card `Bitcoin On-chain` no Crypto Terminal com MVRV, MVRV Z-Score, data da leitura e zona de ciclo.
+- Grafico historico do MVRV Z-Score, com linhas de referencia 0, 2, 4 e 7 para leitura de acumulacao/aquecimento/euforia.
+- O historico tenta primeiro a API BGeometrics e, se houver limite/erro, usa o grafico publico da BGeometrics como fallback cacheado.
 - Motor de regime usa MVRV Z-Score como sinal de ciclo:
   - abaixo de 0: acumulacao;
   - 0 a 2: saudavel;

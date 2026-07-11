@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import re
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import requests
@@ -16,8 +18,11 @@ except ModuleNotFoundError:
     from source_health import mark_source
 
 CACHE_NAME = "crypto_bgeometrics.json"
+HISTORY_CACHE_NAME = "crypto_bgeometrics_mvrv_zscore_history.json"
 SOURCE = "BGeometrics"
 SNAPSHOT_URL = "https://bitcoin-data.com/api/v1/snapshot"
+MVRV_ZSCORE_URL = "https://bitcoin-data.com/api/v1/mvrv-zscore"
+PUBLIC_MVRV_CHART_URL = "https://charts.bgeometrics.com/graphics/mvrv_400.html"
 
 
 def _read_env_key(name: str) -> str:
@@ -67,6 +72,70 @@ def _normalize_snapshot(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_mvrv_history(raw: Any) -> list[dict[str, Any]]:
+    rows = raw if isinstance(raw, list) else []
+    points: list[dict[str, Any]] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        value = safe_float(item.get("mvrvZscore"))
+        unix_ts = int(safe_float(item.get("unixTs")))
+        date_value = item.get("d")
+        if not value and value != 0:
+            continue
+        if not unix_ts and date_value:
+            try:
+                unix_ts = int(datetime.fromisoformat(str(date_value)).replace(tzinfo=timezone.utc).timestamp())
+            except Exception:
+                unix_ts = 0
+        if not unix_ts:
+            continue
+        points.append({
+            "time": unix_ts,
+            "date": date_value,
+            "value": round(value, 4),
+        })
+    points.sort(key=lambda row: int(row.get("time") or 0))
+    return points
+
+
+def _normalize_highcharts_pairs(raw: Any) -> list[dict[str, Any]]:
+    rows = raw if isinstance(raw, list) else []
+    points: list[dict[str, Any]] = []
+    for item in rows:
+        if not isinstance(item, list) or len(item) < 2:
+            continue
+        value = safe_float(item[1])
+        millis = int(safe_float(item[0]))
+        if not millis:
+            continue
+        points.append({
+            "time": int(millis / 1000),
+            "date": datetime.fromtimestamp(millis / 1000, tz=timezone.utc).date().isoformat(),
+            "value": round(value, 4),
+        })
+    points.sort(key=lambda row: int(row.get("time") or 0))
+    return points
+
+
+def _fetch_public_mvrv_chart_history(days: int) -> tuple[list[dict[str, Any]], int]:
+    started = time.perf_counter()
+    response = requests.get(
+        PUBLIC_MVRV_CHART_URL,
+        timeout=20,
+        headers={"User-Agent": "TTS-Crypto-Terminal/1.0"},
+    )
+    response.raise_for_status()
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    match = re.search(r"const\s+data_mvrv_zscore\s*=\s*(\[.*?\]);", response.text, re.S)
+    if not match:
+        return [], latency_ms
+    import json
+
+    points = _normalize_highcharts_pairs(json.loads(match.group(1)))
+    return points[-int(days):], latency_ms
+
+
 def fetch_bgeometrics_snapshot(max_age_seconds: int = 21600, force_refresh: bool = False) -> dict[str, Any]:
     """Fetch latest Bitcoin on-chain snapshot, using long cache to respect free-tier limits."""
     if not force_refresh:
@@ -113,6 +182,106 @@ def fetch_bgeometrics_snapshot(max_age_seconds: int = 21600, force_refresh: bool
         payload = stale_payload(CACHE_NAME, SOURCE, warning)
         mark_source("Crypto BGeometrics", payload.get("status", "error"), rows=0, source=SOURCE, message=warning)
         return payload
+
+
+def fetch_bgeometrics_mvrv_zscore_history(
+    days: int = 730,
+    max_age_seconds: int = 86400,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    """Fetch MVRV Z-Score history for cycle charting."""
+    if not force_refresh:
+        cached = load_cache(HISTORY_CACHE_NAME, max_age_seconds=max_age_seconds)
+        if cached:
+            rows = len((cached.get("data") or {}).get("points") or [])
+            mark_source("Crypto BGeometrics MVRV", "ok", rows=rows, source=SOURCE, message="Historico MVRV em cache.")
+            return cached
+
+    api_key = _read_env_key("BGEOMETRICS_API_KEY")
+    if not api_key:
+        try:
+            points, latency_ms = _fetch_public_mvrv_chart_history(days)
+            payload = {
+                "source": f"{SOURCE} Public Chart",
+                "status": "ok" if points else "empty",
+                "updated_at": utc_now_iso(),
+                "updated_ts": time.time(),
+                "latency_ms": latency_ms,
+                "data": {
+                    "metric": "MVRV Z-Score",
+                    "points": points,
+                    "latest": points[-1] if points else {},
+                    "startday": points[0].get("date") if points else None,
+                },
+                "warnings": ["Historico carregado pelo grafico publico da BGeometrics."],
+            }
+            save_cache(HISTORY_CACHE_NAME, payload)
+            mark_source("Crypto BGeometrics MVRV", "ok" if points else "stale", rows=len(points), source=SOURCE, message="Historico publico MVRV carregado.")
+            return payload
+        except Exception as exc:
+            payload = stale_payload(HISTORY_CACHE_NAME, SOURCE, f"BGEOMETRICS_API_KEY nao configurada e fallback publico falhou: {exc}")
+            payload["status"] = "disabled" if not payload.get("data") else payload.get("status", "stale")
+            mark_source("Crypto BGeometrics MVRV", payload["status"], rows=0, source=SOURCE, message="Chave ausente.")
+            return payload
+
+    start_day = (datetime.now(timezone.utc) - timedelta(days=max(30, int(days)))).date().isoformat()
+    started = time.perf_counter()
+    try:
+        response = requests.get(
+            MVRV_ZSCORE_URL,
+            params={"startday": start_day, "size": int(days) + 10},
+            timeout=20,
+            headers={
+                "User-Agent": "TTS-Crypto-Terminal/1.0",
+                "X-API-KEY": api_key,
+            },
+        )
+        response.raise_for_status()
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        points = _normalize_mvrv_history(response.json())[-int(days):]
+        latest = points[-1] if points else {}
+        payload = {
+            "source": SOURCE,
+            "status": "ok" if points else "empty",
+            "updated_at": utc_now_iso(),
+            "updated_ts": time.time(),
+            "latency_ms": latency_ms,
+            "data": {
+                "metric": "MVRV Z-Score",
+                "points": points,
+                "latest": latest,
+                "startday": start_day,
+            },
+            "warnings": [] if points else ["Historico MVRV vazio."],
+        }
+        save_cache(HISTORY_CACHE_NAME, payload)
+        mark_source("Crypto BGeometrics MVRV", "ok" if points else "stale", rows=len(points), source=SOURCE, message=f"Historico MVRV carregado em {latency_ms}ms.")
+        return payload
+    except Exception as exc:
+        try:
+            points, latency_ms = _fetch_public_mvrv_chart_history(days)
+            payload = {
+                "source": f"{SOURCE} Public Chart",
+                "status": "ok" if points else "empty",
+                "updated_at": utc_now_iso(),
+                "updated_ts": time.time(),
+                "latency_ms": latency_ms,
+                "data": {
+                    "metric": "MVRV Z-Score",
+                    "points": points,
+                    "latest": points[-1] if points else {},
+                    "startday": points[0].get("date") if points else None,
+                },
+                "warnings": [f"API historica BGeometrics indisponivel; usando grafico publico. Detalhe: {exc}"],
+            }
+            save_cache(HISTORY_CACHE_NAME, payload)
+            mark_source("Crypto BGeometrics MVRV", "ok" if points else "stale", rows=len(points), source=SOURCE, message="Fallback publico MVRV carregado.")
+            return payload
+        except Exception as fallback_exc:
+            warning = f"Falha historico MVRV BGeometrics: {exc}; fallback publico: {fallback_exc}"
+            payload = stale_payload(HISTORY_CACHE_NAME, SOURCE, warning)
+            mark_source("Crypto BGeometrics MVRV", payload.get("status", "error"), rows=0, source=SOURCE, message=warning)
+            return payload
 
 
 if __name__ == "__main__":

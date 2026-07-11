@@ -5047,7 +5047,7 @@ def pagina_watchlist_quant():
 @st.cache_data(ttl=60, show_spinner=False)
 def load_crypto_terminal_payload(refresh_key: int = 0):
     """Load public crypto sources and deterministic regime snapshot."""
-    from execution.crypto_bgeometrics import fetch_bgeometrics_snapshot
+    from execution.crypto_bgeometrics import fetch_bgeometrics_mvrv_zscore_history, fetch_bgeometrics_snapshot
     from execution.crypto_binance import fetch_binance_crypto_snapshot
     from execution.crypto_coingecko import fetch_coingecko_crypto_snapshot
     from execution.crypto_defillama import fetch_defillama_crypto_snapshot
@@ -5060,6 +5060,7 @@ def load_crypto_terminal_payload(refresh_key: int = 0):
     fear_greed = fetch_fear_greed_snapshot()
     defillama = fetch_defillama_crypto_snapshot()
     bgeometrics = fetch_bgeometrics_snapshot()
+    bgeometrics_mvrv_history = fetch_bgeometrics_mvrv_zscore_history()
     regime = calculate_crypto_regime(binance, coingecko, fear_greed, defillama, bgeometrics)
     operational = build_crypto_operational_dashboard(binance, regime, coingecko)
     return {
@@ -5068,6 +5069,7 @@ def load_crypto_terminal_payload(refresh_key: int = 0):
         "fear_greed": fear_greed,
         "defillama": defillama,
         "bgeometrics": bgeometrics,
+        "bgeometrics_mvrv_history": bgeometrics_mvrv_history,
         "regime": regime,
         "operational": operational,
     }
@@ -5133,6 +5135,67 @@ def _crypto_mini_chart_html(symbol: str, asset: dict[str, Any], uid: str) -> str
     """
 
 
+def _crypto_mvrv_chart_html(points: list[dict[str, Any]], uid: str = "mvrv-zscore") -> str:
+    chart_points = [
+        {
+            "time": int(row.get("time") or 0),
+            "value": float(row.get("value") or 0),
+        }
+        for row in points
+        if row.get("time") and row.get("value") is not None
+    ][-730:]
+    if not chart_points:
+        return "<div class='crypto-empty'>Sem historico MVRV Z-Score disponivel agora.</div>"
+    payload = json.dumps({"points": chart_points}, ensure_ascii=False)
+    latest = chart_points[-1]["value"]
+    return f"""
+    <div class="crypto-mvrv-card">
+      <div class="crypto-mvrv-head">
+        <div><span class="crypto-label">Historico MVRV Z-Score</span><b>{latest:.2f}</b></div>
+        <div class="crypto-mvrv-legend">
+          <span class="green">0-2 saudavel</span>
+          <span class="yellow">2-4 aquecendo</span>
+          <span class="red">4+ risco</span>
+        </div>
+      </div>
+      <div id="crypto-mvrv-{uid}" class="crypto-mvrv-chart"></div>
+    </div>
+    <script>
+    (function() {{
+      const payload = {payload};
+      const root = document.getElementById("crypto-mvrv-{uid}");
+      if (!root || !window.LightweightCharts || !payload.points || !payload.points.length) return;
+      const chart = LightweightCharts.createChart(root, {{
+        layout: {{ background: {{ color: "#050B14" }}, textColor: "#AAB7C4" }},
+        grid: {{ vertLines: {{ color: "rgba(148,163,184,.08)" }}, horzLines: {{ color: "rgba(148,163,184,.08)" }} }},
+        rightPriceScale: {{ borderVisible: false }},
+        timeScale: {{ borderVisible: false, timeVisible: false, rightOffset: 5 }},
+        crosshair: {{ mode: 1 }},
+      }});
+      let series;
+      if (chart.addSeries && LightweightCharts.LineSeries) {{
+        series = chart.addSeries(LightweightCharts.LineSeries, {{ color: "#22D3EE", lineWidth: 2, priceLineVisible: false }});
+      }} else {{
+        series = chart.addLineSeries({{ color: "#22D3EE", lineWidth: 2, priceLineVisible: false }});
+      }}
+      series.setData(payload.points);
+      [0, 2, 4, 7].forEach(function(level) {{
+        series.createPriceLine({{
+          price: level,
+          color: level >= 4 ? "#FF4B4B" : (level >= 2 ? "#FFB020" : "#00D084"),
+          lineWidth: level === 0 ? 1 : 2,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: "Z " + level
+        }});
+      }});
+      chart.timeScale().fitContent();
+      new ResizeObserver(function() {{ chart.applyOptions({{ width: root.clientWidth }}); }}).observe(root);
+    }})();
+    </script>
+    """
+
+
 def pagina_crypto_terminal():
     """Crypto Terminal phase 1: public crypto data, regime and source health."""
     st.title("Crypto Terminal")
@@ -5158,12 +5221,14 @@ def pagina_crypto_terminal():
     fear_greed = payload.get("fear_greed", {})
     defillama = payload.get("defillama", {})
     bgeometrics = payload.get("bgeometrics", {})
+    bgeometrics_mvrv_history = payload.get("bgeometrics_mvrv_history", {})
     regime = payload.get("regime", {})
     operational = payload.get("operational", {})
     binance_data = binance.get("data", {}) if isinstance(binance, dict) else {}
     coingecko_data = coingecko.get("data", {}) if isinstance(coingecko, dict) else {}
     defillama_data = defillama.get("data", {}) if isinstance(defillama, dict) else {}
     bgeometrics_data = bgeometrics.get("data", {}) if isinstance(bgeometrics, dict) else {}
+    mvrv_history_data = bgeometrics_mvrv_history.get("data", {}) if isinstance(bgeometrics_mvrv_history, dict) else {}
     fear_data = fear_greed.get("data", {}) if isinstance(fear_greed, dict) else {}
 
     def _num(value, default=0.0):
@@ -5362,6 +5427,15 @@ def pagina_crypto_terminal():
           .crypto-onchain-grid div {{background:#08111F; border:1px solid #203047; border-radius:8px; padding:10px;}}
           .crypto-onchain-grid span {{display:block; color:#94A3B8; font-size:.68rem; font-weight:900; text-transform:uppercase;}}
           .crypto-onchain-grid b {{display:block; color:#F8FAFC; font-size:1rem; margin-top:4px;}}
+          .crypto-mvrv-card {{background:#050B14; border:1px solid #1F334A; border-radius:8px; padding:12px; margin:-4px 0 18px;}}
+          .crypto-mvrv-head {{display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:8px;}}
+          .crypto-mvrv-head b {{display:block; color:#F8FAFC; font-size:1.45rem; line-height:1; margin-top:4px;}}
+          .crypto-mvrv-legend {{display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end;}}
+          .crypto-mvrv-legend span {{border-radius:999px; padding:3px 8px; font-size:.68rem; font-weight:900; border:1px solid rgba(148,163,184,.25);}}
+          .crypto-mvrv-legend .green {{color:#2DFFAA; background:rgba(0,208,132,.10);}}
+          .crypto-mvrv-legend .yellow {{color:#FFCB6B; background:rgba(255,176,32,.10);}}
+          .crypto-mvrv-legend .red {{color:#FF8A8A; background:rgba(255,75,75,.10);}}
+          .crypto-mvrv-chart {{height:320px; width:100%;}}
           .crypto-assets {{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; margin-bottom:16px;}}
           .crypto-asset {{background:linear-gradient(180deg,#08111F,#050B14); border:1px solid #203047; border-radius:8px; padding:11px;}}
           .crypto-asset b {{display:block; color:#F8FAFC; font-size:1rem;}}
@@ -5414,6 +5488,8 @@ def pagina_crypto_terminal():
             .crypto-assets {{grid-template-columns:repeat(2,minmax(0,1fr));}}
             .crypto-onchain {{grid-template-columns:1fr;}}
             .crypto-onchain-grid {{grid-template-columns:1fr;}}
+            .crypto-mvrv-head {{display:block;}}
+            .crypto-mvrv-legend {{justify-content:flex-start; margin-top:8px;}}
             .crypto-alerts {{grid-template-columns:1fr;}}
             .crypto-rotation {{grid-template-columns:1fr;}}
             .crypto-class-grid {{grid-template-columns:repeat(2,minmax(0,1fr));}}
@@ -5457,6 +5533,11 @@ def pagina_crypto_terminal():
           </div>
         </div>
         """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        _crypto_mvrv_chart_html(mvrv_history_data.get("points") or []),
         unsafe_allow_html=True,
     )
 
