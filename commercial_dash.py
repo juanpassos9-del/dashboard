@@ -5052,19 +5052,82 @@ def load_crypto_terminal_payload(refresh_key: int = 0):
     from execution.crypto_defillama import fetch_defillama_crypto_snapshot
     from execution.crypto_fear_greed import fetch_fear_greed_snapshot
     from execution.crypto_regime import calculate_crypto_regime
+    from execution.crypto_signals import build_crypto_operational_dashboard
 
     binance = fetch_binance_crypto_snapshot()
     coingecko = fetch_coingecko_crypto_snapshot()
     fear_greed = fetch_fear_greed_snapshot()
     defillama = fetch_defillama_crypto_snapshot()
     regime = calculate_crypto_regime(binance, coingecko, fear_greed, defillama)
+    operational = build_crypto_operational_dashboard(binance, regime)
     return {
         "binance": binance,
         "coingecko": coingecko,
         "fear_greed": fear_greed,
         "defillama": defillama,
         "regime": regime,
+        "operational": operational,
     }
+
+
+def _crypto_mini_chart_html(symbol: str, asset: dict[str, Any], uid: str) -> str:
+    candles = asset.get("candles_1h") or []
+    chart_candles = [
+        {
+            "time": int(row.get("time") or 0),
+            "open": float(row.get("open") or 0),
+            "high": float(row.get("high") or 0),
+            "low": float(row.get("low") or 0),
+            "close": float(row.get("close") or 0),
+        }
+        for row in candles
+        if row.get("time") and row.get("open") and row.get("high") and row.get("low") and row.get("close")
+    ][-72:]
+    payload = json.dumps({"candles": chart_candles}, ensure_ascii=False)
+    safe_symbol = html.escape(symbol.replace("USDT", ""))
+    change = float(asset.get("change_pct_24h") or 0)
+    change_cls = "pos" if change >= 0 else "neg"
+    return f"""
+    <div class="crypto-mini-card">
+      <div class="crypto-mini-head"><b>{safe_symbol}</b><span class="{change_cls}">{change:+.2f}%</span><em>1h</em></div>
+      <div id="crypto-mini-{uid}" class="crypto-mini-chart"></div>
+    </div>
+    <script>
+    (function() {{
+      const payload = {payload};
+      const root = document.getElementById("crypto-mini-{uid}");
+      if (!root || !window.LightweightCharts || !payload.candles || !payload.candles.length) return;
+      const chart = LightweightCharts.createChart(root, {{
+        layout: {{ background: {{ color: "#030712" }}, textColor: "#AAB7C4" }},
+        grid: {{ vertLines: {{ color: "rgba(148,163,184,.08)" }}, horzLines: {{ color: "rgba(148,163,184,.08)" }} }},
+        rightPriceScale: {{ borderVisible: false }},
+        timeScale: {{ borderVisible: false, timeVisible: true, secondsVisible: false, rightOffset: 3 }},
+        crosshair: {{ mode: 1 }},
+        handleScroll: false,
+        handleScale: false,
+      }});
+      let series;
+      if (chart.addSeries && LightweightCharts.AreaSeries) {{
+        series = chart.addSeries(LightweightCharts.AreaSeries, {{
+          lineColor: "{'#00D084' if change >= 0 else '#FF5D5D'}",
+          topColor: "{'rgba(0,208,132,.30)' if change >= 0 else 'rgba(255,93,93,.28)'}",
+          bottomColor: "rgba(3,7,18,0)",
+          lineWidth: 2,
+        }});
+      }} else {{
+        series = chart.addAreaSeries({{
+          lineColor: "{'#00D084' if change >= 0 else '#FF5D5D'}",
+          topColor: "{'rgba(0,208,132,.30)' if change >= 0 else 'rgba(255,93,93,.28)'}",
+          bottomColor: "rgba(3,7,18,0)",
+          lineWidth: 2,
+        }});
+      }}
+      series.setData(payload.candles.map(c => {{ return {{ time: c.time, value: c.close }}; }}));
+      chart.timeScale().fitContent();
+      new ResizeObserver(function() {{ chart.applyOptions({{ width: root.clientWidth }}); }}).observe(root);
+    }})();
+    </script>
+    """
 
 
 def pagina_crypto_terminal():
@@ -5092,6 +5155,7 @@ def pagina_crypto_terminal():
     fear_greed = payload.get("fear_greed", {})
     defillama = payload.get("defillama", {})
     regime = payload.get("regime", {})
+    operational = payload.get("operational", {})
     binance_data = binance.get("data", {}) if isinstance(binance, dict) else {}
     coingecko_data = coingecko.get("data", {}) if isinstance(coingecko, dict) else {}
     defillama_data = defillama.get("data", {}) if isinstance(defillama, dict) else {}
@@ -5157,6 +5221,15 @@ def pagina_crypto_terminal():
           .crypto-asset {{background:#080F1A; border:1px solid #203047; border-radius:8px; padding:10px;}}
           .crypto-asset b {{display:block; color:#F8FAFC; font-size:.95rem;}}
           .crypto-asset small {{display:block; color:#94A3B8; margin-top:3px;}}
+          .crypto-alerts {{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:14px 0;}}
+          .crypto-alert {{background:#1F1117; border:1px solid #7F1D1D; border-left:4px solid #FF4B4B; border-radius:8px; color:#FECACA; padding:10px 12px; font-weight:800;}}
+          .crypto-mini-wrap {{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:12px 0 18px;}}
+          .crypto-mini-card {{background:#050C16; border:1px solid #1F334A; border-radius:8px; padding:9px;}}
+          .crypto-mini-head {{display:flex; gap:8px; align-items:center; color:#E5E7EB; margin-bottom:6px;}}
+          .crypto-mini-head b {{font-size:.92rem;}}
+          .crypto-mini-head span {{font-size:.78rem; font-weight:900;}}
+          .crypto-mini-head em {{margin-left:auto; font-style:normal; background:#132338; color:#93C5FD; border-radius:999px; padding:2px 7px; font-size:.66rem; font-weight:900;}}
+          .crypto-mini-chart {{height:210px; width:100%;}}
           .pos {{color:#00D084; font-weight:900;}}
           .neg {{color:#FF5D5D; font-weight:900;}}
           .crypto-drivers li {{margin-bottom:7px;}}
@@ -5164,6 +5237,8 @@ def pagina_crypto_terminal():
             .crypto-hero {{grid-template-columns:1fr;}}
             .crypto-grid {{grid-template-columns:repeat(2,minmax(0,1fr));}}
             .crypto-assets {{grid-template-columns:repeat(2,minmax(0,1fr));}}
+            .crypto-alerts {{grid-template-columns:1fr;}}
+            .crypto-mini-wrap {{grid-template-columns:1fr;}}
           }}
         </style>
         <div class="crypto-hero">
@@ -5211,6 +5286,59 @@ def pagina_crypto_terminal():
         )
     cards_html = "".join(asset_cards) or '<div class="crypto-card">Sem dados de ativos agora.</div>'
     st.markdown(f"<div class='crypto-assets'>{cards_html}</div>", unsafe_allow_html=True)
+
+    st.markdown("#### Alertas e ranking operacional")
+    alerts = operational.get("alerts", []) if isinstance(operational, dict) else []
+    if alerts:
+        st.markdown(
+            "<div class='crypto-alerts'>" + "".join(f"<div class='crypto-alert'>{sanitize_text(item)}</div>" for item in alerts[:6]) + "</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.success("Sem alertas criticos de alavancagem, faixa extrema ou volatilidade agora.")
+
+    rank_col, weak_col = st.columns([1, 1])
+    with rank_col:
+        st.markdown("##### Lideres de risco")
+        leaders = operational.get("leaders", []) if isinstance(operational, dict) else []
+        if leaders:
+            st.dataframe(
+                pd.DataFrame(leaders)[["symbol", "bias", "score", "change_24h", "trend_80h", "funding_annual_pct", "range_position", "realized_vol_48h_pct"]],
+                hide_index=True,
+                use_container_width=True,
+                height=250,
+            )
+        else:
+            st.info("Sem ranking de lideres agora.")
+    with weak_col:
+        st.markdown("##### Mais fracos / defensivos")
+        laggards = operational.get("laggards", []) if isinstance(operational, dict) else []
+        if laggards:
+            st.dataframe(
+                pd.DataFrame(laggards)[["symbol", "bias", "score", "change_24h", "trend_80h", "funding_annual_pct", "range_position", "realized_vol_48h_pct"]],
+                hide_index=True,
+                use_container_width=True,
+                height=250,
+            )
+        else:
+            st.info("Sem ranking defensivo agora.")
+
+    st.markdown("#### Mini graficos intraday")
+    chart_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+    chart_html = []
+    for idx, sym in enumerate(chart_symbols):
+        item = symbols.get(sym, {})
+        if item:
+            chart_html.append(_crypto_mini_chart_html(sym, item, f"{idx}-{refresh_key}"))
+    if chart_html:
+        components.html(
+            "<script src='https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js'></script>"
+            "<style>body{margin:0;background:transparent;font-family:Inter,Segoe UI,Arial,sans-serif;}.crypto-mini-wrap{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.crypto-mini-card{background:#050C16;border:1px solid #1F334A;border-radius:8px;padding:9px}.crypto-mini-head{display:flex;gap:8px;align-items:center;color:#E5E7EB;margin-bottom:6px}.crypto-mini-head b{font-size:.92rem}.crypto-mini-head span{font-size:.78rem;font-weight:900}.crypto-mini-head em{margin-left:auto;font-style:normal;background:#132338;color:#93C5FD;border-radius:999px;padding:2px 7px;font-size:.66rem;font-weight:900}.crypto-mini-chart{height:210px;width:100%}.pos{color:#00D084}.neg{color:#FF5D5D}@media(max-width:900px){.crypto-mini-wrap{grid-template-columns:1fr}}</style>"
+            f"<div class='crypto-mini-wrap'>{''.join(chart_html)}</div>",
+            height=470,
+        )
+    else:
+        st.info("Sem candles suficientes para os mini graficos.")
 
     st.markdown("#### Drivers do regime")
     drivers = []

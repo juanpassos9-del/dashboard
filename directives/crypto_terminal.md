@@ -28,6 +28,14 @@ Adicionar ao dashboard atual uma pagina `Crypto Terminal` com leitura operaciona
 - Overview com majors, regime, scores, alertas visuais e saude das fontes.
 - Sem alertas Telegram, Wallet Watch, ETF Flows ou execucao de ordens nesta fase.
 
+## Fase 2 Entregavel
+- Motor `execution/crypto_signals.py` com ranking operacional local.
+- Ranking de lideres de risco e ativos mais defensivos/fracos.
+- Alertas deterministas de funding esticado, proximidade de maxima/minima de 24h e volatilidade realizada.
+- Mini graficos intraday dos principais pares usando candles Binance e Lightweight Charts.
+- O ranking usa apenas dados publicos/cacheados ja carregados na Fase 1.
+- Continua sem execucao de ordens, sem carteira conectada e sem chaves privadas.
+
 ## Motor de Regime
 Classificar em:
 - `Risk-on forte`
