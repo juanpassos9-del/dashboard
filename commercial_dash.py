@@ -5044,6 +5044,226 @@ def pagina_watchlist_quant():
         )
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def load_crypto_terminal_payload(refresh_key: int = 0):
+    """Load public crypto sources and deterministic regime snapshot."""
+    from execution.crypto_binance import fetch_binance_crypto_snapshot
+    from execution.crypto_coingecko import fetch_coingecko_crypto_snapshot
+    from execution.crypto_defillama import fetch_defillama_crypto_snapshot
+    from execution.crypto_fear_greed import fetch_fear_greed_snapshot
+    from execution.crypto_regime import calculate_crypto_regime
+
+    binance = fetch_binance_crypto_snapshot()
+    coingecko = fetch_coingecko_crypto_snapshot()
+    fear_greed = fetch_fear_greed_snapshot()
+    defillama = fetch_defillama_crypto_snapshot()
+    regime = calculate_crypto_regime(binance, coingecko, fear_greed, defillama)
+    return {
+        "binance": binance,
+        "coingecko": coingecko,
+        "fear_greed": fear_greed,
+        "defillama": defillama,
+        "regime": regime,
+    }
+
+
+def pagina_crypto_terminal():
+    """Crypto Terminal phase 1: public crypto data, regime and source health."""
+    st.title("Crypto Terminal")
+    st.caption("Fase 1 adaptada: Binance, CoinGecko, Alternative.me e DefiLlama com leitura local de regime cripto.")
+
+    col_refresh, col_note = st.columns([1, 4])
+    with col_refresh:
+        if st.button("Atualizar Crypto", type="primary", use_container_width=True, key="crypto_terminal_refresh"):
+            st.session_state["crypto_terminal_refresh_key"] = st.session_state.get("crypto_terminal_refresh_key", 0) + 1
+            load_crypto_terminal_payload.clear()
+    with col_note:
+        st.caption("Sem chaves privadas, sem wallet e sem dados sensiveis. Somente fontes publicas e cache local.")
+
+    refresh_key = int(st.session_state.get("crypto_terminal_refresh_key", 0))
+    try:
+        payload = load_crypto_terminal_payload(refresh_key)
+    except Exception as e:
+        st.error(f"Nao foi possivel carregar o Crypto Terminal agora: {e}")
+        return
+
+    binance = payload.get("binance", {})
+    coingecko = payload.get("coingecko", {})
+    fear_greed = payload.get("fear_greed", {})
+    defillama = payload.get("defillama", {})
+    regime = payload.get("regime", {})
+    binance_data = binance.get("data", {}) if isinstance(binance, dict) else {}
+    coingecko_data = coingecko.get("data", {}) if isinstance(coingecko, dict) else {}
+    defillama_data = defillama.get("data", {}) if isinstance(defillama, dict) else {}
+    fear_data = fear_greed.get("data", {}) if isinstance(fear_greed, dict) else {}
+    symbols = {
+        str(item.get("symbol")): item
+        for item in (binance_data.get("assets") or [])
+        if isinstance(item, dict) and item.get("symbol")
+    }
+
+    def _num(value, default=0.0):
+        try:
+            if value is None:
+                return default
+            return float(value)
+        except Exception:
+            return default
+
+    def _money(value, decimals=2):
+        value = _num(value)
+        if abs(value) >= 1_000_000_000:
+            return f"US$ {value / 1_000_000_000:.2f}B"
+        if abs(value) >= 1_000_000:
+            return f"US$ {value / 1_000_000:.2f}M"
+        return f"US$ {value:,.{decimals}f}"
+
+    def _pct(value):
+        value = _num(value)
+        cls = "pos" if value >= 0 else "neg"
+        return f"<span class='{cls}'>{value:+.2f}%</span>"
+
+    btc = symbols.get("BTCUSDT", {})
+    eth = symbols.get("ETHUSDT", {})
+    regime_name = sanitize_text(regime.get("regime", "Neutro"))
+    regime_bias = sanitize_text(regime.get("bias", "Neutro"))
+    score = _num(regime.get("score"), 50)
+    fng_value = _num((fear_data.get("current") or {}).get("value"), 0)
+    fng_label = sanitize_text((fear_data.get("current") or {}).get("classification", "---"))
+    global_data = coingecko_data
+    market_cap = _num(global_data.get("total_market_cap_usd"))
+    volume_24h = _num(global_data.get("total_volume_usd"))
+    btc_dom = _num(global_data.get("btc_dominance"))
+    eth_dom = _num(global_data.get("eth_dominance"))
+    tvl = _num(defillama_data.get("total_tvl_usd"))
+    stable_cap = _num(defillama_data.get("stablecoin_market_cap_usd"))
+
+    st.markdown(
+        f"""
+        <style>
+          .crypto-hero {{display:grid; grid-template-columns:1.15fr .85fr; gap:14px; margin:12px 0 16px;}}
+          .crypto-card {{background:#07111F; border:1px solid #1F334A; border-radius:8px; padding:14px; color:#E5E7EB;}}
+          .crypto-regime {{border-left:5px solid #22D3EE; background:linear-gradient(135deg,#07111F,#0B1727);}}
+          .crypto-label {{display:block; color:#8FB6E8; font-size:.72rem; font-weight:900; text-transform:uppercase; letter-spacing:.02em;}}
+          .crypto-regime strong {{display:block; color:#F8FAFC; font-size:2rem; line-height:1.05; margin-top:5px;}}
+          .crypto-bias {{display:inline-flex; margin-top:9px; padding:5px 9px; border-radius:999px; background:#0B2440; color:#7DD3FC; font-weight:900;}}
+          .crypto-score {{font-size:2.15rem; color:#FFB020; font-weight:950; text-align:right;}}
+          .crypto-grid {{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:16px;}}
+          .crypto-kpi {{background:#0B1220; border:1px solid #1E293B; border-radius:8px; padding:12px; min-height:86px;}}
+          .crypto-kpi span {{display:block; color:#94A3B8; font-size:.7rem; font-weight:900; text-transform:uppercase;}}
+          .crypto-kpi strong {{display:block; color:#F8FAFC; font-size:1.22rem; margin-top:5px;}}
+          .crypto-kpi em {{display:block; color:#94A3B8; font-size:.72rem; font-style:normal; margin-top:4px;}}
+          .crypto-assets {{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px;}}
+          .crypto-asset {{background:#080F1A; border:1px solid #203047; border-radius:8px; padding:10px;}}
+          .crypto-asset b {{display:block; color:#F8FAFC; font-size:.95rem;}}
+          .crypto-asset small {{display:block; color:#94A3B8; margin-top:3px;}}
+          .pos {{color:#00D084; font-weight:900;}}
+          .neg {{color:#FF5D5D; font-weight:900;}}
+          .crypto-drivers li {{margin-bottom:7px;}}
+          @media (max-width: 1200px) {{
+            .crypto-hero {{grid-template-columns:1fr;}}
+            .crypto-grid {{grid-template-columns:repeat(2,minmax(0,1fr));}}
+            .crypto-assets {{grid-template-columns:repeat(2,minmax(0,1fr));}}
+          }}
+        </style>
+        <div class="crypto-hero">
+          <div class="crypto-card crypto-regime">
+            <span class="crypto-label">Regime Cripto</span>
+            <strong>{regime_name}</strong>
+            <div class="crypto-bias">{regime_bias}</div>
+            <p style="margin:12px 0 0;color:#CBD5E1;">{sanitize_text(regime.get("summary", "Leitura local indisponivel."))}</p>
+          </div>
+          <div class="crypto-card">
+            <span class="crypto-label">Score de risco</span>
+            <div class="crypto-score">{score:.0f}/100</div>
+            <div style="display:flex;justify-content:space-between;margin-top:10px;gap:10px;">
+              <div><span class="crypto-label">Fear & Greed</span><b>{fng_value:.0f}</b><br><small>{fng_label}</small></div>
+              <div style="text-align:right;"><span class="crypto-label">BTC Dominance</span><b>{btc_dom:.2f}%</b><br><small>ETH {eth_dom:.2f}%</small></div>
+            </div>
+          </div>
+        </div>
+        <div class="crypto-grid">
+          <div class="crypto-kpi"><span>BTC</span><strong>{_money(btc.get("price"), 2)}</strong><em>24h {_pct(btc.get("change_pct_24h"))}</em></div>
+          <div class="crypto-kpi"><span>ETH</span><strong>{_money(eth.get("price"), 2)}</strong><em>24h {_pct(eth.get("change_pct_24h"))}</em></div>
+          <div class="crypto-kpi"><span>Market Cap</span><strong>{_money(market_cap, 2)}</strong><em>Volume 24h {_money(volume_24h, 2)}</em></div>
+          <div class="crypto-kpi"><span>DeFi + Stablecoins</span><strong>TVL {_money(tvl, 2)}</strong><em>Stables {_money(stable_cap, 2)}</em></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("#### Majors e Altcoins")
+    top_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "LINKUSDT", "AVAXUSDT", "SUIUSDT"]
+    asset_cards = []
+    for sym in top_symbols:
+        item = symbols.get(sym, {})
+        if not item:
+            continue
+        asset_cards.append(
+            f"""
+            <div class="crypto-asset">
+              <b>{sanitize_text(sym.replace("USDT", ""))}</b>
+              <small>{_money(item.get("price"), 4)} | 24h {_pct(item.get("change_pct_24h"))}</small>
+              <small>Vol {_money(item.get("quote_volume"), 1)} | Funding {_num(item.get("funding_rate")) * 100:+.4f}%</small>
+              <small>Range 24h: {_money(item.get("low_24h"), 4)} - {_money(item.get("high_24h"), 4)}</small>
+            </div>
+            """
+        )
+    cards_html = "".join(asset_cards) or '<div class="crypto-card">Sem dados de ativos agora.</div>'
+    st.markdown(f"<div class='crypto-assets'>{cards_html}</div>", unsafe_allow_html=True)
+
+    st.markdown("#### Drivers do regime")
+    drivers = []
+    if isinstance(regime, dict):
+        drivers = list(regime.get("drivers_positive", []) or []) + list(regime.get("drivers_negative", []) or [])
+    if drivers:
+        st.markdown("<ul class='crypto-drivers'>" + "".join(f"<li>{sanitize_text(driver)}</li>" for driver in drivers[:10]) + "</ul>", unsafe_allow_html=True)
+    else:
+        st.info("Sem drivers suficientes para o regime agora.")
+
+    c_left, c_right = st.columns([1, 1])
+    with c_left:
+        st.markdown("#### Scores por bloco")
+        score_rows = regime.get("scores", {}) if isinstance(regime, dict) else {}
+        if score_rows:
+            st.dataframe(
+                pd.DataFrame([{"Bloco": key, "Score": value} for key, value in score_rows.items()]),
+                hide_index=True,
+                use_container_width=True,
+                height=260,
+            )
+    with c_right:
+        st.markdown("#### Saude das fontes cripto")
+        health_rows = [
+            item for item in get_source_health()
+            if str(item.get("name", "")).lower().startswith("crypto")
+        ]
+        if health_rows:
+            st.dataframe(pd.DataFrame(health_rows), hide_index=True, use_container_width=True, height=260)
+        else:
+            st.info("Sem telemetria de fontes cripto registrada ainda.")
+
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        st.markdown("#### Top chains por TVL")
+        chains = defillama_data.get("top_chains", []) if isinstance(defillama_data, dict) else []
+        if chains:
+            df_chains = pd.DataFrame(chains[:15])
+            cols = [col for col in ["name", "symbol", "tvl", "change_1d", "change_7d"] if col in df_chains.columns]
+            st.dataframe(df_chains[cols], hide_index=True, use_container_width=True, height=430)
+        else:
+            st.info("DefiLlama sem dados de chains agora.")
+    with c2:
+        st.markdown("#### Top mercado CoinGecko")
+        markets = coingecko_data.get("markets", []) if isinstance(coingecko_data, dict) else []
+        if markets:
+            df_markets = pd.DataFrame(markets[:15])
+            cols = [col for col in ["symbol", "name", "current_price", "price_change_percentage_24h", "market_cap", "total_volume"] if col in df_markets.columns]
+            st.dataframe(df_markets[cols], hide_index=True, use_container_width=True, height=430)
+        else:
+            st.info("CoinGecko sem dados de mercado agora.")
+
+
 @st.cache_data(ttl=240, show_spinner=False)
 def get_market_moving_events_cached(refresh_nonce: int = 0):
     news_items, _sources, _warnings, _loaded_at = load_bloomberg_news_feed(refresh_nonce)
@@ -6696,7 +6916,7 @@ with st.sidebar:
         st.session_state.pop("auth_loading_until", None)
         _auth_rerun()
     st.markdown("### 🧭 Navegação")
-    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
+    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "Crypto Terminal", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
     sidebar_clock()
     
     st.markdown("---")
@@ -6713,6 +6933,8 @@ if page == "📉 Terminal de Trading":
     pagina_terminal()
 elif page == "🌎 Terminal Global":
     pagina_terminal_global()
+elif page == "Crypto Terminal":
+    pagina_crypto_terminal()
 elif page == "📺 Terminal Bloomberg":
     pagina_terminal_bloomberg()
 elif page == "📰 Market Report":
