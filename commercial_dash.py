@@ -5060,7 +5060,15 @@ def load_crypto_terminal_payload(refresh_key: int = 0):
     fear_greed = fetch_fear_greed_snapshot()
     defillama = fetch_defillama_crypto_snapshot()
     bgeometrics = fetch_bgeometrics_snapshot()
-    bgeometrics_mvrv_history = fetch_bgeometrics_mvrv_zscore_history()
+    try:
+        bgeometrics_mvrv_history = fetch_bgeometrics_mvrv_zscore_history()
+    except Exception as exc:
+        bgeometrics_mvrv_history = {
+            "source": "BGeometrics",
+            "status": "error",
+            "data": {"points": []},
+            "warnings": [f"Historico MVRV indisponivel: {exc}"],
+        }
     regime = calculate_crypto_regime(binance, coingecko, fear_greed, defillama, bgeometrics)
     operational = build_crypto_operational_dashboard(binance, regime, coingecko)
     return {

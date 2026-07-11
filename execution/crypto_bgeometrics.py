@@ -132,7 +132,10 @@ def _fetch_public_mvrv_chart_history(days: int) -> tuple[list[dict[str, Any]], i
         return [], latency_ms
     import json
 
-    points = _normalize_highcharts_pairs(json.loads(match.group(1)))
+    try:
+        points = _normalize_highcharts_pairs(json.loads(match.group(1)))
+    except Exception:
+        return [], latency_ms
     return points[-int(days):], latency_ms
 
 
