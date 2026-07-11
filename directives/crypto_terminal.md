@@ -37,6 +37,12 @@ Adicionar ao dashboard atual uma pagina `Crypto Terminal` com leitura operaciona
 - Se Binance vier vazia no ambiente online, ranking e mini graficos usam CoinGecko com sparkline como fallback rotulado.
 - Continua sem execucao de ordens, sem carteira conectada e sem chaves privadas.
 
+## Fase 3 Entregavel
+- Regime por subclasse: Majors, L1/L2, DeFi/Infra, Memes/Beta, Pagamentos, Altcoins e Stablecoins quando houver dados.
+- Mapa de rotacao com classe lider, classe mais fraca, score medio, variacao 24h, tendencia e volatilidade realizada.
+- Leitura IA local curta e deterministica para interpretar se o fluxo esta em Majors, Altcoins ou defensivo.
+- Rankings operacionais passam a exibir a subclasse do ativo para facilitar leitura de beta e concentracao de risco.
+
 ## Motor de Regime
 Classificar em:
 - `Risk-on forte`

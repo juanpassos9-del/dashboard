@@ -10,6 +10,23 @@ try:
 except ModuleNotFoundError:
     from crypto_common import safe_float
 
+SUBCLASS_MAP = {
+    "BTCUSDT": ("Majors", "Reserva de risco cripto"),
+    "ETHUSDT": ("Majors", "Beta institucional / smart contracts"),
+    "SOLUSDT": ("L1/L2", "Alta beta de ecossistema"),
+    "BNBUSDT": ("L1/L2", "Exchange/L1"),
+    "AVAXUSDT": ("L1/L2", "Alta beta de ecossistema"),
+    "SUIUSDT": ("L1/L2", "Alta beta emergente"),
+    "LINKUSDT": ("DeFi/Infra", "Oraculos e infraestrutura"),
+    "AAVEUSDT": ("DeFi/Infra", "Credito DeFi"),
+    "UNIUSDT": ("DeFi/Infra", "DEX DeFi"),
+    "XRPUSDT": ("Pagamentos", "Pagamentos/large cap"),
+    "ADAUSDT": ("L1/L2", "Large cap L1"),
+    "DOGEUSDT": ("Memes/Beta", "Beta especulativo"),
+    "SHIBUSDT": ("Memes/Beta", "Beta especulativo"),
+    "PEPEUSDT": ("Memes/Beta", "Beta especulativo"),
+}
+
 
 def _asset_rows(binance_payload: dict[str, Any]) -> list[dict[str, Any]]:
     return ((binance_payload or {}).get("data") or {}).get("assets") or []
@@ -100,6 +117,87 @@ def _funding_annual_pct(asset: dict[str, Any]) -> float:
     return safe_float(asset.get("funding_rate")) * 3 * 365 * 100
 
 
+def _subclass_for(symbol: str) -> tuple[str, str]:
+    if symbol in SUBCLASS_MAP:
+        return SUBCLASS_MAP[symbol]
+    base = symbol.replace("USDT", "")
+    if base in {"BTC", "ETH"}:
+        return "Majors", "Large cap"
+    if base in {"USDT", "USDC", "DAI", "FDUSD", "TUSD"}:
+        return "Stablecoins", "Liquidez"
+    return "Altcoins", "Beta cripto"
+
+
+def _class_bias(avg_score: float, avg_change: float, avg_trend: float) -> str:
+    if avg_score >= 68 and avg_change > 0 and avg_trend > 0:
+        return "Risk-on"
+    if avg_score <= 38 and avg_change < 0 and avg_trend < 0:
+        return "Risk-off"
+    if avg_change > 0 and avg_trend < 0:
+        return "Repique"
+    if avg_change < 0 and avg_trend > 0:
+        return "Correcao"
+    return "Neutro"
+
+
+def _build_rotation(rows: list[dict[str, Any]], regime: dict[str, Any]) -> dict[str, Any]:
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        buckets.setdefault(str(row.get("subclass") or "Outros"), []).append(row)
+
+    classes = []
+    for name, items in buckets.items():
+        if not items:
+            continue
+        avg_score = sum(safe_float(i.get("score")) for i in items) / len(items)
+        avg_change = sum(safe_float(i.get("change_24h")) for i in items) / len(items)
+        avg_trend = sum(safe_float(i.get("trend_80h")) for i in items) / len(items)
+        avg_vol = sum(safe_float(i.get("realized_vol_48h_pct")) for i in items) / len(items)
+        leader = max(items, key=lambda item: safe_float(item.get("score")))
+        classes.append({
+            "classe": name,
+            "ativos": len(items),
+            "score": round(avg_score, 1),
+            "change_24h": round(avg_change, 2),
+            "trend_80h": round(avg_trend, 2),
+            "vol_realizada": round(avg_vol, 2),
+            "vies": _class_bias(avg_score, avg_change, avg_trend),
+            "lider": leader.get("symbol"),
+        })
+    classes.sort(key=lambda item: item["score"], reverse=True)
+
+    leader_class = classes[0] if classes else {}
+    weakest_class = classes[-1] if classes else {}
+    majors = next((c for c in classes if c.get("classe") == "Majors"), {})
+    beta_classes = [c for c in classes if c.get("classe") in {"L1/L2", "DeFi/Infra", "Memes/Beta", "Altcoins"}]
+    beta_score = sum(safe_float(c.get("score")) for c in beta_classes) / len(beta_classes) if beta_classes else 0
+    major_score = safe_float(majors.get("score"))
+    if beta_score and major_score:
+        flow = "Altcoins lideram" if beta_score > major_score + 5 else "Majors lideram" if major_score > beta_score + 5 else "Fluxo equilibrado"
+    else:
+        flow = "Fluxo indefinido"
+
+    regime_name = str((regime or {}).get("regime") or "Neutro")
+    if "Risk-on" in regime_name and flow == "Altcoins lideram":
+        ai_summary = "Risk-on amplo: beta cripto confirma apetite por risco."
+    elif "Risk-on" in regime_name and flow == "Majors lideram":
+        ai_summary = "Risk-on seletivo: BTC/ETH lideram, altcoins ainda precisam confirmar."
+    elif "Risk-off" in regime_name or regime_name in {"Capitulacao", "Desalavancagem"}:
+        ai_summary = "Defensivo: reduzir beta e priorizar liquidez ate a breadth estabilizar."
+    elif flow == "Altcoins lideram":
+        ai_summary = "Rotacao para beta: observar se volume e funding seguem controlados."
+    else:
+        ai_summary = "Mercado misto: trabalhar seletivo e evitar perseguir ativos esticados."
+
+    return {
+        "classes": classes,
+        "leader_class": leader_class,
+        "weakest_class": weakest_class,
+        "flow": flow,
+        "ai_summary": ai_summary,
+    }
+
+
 def build_crypto_operational_dashboard(
     binance_payload: dict[str, Any],
     regime: dict[str, Any],
@@ -115,6 +213,7 @@ def build_crypto_operational_dashboard(
         symbol = str(asset.get("symbol") or "")
         if not symbol:
             continue
+        subclass, theme = _subclass_for(symbol)
         price = safe_float(asset.get("price"))
         change_24h = safe_float(asset.get("change_pct_24h"))
         trend_80h = safe_float(asset.get("trend_80h_pct"))
@@ -173,12 +272,16 @@ def build_crypto_operational_dashboard(
             "realized_vol_48h_pct": round(realized_vol, 2),
             "score": round(score, 1),
             "bias": bias,
+            "subclass": subclass,
+            "theme": theme,
         })
 
     rows.sort(key=lambda row: row["score"], reverse=True)
+    rotation = _build_rotation(rows, regime)
     return {
         "leaders": rows[:5],
         "laggards": sorted(rows, key=lambda row: row["score"])[:5],
         "ranking": rows,
         "alerts": alerts[:10],
+        "rotation": rotation,
     }

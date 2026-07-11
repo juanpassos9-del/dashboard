@@ -5264,6 +5264,10 @@ def pagina_crypto_terminal():
           .crypto-asset small {{display:block; color:#94A3B8; margin-top:3px;}}
           .crypto-alerts {{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:14px 0;}}
           .crypto-alert {{background:#1F1117; border:1px solid #7F1D1D; border-left:4px solid #FF4B4B; border-radius:8px; color:#FECACA; padding:10px 12px; font-weight:800;}}
+          .crypto-rotation {{display:grid; grid-template-columns:1.3fr .85fr .85fr; gap:10px; margin:14px 0 16px;}}
+          .crypto-rot-card {{background:#07111F; border:1px solid #1F334A; border-radius:8px; padding:12px; color:#E5E7EB;}}
+          .crypto-rot-card strong {{display:block; color:#F8FAFC; font-size:1.08rem; margin-top:5px;}}
+          .crypto-rot-card p {{margin:7px 0 0; color:#CBD5E1; font-weight:700;}}
           .crypto-mini-wrap {{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:12px 0 18px;}}
           .crypto-mini-card {{background:#050C16; border:1px solid #1F334A; border-radius:8px; padding:9px;}}
           .crypto-mini-head {{display:flex; gap:8px; align-items:center; color:#E5E7EB; margin-bottom:6px;}}
@@ -5279,6 +5283,7 @@ def pagina_crypto_terminal():
             .crypto-grid {{grid-template-columns:repeat(2,minmax(0,1fr));}}
             .crypto-assets {{grid-template-columns:repeat(2,minmax(0,1fr));}}
             .crypto-alerts {{grid-template-columns:1fr;}}
+            .crypto-rotation {{grid-template-columns:1fr;}}
             .crypto-mini-wrap {{grid-template-columns:1fr;}}
           }}
         </style>
@@ -5326,6 +5331,41 @@ def pagina_crypto_terminal():
     cards_html = "".join(asset_cards) or '<div class="crypto-card">Sem dados de ativos agora.</div>'
     st.markdown(f"<div class='crypto-assets'>{cards_html}</div>", unsafe_allow_html=True)
 
+    rotation = operational.get("rotation", {}) if isinstance(operational, dict) else {}
+    leader_class = rotation.get("leader_class", {}) if isinstance(rotation, dict) else {}
+    weakest_class = rotation.get("weakest_class", {}) if isinstance(rotation, dict) else {}
+    st.markdown("#### Regime por subclasse")
+    st.markdown(
+        "<div class='crypto-rotation'>"
+        "<div class='crypto-rot-card'>"
+        "<span class='crypto-label'>Leitura IA local</span>"
+        f"<strong>{sanitize_text(rotation.get('flow', 'Fluxo indefinido'))}</strong>"
+        f"<p>{sanitize_text(rotation.get('ai_summary', 'Sem leitura suficiente agora.'))}</p>"
+        "</div>"
+        "<div class='crypto-rot-card'>"
+        "<span class='crypto-label'>Classe lider</span>"
+        f"<strong>{sanitize_text(leader_class.get('classe', '---'))}</strong>"
+        f"<p>Score {leader_class.get('score', '---')} | Lider {sanitize_text(leader_class.get('lider', '---'))}</p>"
+        "</div>"
+        "<div class='crypto-rot-card'>"
+        "<span class='crypto-label'>Classe mais fraca</span>"
+        f"<strong>{sanitize_text(weakest_class.get('classe', '---'))}</strong>"
+        f"<p>Score {weakest_class.get('score', '---')} | Lider {sanitize_text(weakest_class.get('lider', '---'))}</p>"
+        "</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    classes = rotation.get("classes", []) if isinstance(rotation, dict) else []
+    if classes:
+        st.dataframe(
+            pd.DataFrame(classes)[["classe", "vies", "score", "change_24h", "trend_80h", "vol_realizada", "lider", "ativos"]],
+            hide_index=True,
+            use_container_width=True,
+            height=min(320, 38 + len(classes) * 36),
+        )
+    else:
+        st.info("Sem dados suficientes para rotação por subclasse agora.")
+
     st.markdown("#### Alertas e ranking operacional")
     alerts = operational.get("alerts", []) if isinstance(operational, dict) else []
     if alerts:
@@ -5342,7 +5382,7 @@ def pagina_crypto_terminal():
         leaders = operational.get("leaders", []) if isinstance(operational, dict) else []
         if leaders:
             st.dataframe(
-                pd.DataFrame(leaders)[["symbol", "bias", "score", "change_24h", "trend_80h", "funding_annual_pct", "range_position", "realized_vol_48h_pct"]],
+                pd.DataFrame(leaders)[["symbol", "subclass", "bias", "score", "change_24h", "trend_80h", "funding_annual_pct", "range_position", "realized_vol_48h_pct"]],
                 hide_index=True,
                 use_container_width=True,
                 height=250,
@@ -5354,7 +5394,7 @@ def pagina_crypto_terminal():
         laggards = operational.get("laggards", []) if isinstance(operational, dict) else []
         if laggards:
             st.dataframe(
-                pd.DataFrame(laggards)[["symbol", "bias", "score", "change_24h", "trend_80h", "funding_annual_pct", "range_position", "realized_vol_48h_pct"]],
+                pd.DataFrame(laggards)[["symbol", "subclass", "bias", "score", "change_24h", "trend_80h", "funding_annual_pct", "range_position", "realized_vol_48h_pct"]],
                 hide_index=True,
                 use_container_width=True,
                 height=250,
