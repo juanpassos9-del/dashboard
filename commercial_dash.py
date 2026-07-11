@@ -5228,6 +5228,77 @@ def pagina_crypto_terminal():
         cls = "pos" if value >= 0 else "neg"
         return f"<span class='{cls}'>{value:+.2f}%</span>"
 
+    def _plain_pct(value):
+        return f"{_num(value):+.2f}%"
+
+    def _bias_class(value):
+        text = str(value or "").lower()
+        if "risk-on" in text or "comprador" in text or "momentum" in text:
+            return "good"
+        if "risk-off" in text or "vendedora" in text or "estresse" in text:
+            return "bad"
+        if "repique" in text or "correcao" in text or "alavancagem" in text:
+            return "warn"
+        return "neutral"
+
+    def _score_class(value):
+        score_value = _num(value)
+        if score_value >= 68:
+            return "good"
+        if score_value <= 38:
+            return "bad"
+        return "warn"
+
+    def _rotation_cards_html(rows):
+        cards = []
+        for row in rows[:8]:
+            bias = sanitize_text(row.get("vies", "Neutro"))
+            change_cls = "pos" if _num(row.get("change_24h")) >= 0 else "neg"
+            trend_cls = "pos" if _num(row.get("trend_80h")) >= 0 else "neg"
+            cards.append(
+                "<div class='crypto-class-card'>"
+                "<div class='crypto-class-top'>"
+                f"<b>{sanitize_text(row.get('classe', '---'))}</b>"
+                f"<span class='crypto-chip {_bias_class(bias)}'>{bias}</span>"
+                "</div>"
+                f"<div class='crypto-class-score {_score_class(row.get('score'))}'>{_num(row.get('score')):.1f}</div>"
+                "<div class='crypto-class-metrics'>"
+                f"<span>24h <strong class='{change_cls}'>{_plain_pct(row.get('change_24h'))}</strong></span>"
+                f"<span>Tend. <strong class='{trend_cls}'>{_plain_pct(row.get('trend_80h'))}</strong></span>"
+                f"<span>Vol <strong>{_num(row.get('vol_realizada')):.2f}%</strong></span>"
+                f"<span>Lider <strong>{sanitize_text(row.get('lider', '---'))}</strong></span>"
+                "</div>"
+                "</div>"
+            )
+        return "".join(cards)
+
+    def _ranking_cards_html(rows, mode="leader"):
+        cards = []
+        for row in rows[:5]:
+            score_cls = _score_class(row.get("score"))
+            change_cls = "pos" if _num(row.get("change_24h")) >= 0 else "neg"
+            trend_cls = "pos" if _num(row.get("trend_80h")) >= 0 else "neg"
+            cards.append(
+                "<div class='crypto-rank-card'>"
+                "<div class='crypto-rank-head'>"
+                "<div>"
+                f"<b>{sanitize_text(row.get('symbol', '---'))}</b>"
+                f"<small>{sanitize_text(row.get('subclass', '---'))} | {sanitize_text(row.get('theme', ''))}</small>"
+                "</div>"
+                f"<span class='crypto-rank-score {score_cls}'>{_num(row.get('score')):.0f}</span>"
+                "</div>"
+                f"<div class='crypto-chip {_bias_class(row.get('bias'))}'>{sanitize_text(row.get('bias', 'Neutro'))}</div>"
+                "<div class='crypto-rank-grid'>"
+                f"<span>24h <strong class='{change_cls}'>{_plain_pct(row.get('change_24h'))}</strong></span>"
+                f"<span>Tend. <strong class='{trend_cls}'>{_plain_pct(row.get('trend_80h'))}</strong></span>"
+                f"<span>Funding <strong>{_num(row.get('funding_annual_pct')):.2f}%</strong></span>"
+                f"<span>Faixa <strong>{_num(row.get('range_position')):.0f}%</strong></span>"
+                "</div>"
+                "</div>"
+            )
+        empty = "Sem ranking de lideres agora." if mode == "leader" else "Sem ranking defensivo agora."
+        return "".join(cards) or f"<div class='crypto-empty'>{empty}</div>"
+
     btc = symbols.get("BTCUSDT", {})
     eth = symbols.get("ETHUSDT", {})
     regime_name = sanitize_text(regime.get("regime", "Neutro"))
@@ -5248,9 +5319,10 @@ def pagina_crypto_terminal():
         <style>
           .crypto-hero {{display:grid; grid-template-columns:1.15fr .85fr; gap:14px; margin:12px 0 16px;}}
           .crypto-card {{background:#07111F; border:1px solid #1F334A; border-radius:8px; padding:14px; color:#E5E7EB;}}
-          .crypto-regime {{border-left:5px solid #22D3EE; background:linear-gradient(135deg,#07111F,#0B1727);}}
+          .crypto-card, .crypto-kpi, .crypto-asset, .crypto-rot-card, .crypto-class-card, .crypto-rank-card {{box-shadow:0 10px 28px rgba(0,0,0,.18);}}
+          .crypto-regime {{border-left:5px solid #22D3EE; background:linear-gradient(135deg,#06101E 0%,#0B1727 58%,#0F2437 100%);}}
           .crypto-label {{display:block; color:#8FB6E8; font-size:.72rem; font-weight:900; text-transform:uppercase; letter-spacing:.02em;}}
-          .crypto-regime strong {{display:block; color:#F8FAFC; font-size:2rem; line-height:1.05; margin-top:5px;}}
+          .crypto-regime strong {{display:block; color:#F8FAFC; font-size:2.35rem; line-height:1.05; margin-top:5px;}}
           .crypto-bias {{display:inline-flex; margin-top:9px; padding:5px 9px; border-radius:999px; background:#0B2440; color:#7DD3FC; font-weight:900;}}
           .crypto-score {{font-size:2.15rem; color:#FFB020; font-weight:950; text-align:right;}}
           .crypto-grid {{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:16px;}}
@@ -5258,9 +5330,9 @@ def pagina_crypto_terminal():
           .crypto-kpi span {{display:block; color:#94A3B8; font-size:.7rem; font-weight:900; text-transform:uppercase;}}
           .crypto-kpi strong {{display:block; color:#F8FAFC; font-size:1.22rem; margin-top:5px;}}
           .crypto-kpi em {{display:block; color:#94A3B8; font-size:.72rem; font-style:normal; margin-top:4px;}}
-          .crypto-assets {{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px;}}
-          .crypto-asset {{background:#080F1A; border:1px solid #203047; border-radius:8px; padding:10px;}}
-          .crypto-asset b {{display:block; color:#F8FAFC; font-size:.95rem;}}
+          .crypto-assets {{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; margin-bottom:16px;}}
+          .crypto-asset {{background:linear-gradient(180deg,#08111F,#050B14); border:1px solid #203047; border-radius:8px; padding:11px;}}
+          .crypto-asset b {{display:block; color:#F8FAFC; font-size:1rem;}}
           .crypto-asset small {{display:block; color:#94A3B8; margin-top:3px;}}
           .crypto-alerts {{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:14px 0;}}
           .crypto-alert {{background:#1F1117; border:1px solid #7F1D1D; border-left:4px solid #FF4B4B; border-radius:8px; color:#FECACA; padding:10px 12px; font-weight:800;}}
@@ -5268,6 +5340,32 @@ def pagina_crypto_terminal():
           .crypto-rot-card {{background:#07111F; border:1px solid #1F334A; border-radius:8px; padding:12px; color:#E5E7EB;}}
           .crypto-rot-card strong {{display:block; color:#F8FAFC; font-size:1.08rem; margin-top:5px;}}
           .crypto-rot-card p {{margin:7px 0 0; color:#CBD5E1; font-weight:700;}}
+          .crypto-class-grid {{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:10px 0 16px;}}
+          .crypto-class-card {{background:#07111F; border:1px solid #1F334A; border-radius:8px; padding:12px; min-height:142px;}}
+          .crypto-class-top {{display:flex; align-items:flex-start; justify-content:space-between; gap:10px;}}
+          .crypto-class-top b {{color:#F8FAFC; font-size:1rem;}}
+          .crypto-chip {{display:inline-flex; width:max-content; border-radius:999px; padding:3px 8px; font-size:.68rem; font-weight:950; text-transform:uppercase;}}
+          .crypto-chip.good {{background:rgba(0,208,132,.14); color:#2DFFAA; border:1px solid rgba(0,208,132,.35);}}
+          .crypto-chip.bad {{background:rgba(255,75,75,.14); color:#FF8A8A; border:1px solid rgba(255,75,75,.35);}}
+          .crypto-chip.warn {{background:rgba(255,176,32,.14); color:#FFCB6B; border:1px solid rgba(255,176,32,.35);}}
+          .crypto-chip.neutral {{background:rgba(148,163,184,.13); color:#CBD5E1; border:1px solid rgba(148,163,184,.28);}}
+          .crypto-class-score {{font-size:2rem; font-weight:950; margin:10px 0 8px;}}
+          .crypto-class-score.good, .crypto-rank-score.good {{color:#00D084;}}
+          .crypto-class-score.bad, .crypto-rank-score.bad {{color:#FF5D5D;}}
+          .crypto-class-score.warn, .crypto-rank-score.warn {{color:#FFB020;}}
+          .crypto-class-metrics, .crypto-rank-grid {{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px;}}
+          .crypto-class-metrics span, .crypto-rank-grid span {{color:#8FA4BD; font-size:.74rem;}}
+          .crypto-class-metrics strong, .crypto-rank-grid strong {{color:#F8FAFC;}}
+          .crypto-rank-wrap {{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:8px;}}
+          .crypto-rank-panel {{background:#050B14; border:1px solid #1A2B42; border-radius:8px; padding:12px;}}
+          .crypto-rank-panel h5 {{margin:0 0 10px; color:#F8FAFC; font-size:.94rem;}}
+          .crypto-rank-list {{display:grid; gap:9px;}}
+          .crypto-rank-card {{background:#08111F; border:1px solid #203047; border-radius:8px; padding:10px;}}
+          .crypto-rank-head {{display:flex; justify-content:space-between; gap:10px; margin-bottom:7px;}}
+          .crypto-rank-head b {{display:block; color:#F8FAFC; font-size:.95rem;}}
+          .crypto-rank-head small {{display:block; color:#8FA4BD; margin-top:2px; font-size:.70rem;}}
+          .crypto-rank-score {{font-size:1.25rem; font-weight:950;}}
+          .crypto-empty {{background:#0B233A; border:1px solid #16466E; color:#7DD3FC; border-radius:8px; padding:12px; font-weight:800;}}
           .crypto-mini-wrap {{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:12px 0 18px;}}
           .crypto-mini-card {{background:#050C16; border:1px solid #1F334A; border-radius:8px; padding:9px;}}
           .crypto-mini-head {{display:flex; gap:8px; align-items:center; color:#E5E7EB; margin-bottom:6px;}}
@@ -5284,6 +5382,8 @@ def pagina_crypto_terminal():
             .crypto-assets {{grid-template-columns:repeat(2,minmax(0,1fr));}}
             .crypto-alerts {{grid-template-columns:1fr;}}
             .crypto-rotation {{grid-template-columns:1fr;}}
+            .crypto-class-grid {{grid-template-columns:repeat(2,minmax(0,1fr));}}
+            .crypto-rank-wrap {{grid-template-columns:1fr;}}
             .crypto-mini-wrap {{grid-template-columns:1fr;}}
           }}
         </style>
@@ -5357,14 +5457,9 @@ def pagina_crypto_terminal():
     )
     classes = rotation.get("classes", []) if isinstance(rotation, dict) else []
     if classes:
-        st.dataframe(
-            pd.DataFrame(classes)[["classe", "vies", "score", "change_24h", "trend_80h", "vol_realizada", "lider", "ativos"]],
-            hide_index=True,
-            use_container_width=True,
-            height=min(320, 38 + len(classes) * 36),
-        )
+        st.markdown(f"<div class='crypto-class-grid'>{_rotation_cards_html(classes)}</div>", unsafe_allow_html=True)
     else:
-        st.info("Sem dados suficientes para rotação por subclasse agora.")
+        st.info("Sem dados suficientes para rotacao por subclasse agora.")
 
     st.markdown("#### Alertas e ranking operacional")
     alerts = operational.get("alerts", []) if isinstance(operational, dict) else []
@@ -5376,31 +5471,17 @@ def pagina_crypto_terminal():
     else:
         st.success("Sem alertas criticos de alavancagem, faixa extrema ou volatilidade agora.")
 
-    rank_col, weak_col = st.columns([1, 1])
-    with rank_col:
-        st.markdown("##### Lideres de risco")
-        leaders = operational.get("leaders", []) if isinstance(operational, dict) else []
-        if leaders:
-            st.dataframe(
-                pd.DataFrame(leaders)[["symbol", "subclass", "bias", "score", "change_24h", "trend_80h", "funding_annual_pct", "range_position", "realized_vol_48h_pct"]],
-                hide_index=True,
-                use_container_width=True,
-                height=250,
-            )
-        else:
-            st.info("Sem ranking de lideres agora.")
-    with weak_col:
-        st.markdown("##### Mais fracos / defensivos")
-        laggards = operational.get("laggards", []) if isinstance(operational, dict) else []
-        if laggards:
-            st.dataframe(
-                pd.DataFrame(laggards)[["symbol", "subclass", "bias", "score", "change_24h", "trend_80h", "funding_annual_pct", "range_position", "realized_vol_48h_pct"]],
-                hide_index=True,
-                use_container_width=True,
-                height=250,
-            )
-        else:
-            st.info("Sem ranking defensivo agora.")
+    leaders = operational.get("leaders", []) if isinstance(operational, dict) else []
+    laggards = operational.get("laggards", []) if isinstance(operational, dict) else []
+    st.markdown(
+        "<div class='crypto-rank-wrap'>"
+        "<div class='crypto-rank-panel'><h5>Lideres de risco</h5>"
+        f"<div class='crypto-rank-list'>{_ranking_cards_html(leaders, 'leader')}</div></div>"
+        "<div class='crypto-rank-panel'><h5>Mais fracos / defensivos</h5>"
+        f"<div class='crypto-rank-list'>{_ranking_cards_html(laggards, 'laggard')}</div></div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
     st.markdown("#### Mini graficos intraday")
     chart_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
@@ -5428,51 +5509,52 @@ def pagina_crypto_terminal():
     else:
         st.info("Sem drivers suficientes para o regime agora.")
 
-    c_left, c_right = st.columns([1, 1])
-    with c_left:
-        st.markdown("#### Scores por bloco")
-        score_rows = regime.get("scores", {}) if isinstance(regime, dict) else {}
-        if score_rows:
-            st.dataframe(
-                pd.DataFrame([{"Bloco": key, "Score": value} for key, value in score_rows.items()]),
-                hide_index=True,
-                use_container_width=True,
-                height=260,
-            )
-    with c_right:
-        st.markdown("#### Saude das fontes cripto")
-        raw_health = get_source_health()
-        health_iter = raw_health.values() if isinstance(raw_health, dict) else raw_health
-        health_rows = []
-        for item in health_iter or []:
-            if not isinstance(item, dict):
-                continue
-            if str(item.get("name", "")).lower().startswith("crypto"):
-                health_rows.append(item)
-        if health_rows:
-            st.dataframe(pd.DataFrame(health_rows), hide_index=True, use_container_width=True, height=260)
-        else:
-            st.info("Sem telemetria de fontes cripto registrada ainda.")
+    with st.expander("Detalhes tecnicos das fontes cripto", expanded=False):
+        c_left, c_right = st.columns([1, 1])
+        with c_left:
+            st.markdown("#### Scores por bloco")
+            score_rows = regime.get("scores", {}) if isinstance(regime, dict) else {}
+            if score_rows:
+                st.dataframe(
+                    pd.DataFrame([{"Bloco": key, "Score": value} for key, value in score_rows.items()]),
+                    hide_index=True,
+                    use_container_width=True,
+                    height=260,
+                )
+        with c_right:
+            st.markdown("#### Saude das fontes cripto")
+            raw_health = get_source_health()
+            health_iter = raw_health.values() if isinstance(raw_health, dict) else raw_health
+            health_rows = []
+            for item in health_iter or []:
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("name", "")).lower().startswith("crypto"):
+                    health_rows.append(item)
+            if health_rows:
+                st.dataframe(pd.DataFrame(health_rows), hide_index=True, use_container_width=True, height=260)
+            else:
+                st.info("Sem telemetria de fontes cripto registrada ainda.")
 
-    c1, c2 = st.columns([1, 1])
-    with c1:
-        st.markdown("#### Top chains por TVL")
-        chains = defillama_data.get("top_chains", []) if isinstance(defillama_data, dict) else []
-        if chains:
-            df_chains = pd.DataFrame(chains[:15])
-            cols = [col for col in ["name", "symbol", "tvl", "change_1d", "change_7d"] if col in df_chains.columns]
-            st.dataframe(df_chains[cols], hide_index=True, use_container_width=True, height=430)
-        else:
-            st.info("DefiLlama sem dados de chains agora.")
-    with c2:
-        st.markdown("#### Top mercado CoinGecko")
-        markets = coingecko_data.get("markets", []) if isinstance(coingecko_data, dict) else []
-        if markets:
-            df_markets = pd.DataFrame(markets[:15])
-            cols = [col for col in ["symbol", "name", "current_price", "price_change_percentage_24h", "market_cap", "total_volume"] if col in df_markets.columns]
-            st.dataframe(df_markets[cols], hide_index=True, use_container_width=True, height=430)
-        else:
-            st.info("CoinGecko sem dados de mercado agora.")
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            st.markdown("#### Top chains por TVL")
+            chains = defillama_data.get("top_chains", []) if isinstance(defillama_data, dict) else []
+            if chains:
+                df_chains = pd.DataFrame(chains[:15])
+                cols = [col for col in ["name", "symbol", "tvl", "change_1d", "change_7d"] if col in df_chains.columns]
+                st.dataframe(df_chains[cols], hide_index=True, use_container_width=True, height=430)
+            else:
+                st.info("DefiLlama sem dados de chains agora.")
+        with c2:
+            st.markdown("#### Top mercado CoinGecko")
+            markets = coingecko_data.get("markets", []) if isinstance(coingecko_data, dict) else []
+            if markets:
+                df_markets = pd.DataFrame(markets[:15])
+                cols = [col for col in ["symbol", "name", "current_price", "price_change_percentage_24h", "market_cap", "total_volume"] if col in df_markets.columns]
+                st.dataframe(df_markets[cols], hide_index=True, use_container_width=True, height=430)
+            else:
+                st.info("CoinGecko sem dados de mercado agora.")
 
 
 @st.cache_data(ttl=240, show_spinner=False)
