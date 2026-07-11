@@ -5316,14 +5316,12 @@ def pagina_crypto_terminal():
         if not item:
             continue
         asset_cards.append(
-            f"""
-            <div class="crypto-asset">
-              <b>{sanitize_text(sym.replace("USDT", ""))}</b>
-              <small>{_money(item.get("price"), 4)} | 24h {_pct(item.get("change_pct_24h"))}</small>
-              <small>Vol {_money(item.get("quote_volume"), 1)} | Funding {_num(item.get("funding_rate")) * 100:+.4f}%</small>
-              <small>Range 24h: {_money(item.get("low_24h"), 4)} - {_money(item.get("high_24h"), 4)}</small>
-            </div>
-            """
+            "<div class='crypto-asset'>"
+            f"<b>{sanitize_text(sym.replace('USDT', ''))}</b>"
+            f"<small>{_money(item.get('price'), 4)} | 24h {_pct(item.get('change_pct_24h'))}</small>"
+            f"<small>Vol {_money(item.get('quote_volume'), 1)} | Funding {_num(item.get('funding_rate')) * 100:+.4f}%</small>"
+            f"<small>Range 24h: {_money(item.get('low_24h'), 4)} - {_money(item.get('high_24h'), 4)}</small>"
+            "</div>"
         )
     cards_html = "".join(asset_cards) or '<div class="crypto-card">Sem dados de ativos agora.</div>'
     st.markdown(f"<div class='crypto-assets'>{cards_html}</div>", unsafe_allow_html=True)
