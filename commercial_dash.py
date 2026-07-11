@@ -5047,7 +5047,7 @@ def pagina_watchlist_quant():
 @st.cache_data(ttl=60, show_spinner=False)
 def load_crypto_terminal_payload(refresh_key: int = 0):
     """Load public crypto sources and deterministic regime snapshot."""
-    from execution.crypto_bgeometrics import fetch_bgeometrics_mvrv_zscore_history, fetch_bgeometrics_snapshot
+    from execution.crypto_bgeometrics import fetch_bgeometrics_snapshot
     from execution.crypto_binance import fetch_binance_crypto_snapshot
     from execution.crypto_coingecko import fetch_coingecko_crypto_snapshot
     from execution.crypto_defillama import fetch_defillama_crypto_snapshot
@@ -5060,15 +5060,6 @@ def load_crypto_terminal_payload(refresh_key: int = 0):
     fear_greed = fetch_fear_greed_snapshot()
     defillama = fetch_defillama_crypto_snapshot()
     bgeometrics = fetch_bgeometrics_snapshot()
-    try:
-        bgeometrics_mvrv_history = fetch_bgeometrics_mvrv_zscore_history()
-    except Exception as exc:
-        bgeometrics_mvrv_history = {
-            "source": "BGeometrics",
-            "status": "error",
-            "data": {"points": []},
-            "warnings": [f"Historico MVRV indisponivel: {exc}"],
-        }
     regime = calculate_crypto_regime(binance, coingecko, fear_greed, defillama, bgeometrics)
     operational = build_crypto_operational_dashboard(binance, regime, coingecko)
     return {
@@ -5077,10 +5068,25 @@ def load_crypto_terminal_payload(refresh_key: int = 0):
         "fear_greed": fear_greed,
         "defillama": defillama,
         "bgeometrics": bgeometrics,
-        "bgeometrics_mvrv_history": bgeometrics_mvrv_history,
         "regime": regime,
         "operational": operational,
     }
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def load_crypto_mvrv_history(refresh_key: int = 0):
+    """Load MVRV history lazily so this optional chart never blocks app boot."""
+    try:
+        from execution.crypto_bgeometrics import fetch_bgeometrics_mvrv_zscore_history
+
+        return fetch_bgeometrics_mvrv_zscore_history()
+    except Exception as exc:
+        return {
+            "source": "BGeometrics",
+            "status": "error",
+            "data": {"points": []},
+            "warnings": [f"Historico MVRV indisponivel: {exc}"],
+        }
 
 
 def _crypto_mini_chart_html(symbol: str, asset: dict[str, Any], uid: str) -> str:
@@ -5229,14 +5235,12 @@ def pagina_crypto_terminal():
     fear_greed = payload.get("fear_greed", {})
     defillama = payload.get("defillama", {})
     bgeometrics = payload.get("bgeometrics", {})
-    bgeometrics_mvrv_history = payload.get("bgeometrics_mvrv_history", {})
     regime = payload.get("regime", {})
     operational = payload.get("operational", {})
     binance_data = binance.get("data", {}) if isinstance(binance, dict) else {}
     coingecko_data = coingecko.get("data", {}) if isinstance(coingecko, dict) else {}
     defillama_data = defillama.get("data", {}) if isinstance(defillama, dict) else {}
     bgeometrics_data = bgeometrics.get("data", {}) if isinstance(bgeometrics, dict) else {}
-    mvrv_history_data = bgeometrics_mvrv_history.get("data", {}) if isinstance(bgeometrics_mvrv_history, dict) else {}
     fear_data = fear_greed.get("data", {}) if isinstance(fear_greed, dict) else {}
 
     def _num(value, default=0.0):
@@ -5544,10 +5548,10 @@ def pagina_crypto_terminal():
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        _crypto_mvrv_chart_html(mvrv_history_data.get("points") or []),
-        unsafe_allow_html=True,
-    )
+    mvrv_refresh_key = int(st.session_state.get("crypto_terminal_refresh_key", 0))
+    bgeometrics_mvrv_history = load_crypto_mvrv_history(mvrv_refresh_key)
+    mvrv_history_data = bgeometrics_mvrv_history.get("data", {}) if isinstance(bgeometrics_mvrv_history, dict) else {}
+    st.markdown(_crypto_mvrv_chart_html(mvrv_history_data.get("points") or []), unsafe_allow_html=True)
 
     st.markdown("#### Majors e Altcoins")
     top_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "LINKUSDT", "AVAXUSDT", "SUIUSDT"]
