@@ -117,6 +117,7 @@ def calculate_crypto_regime(
     coingecko_payload: dict[str, Any],
     fear_payload: dict[str, Any],
     defillama_payload: dict[str, Any],
+    bgeometrics_payload: dict[str, Any] | None = None,
     save_file: bool = True,
 ) -> dict[str, Any]:
     assets = list(_asset_map(binance_payload).values())
@@ -124,6 +125,7 @@ def calculate_crypto_regime(
     gecko = (coingecko_payload or {}).get("data") or {}
     fear = ((fear_payload or {}).get("data") or {}).get("current") or {}
     defi = (defillama_payload or {}).get("data") or {}
+    onchain = (bgeometrics_payload or {}).get("data") or {}
 
     score = 50.0
     positive: list[str] = []
@@ -200,6 +202,29 @@ def calculate_crypto_regime(
     else:
         missing.append("TVL DeFi")
 
+    mvrv_z = safe_float(onchain.get("mvrv_z_score"))
+    mvrv = safe_float(onchain.get("mvrv"))
+    if mvrv_z:
+        if mvrv_z >= 7:
+            score -= 14
+            alerts.append(f"MVRV Z-Score em euforia de ciclo ({mvrv_z:.2f})")
+            negative.append("On-chain sugere risco assimetrico de topo no Bitcoin")
+        elif mvrv_z >= 4:
+            score -= 7
+            negative.append(f"MVRV Z-Score aquecido ({mvrv_z:.2f})")
+        elif mvrv_z <= 0:
+            score += 8
+            positive.append(f"MVRV Z-Score em zona de acumulacao ({mvrv_z:.2f})")
+        elif mvrv_z <= 2:
+            score += 3
+            positive.append(f"MVRV Z-Score saudavel para ciclo ({mvrv_z:.2f})")
+        else:
+            positive.append(f"MVRV Z-Score neutro/aquecendo ({mvrv_z:.2f})")
+        if mvrv:
+            positive.append(f"MVRV BTC {mvrv:.2f}x")
+    else:
+        missing.append("MVRV Z-Score BGeometrics")
+
     score = max(0, min(100, score))
     confidence = max(25, min(95, 100 - len(missing) * 10))
     regime = _classify(score, fear_value, funding_pressure)
@@ -215,6 +240,11 @@ def calculate_crypto_regime(
         "drivers_negative": negative[:8],
         "alerts": alerts[:8],
         "missing_data": missing,
+        "onchain": {
+            "mvrv": round(mvrv, 4) if mvrv else None,
+            "mvrv_z_score": round(mvrv_z, 4) if mvrv_z else None,
+            "date": onchain.get("date"),
+        },
     }
     if save_file:
         save_cache("crypto_regime.json", result)

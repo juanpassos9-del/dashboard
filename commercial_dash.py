@@ -5047,6 +5047,7 @@ def pagina_watchlist_quant():
 @st.cache_data(ttl=60, show_spinner=False)
 def load_crypto_terminal_payload(refresh_key: int = 0):
     """Load public crypto sources and deterministic regime snapshot."""
+    from execution.crypto_bgeometrics import fetch_bgeometrics_snapshot
     from execution.crypto_binance import fetch_binance_crypto_snapshot
     from execution.crypto_coingecko import fetch_coingecko_crypto_snapshot
     from execution.crypto_defillama import fetch_defillama_crypto_snapshot
@@ -5058,13 +5059,15 @@ def load_crypto_terminal_payload(refresh_key: int = 0):
     coingecko = fetch_coingecko_crypto_snapshot()
     fear_greed = fetch_fear_greed_snapshot()
     defillama = fetch_defillama_crypto_snapshot()
-    regime = calculate_crypto_regime(binance, coingecko, fear_greed, defillama)
+    bgeometrics = fetch_bgeometrics_snapshot()
+    regime = calculate_crypto_regime(binance, coingecko, fear_greed, defillama, bgeometrics)
     operational = build_crypto_operational_dashboard(binance, regime, coingecko)
     return {
         "binance": binance,
         "coingecko": coingecko,
         "fear_greed": fear_greed,
         "defillama": defillama,
+        "bgeometrics": bgeometrics,
         "regime": regime,
         "operational": operational,
     }
@@ -5154,11 +5157,13 @@ def pagina_crypto_terminal():
     coingecko = payload.get("coingecko", {})
     fear_greed = payload.get("fear_greed", {})
     defillama = payload.get("defillama", {})
+    bgeometrics = payload.get("bgeometrics", {})
     regime = payload.get("regime", {})
     operational = payload.get("operational", {})
     binance_data = binance.get("data", {}) if isinstance(binance, dict) else {}
     coingecko_data = coingecko.get("data", {}) if isinstance(coingecko, dict) else {}
     defillama_data = defillama.get("data", {}) if isinstance(defillama, dict) else {}
+    bgeometrics_data = bgeometrics.get("data", {}) if isinstance(bgeometrics, dict) else {}
     fear_data = fear_greed.get("data", {}) if isinstance(fear_greed, dict) else {}
 
     def _num(value, default=0.0):
@@ -5249,6 +5254,20 @@ def pagina_crypto_terminal():
             return "bad"
         return "warn"
 
+    def _mvrv_zone(value):
+        z = _num(value, None)
+        if z is None or z == 0:
+            return "Sem dado", "neutral", "Aguardando BGeometrics/cache."
+        if z < 0:
+            return "Acumulacao profunda", "good", "Bitcoin negociando abaixo do valor realizado ajustado."
+        if z < 2:
+            return "Saudavel", "good", "Zona historicamente construtiva para ciclo."
+        if z < 4:
+            return "Neutro / aquecendo", "warn", "Risco de ciclo ainda controlado, mas monitorar aceleracao."
+        if z < 7:
+            return "Risco de ciclo", "bad", "On-chain aquecido; reduzir complacencia em beta cripto."
+        return "Euforia", "bad", "Zona historicamente associada a assimetria pior para novas compras."
+
     def _rotation_cards_html(rows):
         cards = []
         for row in rows[:8]:
@@ -5313,6 +5332,11 @@ def pagina_crypto_terminal():
     eth_dom = _num(global_data.get("eth_dominance"))
     tvl = _num(defillama_data.get("total_tvl_usd"))
     stable_cap = _num(defillama_data.get("stablecoin_market_cap_usd"))
+    mvrv_z = _num(bgeometrics_data.get("mvrv_z_score"), None)
+    mvrv_ratio = _num(bgeometrics_data.get("mvrv"), None)
+    mvrv_zone, mvrv_cls, mvrv_text = _mvrv_zone(mvrv_z)
+    mvrv_status = sanitize_text(bgeometrics.get("status", "---") if isinstance(bgeometrics, dict) else "---")
+    mvrv_date = sanitize_text(bgeometrics_data.get("date", "---"))
 
     st.markdown(
         f"""
@@ -5330,6 +5354,14 @@ def pagina_crypto_terminal():
           .crypto-kpi span {{display:block; color:#94A3B8; font-size:.7rem; font-weight:900; text-transform:uppercase;}}
           .crypto-kpi strong {{display:block; color:#F8FAFC; font-size:1.22rem; margin-top:5px;}}
           .crypto-kpi em {{display:block; color:#94A3B8; font-size:.72rem; font-style:normal; margin-top:4px;}}
+          .crypto-onchain {{display:grid; grid-template-columns:.85fr 1.15fr; gap:12px; margin:-2px 0 16px;}}
+          .crypto-onchain-main {{background:linear-gradient(135deg,#07111F,#101728); border:1px solid #28405E; border-left:5px solid #22D3EE; border-radius:8px; padding:13px;}}
+          .crypto-onchain-main strong {{display:block; color:#F8FAFC; font-size:2rem; line-height:1; margin-top:5px;}}
+          .crypto-onchain-main p {{margin:8px 0 0; color:#CBD5E1; font-weight:800;}}
+          .crypto-onchain-grid {{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px;}}
+          .crypto-onchain-grid div {{background:#08111F; border:1px solid #203047; border-radius:8px; padding:10px;}}
+          .crypto-onchain-grid span {{display:block; color:#94A3B8; font-size:.68rem; font-weight:900; text-transform:uppercase;}}
+          .crypto-onchain-grid b {{display:block; color:#F8FAFC; font-size:1rem; margin-top:4px;}}
           .crypto-assets {{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; margin-bottom:16px;}}
           .crypto-asset {{background:linear-gradient(180deg,#08111F,#050B14); border:1px solid #203047; border-radius:8px; padding:11px;}}
           .crypto-asset b {{display:block; color:#F8FAFC; font-size:1rem;}}
@@ -5380,6 +5412,8 @@ def pagina_crypto_terminal():
             .crypto-hero {{grid-template-columns:1fr;}}
             .crypto-grid {{grid-template-columns:repeat(2,minmax(0,1fr));}}
             .crypto-assets {{grid-template-columns:repeat(2,minmax(0,1fr));}}
+            .crypto-onchain {{grid-template-columns:1fr;}}
+            .crypto-onchain-grid {{grid-template-columns:1fr;}}
             .crypto-alerts {{grid-template-columns:1fr;}}
             .crypto-rotation {{grid-template-columns:1fr;}}
             .crypto-class-grid {{grid-template-columns:repeat(2,minmax(0,1fr));}}
@@ -5408,6 +5442,19 @@ def pagina_crypto_terminal():
           <div class="crypto-kpi"><span>ETH</span><strong>{_money(eth.get("price"), 2)}</strong><em>24h {_pct(eth.get("change_pct_24h"))}</em></div>
           <div class="crypto-kpi"><span>Market Cap</span><strong>{_money(market_cap, 2)}</strong><em>Volume 24h {_money(volume_24h, 2)}</em></div>
           <div class="crypto-kpi"><span>DeFi + Stablecoins</span><strong>TVL {_money(tvl, 2)}</strong><em>Stables {_money(stable_cap, 2)}</em></div>
+        </div>
+        <div class="crypto-onchain">
+          <div class="crypto-onchain-main">
+            <span class="crypto-label">Bitcoin On-chain | MVRV Z-Score</span>
+            <strong>{'---' if mvrv_z is None else f'{mvrv_z:.2f}'}</strong>
+            <span class="crypto-chip {mvrv_cls}">{sanitize_text(mvrv_zone)}</span>
+            <p>{sanitize_text(mvrv_text)}</p>
+          </div>
+          <div class="crypto-onchain-grid">
+            <div><span>MVRV</span><b>{'---' if mvrv_ratio is None else f'{mvrv_ratio:.2f}x'}</b></div>
+            <div><span>Data on-chain</span><b>{mvrv_date}</b></div>
+            <div><span>Fonte</span><b>BGeometrics · {mvrv_status}</b></div>
+          </div>
         </div>
         """,
         unsafe_allow_html=True,

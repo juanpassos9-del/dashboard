@@ -11,6 +11,7 @@ Adicionar ao dashboard atual uma pagina `Crypto Terminal` com leitura operaciona
 | CoinGecko Public API | market cap, dominance aproximada, rankings | Nao | agregado | 10min | ultimo `.tmp/crypto_coingecko.json` |
 | Alternative.me | Fear & Greed atual/historico | Nao | diario | 60min | ultimo `.tmp/crypto_fear_greed.json` |
 | DefiLlama | TVL, stablecoins, protocolos/chains | Nao | agregado | 15min | ultimo `.tmp/crypto_defillama.json` |
+| BGeometrics | Snapshot on-chain BTC, MVRV e MVRV Z-Score | Sim (`BGEOMETRICS_API_KEY`) | diario/ciclo | 6h | ultimo `.tmp/crypto_bgeometrics.json` |
 
 ## Regras
 - Nao usar dados simulados sem rotulo `DEMO`.
@@ -43,6 +44,18 @@ Adicionar ao dashboard atual uma pagina `Crypto Terminal` com leitura operaciona
 - Leitura IA local curta e deterministica para interpretar se o fluxo esta em Majors, Altcoins ou defensivo.
 - Rankings operacionais passam a exibir a subclasse do ativo para facilitar leitura de beta e concentracao de risco.
 
+## Fase 4 Entregavel
+- Provider `execution/crypto_bgeometrics.py` para snapshot on-chain do Bitcoin via BGeometrics.
+- Card `Bitcoin On-chain` no Crypto Terminal com MVRV, MVRV Z-Score, data da leitura e zona de ciclo.
+- Motor de regime usa MVRV Z-Score como sinal de ciclo:
+  - abaixo de 0: acumulacao;
+  - 0 a 2: saudavel;
+  - 2 a 4: neutro/aquecendo;
+  - 4 a 7: risco de ciclo;
+  - acima de 7: euforia.
+- A chave nunca deve ser commitada. Usar `.env` local ou secret `BGEOMETRICS_API_KEY` no ambiente online.
+- Por limite de plano gratuito, manter cache de 6 horas e usar cache stale se a API falhar.
+
 ## Motor de Regime
 Classificar em:
 - `Risk-on forte`
@@ -64,5 +77,6 @@ Variaveis iniciais:
 - Fear & Greed
 - TVL DeFi
 - market cap/stablecoin dominance quando disponivel
+- MVRV / MVRV Z-Score do Bitcoin via BGeometrics quando configurado
 
 O resultado deve mostrar score, confianca, drivers positivos, drivers negativos, alertas e dados ausentes.
