@@ -5154,6 +5154,9 @@ def _render_crypto_mvrv_chart(points: list[dict[str, Any]]) -> None:
         {
             "time": int(row.get("time") or 0),
             "value": float(row.get("value") or 0),
+            "btc_price": float(row.get("btc_price") or 0),
+            "realized_price": float(row.get("realized_price") or 0),
+            "mvrv": float(row.get("mvrv") or 0),
         }
         for row in points
         if row.get("time") and row.get("value") is not None
@@ -5163,22 +5166,42 @@ def _render_crypto_mvrv_chart(points: list[dict[str, Any]]) -> None:
         return
 
     import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
 
     df = pd.DataFrame(chart_points)
     df["date"] = pd.to_datetime(df["time"], unit="s", utc=True)
     latest = chart_points[-1]["value"]
-    fig = go.Figure()
-    fig.add_hrect(y0=0, y1=2, fillcolor="rgba(0,208,132,.10)", line_width=0, layer="below")
-    fig.add_hrect(y0=2, y1=4, fillcolor="rgba(255,176,32,.10)", line_width=0, layer="below")
-    fig.add_hrect(y0=4, y1=7, fillcolor="rgba(255,75,75,.10)", line_width=0, layer="below")
+    has_price = bool((df["btc_price"] > 0).any() and (df["realized_price"] > 0).any())
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    if has_price:
+        price_df = df[df["btc_price"] > 0]
+        realized_df = df[df["realized_price"] > 0]
+        fig.add_trace(go.Scatter(
+            x=price_df["date"],
+            y=price_df["btc_price"],
+            mode="lines",
+            name="BTC Price",
+            line={"color": "#E5E7EB", "width": 1.7},
+            hovertemplate="%{x|%d/%m/%Y}<br>BTC: US$ %{y:,.0f}<extra></extra>",
+        ), secondary_y=False)
+        fig.add_trace(go.Scatter(
+            x=realized_df["date"],
+            y=realized_df["realized_price"],
+            mode="lines",
+            name="Realized Price",
+            line={"color": "#22D3EE", "width": 1.8},
+            hovertemplate="%{x|%d/%m/%Y}<br>Realized: US$ %{y:,.0f}<extra></extra>",
+        ), secondary_y=False)
     fig.add_trace(go.Scatter(
         x=df["date"],
         y=df["value"],
         mode="lines",
         name="MVRV Z-Score",
-        line={"color": "#22D3EE", "width": 2},
+        line={"color": "#FF9800", "width": 2},
         hovertemplate="%{x|%d/%m/%Y}<br>Z-Score: %{y:.2f}<extra></extra>",
-    ))
+    ), secondary_y=True)
+    fig.add_hrect(y0=-0.7, y1=0, fillcolor="rgba(0,208,132,.12)", line_width=0, layer="below", secondary_y=True)
+    fig.add_hrect(y0=7, y1=10, fillcolor="rgba(255,75,75,.13)", line_width=0, layer="below", secondary_y=True)
     for level, color, label in [(0, "#00D084", "0"), (2, "#FFB020", "2"), (4, "#FF4B4B", "4"), (7, "#FF4B4B", "7")]:
         fig.add_hline(
             y=level,
@@ -5187,26 +5210,44 @@ def _render_crypto_mvrv_chart(points: list[dict[str, Any]]) -> None:
             annotation_text=label,
             annotation_position="right",
             annotation_font_color=color,
+            secondary_y=True,
         )
     fig.update_layout(
-        height=360,
-        margin={"l": 10, "r": 20, "t": 8, "b": 10},
+        height=470,
+        margin={"l": 10, "r": 22, "t": 8, "b": 10},
         paper_bgcolor="#050B14",
         plot_bgcolor="#050B14",
         font={"color": "#AAB7C4"},
-        showlegend=False,
+        legend={"orientation": "h", "y": -0.08, "x": 0.01, "font": {"size": 11}},
         xaxis={"gridcolor": "rgba(148,163,184,.08)", "zeroline": False},
-        yaxis={"gridcolor": "rgba(148,163,184,.08)", "zeroline": False, "side": "right"},
+    )
+    if has_price:
+        fig.update_yaxes(
+            type="log",
+            title_text="BTC / Realized Price",
+            gridcolor="rgba(148,163,184,.08)",
+            zeroline=False,
+            tickprefix="US$ ",
+            secondary_y=False,
+        )
+    else:
+        fig.update_yaxes(visible=False, secondary_y=False)
+    fig.update_yaxes(
+        title_text="MVRV Z-Score",
+        range=[-1, 10],
+        gridcolor="rgba(148,163,184,.08)",
+        zeroline=False,
+        secondary_y=True,
     )
     st.markdown(
         f"""
     <div class="crypto-mvrv-card">
       <div class="crypto-mvrv-head">
-        <div><span class="crypto-label">Historico MVRV Z-Score</span><b>{latest:.2f}</b></div>
+        <div><span class="crypto-label">Bitcoin: MVRV Z-Score</span><b>{latest:.2f}</b></div>
         <div class="crypto-mvrv-legend">
-          <span class="green">0-2 saudavel</span>
-          <span class="yellow">2-4 aquecendo</span>
-          <span class="red">4+ risco</span>
+          <span class="green">acumulacao</span>
+          <span class="yellow">neutro</span>
+          <span class="red">euforia</span>
         </div>
       </div>
     </div>

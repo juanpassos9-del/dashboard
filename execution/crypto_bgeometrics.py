@@ -23,6 +23,7 @@ SOURCE = "BGeometrics"
 SNAPSHOT_URL = "https://bitcoin-data.com/api/v1/snapshot"
 MVRV_ZSCORE_URL = "https://bitcoin-data.com/api/v1/mvrv-zscore"
 PUBLIC_MVRV_CHART_URL = "https://charts.bgeometrics.com/graphics/mvrv_400.html"
+PUBLIC_MVRV_PRICE_URL = "https://charts.bgeometrics.com/files/mvrv_zscore_btc_price.json"
 
 
 def _read_env_key(name: str) -> str:
@@ -118,16 +119,43 @@ def _fetch_public_mvrv_chart_history(days: int) -> tuple[list[dict[str, Any]], i
     )
     response.raise_for_status()
     latency_ms = int((time.perf_counter() - started) * 1000)
-    match = re.search(r"const\s+data_mvrv_zscore\s*=\s*(\[.*?\]);", response.text, re.S)
-    if not match:
+    z_match = re.search(r"const\s+data_mvrv_zscore\s*=\s*(\[.*?\]);", response.text, re.S)
+    mvrv_match = re.search(r"const\s+data_mvrv\s*=\s*(\[.*?\]);", response.text, re.S)
+    if not z_match:
         return [], latency_ms
     import json
 
     try:
-        points = _normalize_highcharts_pairs(json.loads(match.group(1)))
+        points = _normalize_highcharts_pairs(json.loads(z_match.group(1)))
+        mvrv_points = _normalize_highcharts_pairs(json.loads(mvrv_match.group(1))) if mvrv_match else []
     except Exception:
         return [], latency_ms
-    return points[-int(days):], latency_ms
+    mvrv_by_time = {int(row.get("time") or 0): safe_float(row.get("value")) for row in mvrv_points}
+    try:
+        price_response = requests.get(
+            PUBLIC_MVRV_PRICE_URL,
+            timeout=15,
+            headers={"User-Agent": "TTS-Crypto-Terminal/1.0"},
+        )
+        price_response.raise_for_status()
+        price_rows = _normalize_highcharts_pairs(price_response.json())
+    except Exception:
+        price_rows = []
+    price_by_time = {int(row.get("time") or 0): safe_float(row.get("value")) for row in price_rows}
+    enriched: list[dict[str, Any]] = []
+    for row in points:
+        item = dict(row)
+        ts = int(item.get("time") or 0)
+        mvrv = mvrv_by_time.get(ts)
+        price = price_by_time.get(ts)
+        if mvrv:
+            item["mvrv"] = round(mvrv, 4)
+        if price:
+            item["btc_price"] = round(price, 2)
+        if mvrv and price:
+            item["realized_price"] = round(price / mvrv, 2)
+        enriched.append(item)
+    return enriched[-int(days):], latency_ms
 
 
 def fetch_bgeometrics_snapshot(max_age_seconds: int = 21600, force_refresh: bool = False) -> dict[str, Any]:
@@ -190,6 +218,29 @@ def fetch_bgeometrics_mvrv_zscore_history(
             rows = len((cached.get("data") or {}).get("points") or [])
             mark_source("Crypto BGeometrics MVRV", "ok", rows=rows, source=SOURCE, message="Historico MVRV em cache.")
             return cached
+
+    try:
+        points, latency_ms = _fetch_public_mvrv_chart_history(days)
+        if points:
+            payload = {
+                "source": f"{SOURCE} Public Chart",
+                "status": "ok",
+                "updated_at": utc_now_iso(),
+                "updated_ts": time.time(),
+                "latency_ms": latency_ms,
+                "data": {
+                    "metric": "MVRV Z-Score",
+                    "points": points,
+                    "latest": points[-1],
+                    "startday": points[0].get("date"),
+                },
+                "warnings": ["Historico carregado pelo grafico publico da BGeometrics."],
+            }
+            save_cache(HISTORY_CACHE_NAME, payload)
+            mark_source("Crypto BGeometrics MVRV", "ok", rows=len(points), source=SOURCE, message="Historico publico MVRV carregado.")
+            return payload
+    except Exception:
+        pass
 
     api_key = _read_env_key("BGEOMETRICS_API_KEY")
     if not api_key:
