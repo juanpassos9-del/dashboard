@@ -24,6 +24,16 @@ def _read_env_key(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if value:
         return value
+
+    try:
+        import streamlit as st  # type: ignore
+
+        secret_value = st.secrets.get(name, "") if hasattr(st, "secrets") else ""
+        if secret_value:
+            return str(secret_value).strip()
+    except Exception:
+        pass
+
     env_path = os.path.join(PROJECT_ROOT, ".env")
     if not os.path.exists(env_path):
         return ""
