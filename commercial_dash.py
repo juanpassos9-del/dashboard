@@ -5149,7 +5149,7 @@ def _crypto_mini_chart_html(symbol: str, asset: dict[str, Any], uid: str) -> str
     """
 
 
-def _crypto_mvrv_chart_html(points: list[dict[str, Any]], uid: str = "mvrv-zscore") -> str:
+def _render_crypto_mvrv_chart(points: list[dict[str, Any]]) -> None:
     chart_points = [
         {
             "time": int(row.get("time") or 0),
@@ -5159,10 +5159,47 @@ def _crypto_mvrv_chart_html(points: list[dict[str, Any]], uid: str = "mvrv-zscor
         if row.get("time") and row.get("value") is not None
     ][-730:]
     if not chart_points:
-        return "<div class='crypto-empty'>Sem historico MVRV Z-Score disponivel agora.</div>"
-    payload = json.dumps({"points": chart_points}, ensure_ascii=False)
+        st.markdown("<div class='crypto-empty'>Sem historico MVRV Z-Score disponivel agora.</div>", unsafe_allow_html=True)
+        return
+
+    import plotly.graph_objects as go
+
+    df = pd.DataFrame(chart_points)
+    df["date"] = pd.to_datetime(df["time"], unit="s", utc=True)
     latest = chart_points[-1]["value"]
-    return f"""
+    fig = go.Figure()
+    fig.add_hrect(y0=0, y1=2, fillcolor="rgba(0,208,132,.10)", line_width=0, layer="below")
+    fig.add_hrect(y0=2, y1=4, fillcolor="rgba(255,176,32,.10)", line_width=0, layer="below")
+    fig.add_hrect(y0=4, y1=7, fillcolor="rgba(255,75,75,.10)", line_width=0, layer="below")
+    fig.add_trace(go.Scatter(
+        x=df["date"],
+        y=df["value"],
+        mode="lines",
+        name="MVRV Z-Score",
+        line={"color": "#22D3EE", "width": 2},
+        hovertemplate="%{x|%d/%m/%Y}<br>Z-Score: %{y:.2f}<extra></extra>",
+    ))
+    for level, color, label in [(0, "#00D084", "0"), (2, "#FFB020", "2"), (4, "#FF4B4B", "4"), (7, "#FF4B4B", "7")]:
+        fig.add_hline(
+            y=level,
+            line_dash="dash",
+            line_color=color,
+            annotation_text=label,
+            annotation_position="right",
+            annotation_font_color=color,
+        )
+    fig.update_layout(
+        height=360,
+        margin={"l": 10, "r": 20, "t": 8, "b": 10},
+        paper_bgcolor="#050B14",
+        plot_bgcolor="#050B14",
+        font={"color": "#AAB7C4"},
+        showlegend=False,
+        xaxis={"gridcolor": "rgba(148,163,184,.08)", "zeroline": False},
+        yaxis={"gridcolor": "rgba(148,163,184,.08)", "zeroline": False, "side": "right"},
+    )
+    st.markdown(
+        f"""
     <div class="crypto-mvrv-card">
       <div class="crypto-mvrv-head">
         <div><span class="crypto-label">Historico MVRV Z-Score</span><b>{latest:.2f}</b></div>
@@ -5172,42 +5209,11 @@ def _crypto_mvrv_chart_html(points: list[dict[str, Any]], uid: str = "mvrv-zscor
           <span class="red">4+ risco</span>
         </div>
       </div>
-      <div id="crypto-mvrv-{uid}" class="crypto-mvrv-chart"></div>
     </div>
-    <script>
-    (function() {{
-      const payload = {payload};
-      const root = document.getElementById("crypto-mvrv-{uid}");
-      if (!root || !window.LightweightCharts || !payload.points || !payload.points.length) return;
-      const chart = LightweightCharts.createChart(root, {{
-        layout: {{ background: {{ color: "#050B14" }}, textColor: "#AAB7C4" }},
-        grid: {{ vertLines: {{ color: "rgba(148,163,184,.08)" }}, horzLines: {{ color: "rgba(148,163,184,.08)" }} }},
-        rightPriceScale: {{ borderVisible: false }},
-        timeScale: {{ borderVisible: false, timeVisible: false, rightOffset: 5 }},
-        crosshair: {{ mode: 1 }},
-      }});
-      let series;
-      if (chart.addSeries && LightweightCharts.LineSeries) {{
-        series = chart.addSeries(LightweightCharts.LineSeries, {{ color: "#22D3EE", lineWidth: 2, priceLineVisible: false }});
-      }} else {{
-        series = chart.addLineSeries({{ color: "#22D3EE", lineWidth: 2, priceLineVisible: false }});
-      }}
-      series.setData(payload.points);
-      [0, 2, 4, 7].forEach(function(level) {{
-        series.createPriceLine({{
-          price: level,
-          color: level >= 4 ? "#FF4B4B" : (level >= 2 ? "#FFB020" : "#00D084"),
-          lineWidth: level === 0 ? 1 : 2,
-          lineStyle: LightweightCharts.LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: "Z " + level
-        }});
-      }});
-      chart.timeScale().fitContent();
-      new ResizeObserver(function() {{ chart.applyOptions({{ width: root.clientWidth }}); }}).observe(root);
-    }})();
-    </script>
-    """
+        """,
+        unsafe_allow_html=True,
+    )
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
 def pagina_crypto_terminal():
@@ -5551,7 +5557,7 @@ def pagina_crypto_terminal():
     mvrv_refresh_key = int(st.session_state.get("crypto_terminal_refresh_key", 0))
     bgeometrics_mvrv_history = load_crypto_mvrv_history(mvrv_refresh_key)
     mvrv_history_data = bgeometrics_mvrv_history.get("data", {}) if isinstance(bgeometrics_mvrv_history, dict) else {}
-    st.markdown(_crypto_mvrv_chart_html(mvrv_history_data.get("points") or []), unsafe_allow_html=True)
+    _render_crypto_mvrv_chart(mvrv_history_data.get("points") or [])
 
     st.markdown("#### Majors e Altcoins")
     top_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "LINKUSDT", "AVAXUSDT", "SUIUSDT"]
