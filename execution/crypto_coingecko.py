@@ -26,7 +26,7 @@ def fetch_coingecko_crypto_snapshot(save_file: bool = True) -> dict[str, Any]:
                 "order": "market_cap_desc",
                 "per_page": 50,
                 "page": 1,
-                "sparkline": "false",
+                "sparkline": "true",
                 "price_change_percentage": "1h,24h,7d,30d",
             },
             timeout=10,

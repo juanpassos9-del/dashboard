@@ -15,6 +15,59 @@ def _asset_rows(binance_payload: dict[str, Any]) -> list[dict[str, Any]]:
     return ((binance_payload or {}).get("data") or {}).get("assets") or []
 
 
+def _coingecko_rows(coingecko_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    return ((coingecko_payload or {}).get("data") or {}).get("markets") or []
+
+
+def _normalized_rows(
+    binance_payload: dict[str, Any],
+    coingecko_payload: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    rows = [row for row in _asset_rows(binance_payload) if isinstance(row, dict) and row.get("price")]
+    if rows:
+        return rows
+
+    out = []
+    for item in _coingecko_rows(coingecko_payload or {})[:20]:
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("symbol") or "").upper()
+        if not symbol:
+            continue
+        sparkline = ((item.get("sparkline_in_7d") or {}).get("price") or [])
+        candles = []
+        start_time = int(safe_float(item.get("last_updated_ts")) or 0)
+        if not start_time:
+            import time
+            start_time = int(time.time())
+        if isinstance(sparkline, list):
+            for idx, price in enumerate(sparkline[-80:]):
+                px = safe_float(price)
+                if px <= 0:
+                    continue
+                candles.append({
+                    "time": start_time - (len(sparkline[-80:]) - idx) * 3600,
+                    "open": px,
+                    "high": px,
+                    "low": px,
+                    "close": px,
+                    "volume": 0,
+                })
+        out.append({
+            "symbol": f"{symbol}USDT",
+            "price": safe_float(item.get("current_price")),
+            "change_pct_24h": safe_float(item.get("price_change_percentage_24h")),
+            "quote_volume": safe_float(item.get("total_volume")),
+            "high_24h": safe_float(item.get("high_24h")),
+            "low_24h": safe_float(item.get("low_24h")),
+            "funding_rate": 0,
+            "candles_1h": candles,
+            "trend_80h_pct": safe_float(item.get("price_change_percentage_7d_in_currency")),
+            "source": "CoinGecko fallback",
+        })
+    return out
+
+
 def _returns(candles: list[dict[str, Any]]) -> list[float]:
     closes = [safe_float(row.get("close")) for row in candles if safe_float(row.get("close")) > 0]
     out: list[float] = []
@@ -47,14 +100,18 @@ def _funding_annual_pct(asset: dict[str, Any]) -> float:
     return safe_float(asset.get("funding_rate")) * 3 * 365 * 100
 
 
-def build_crypto_operational_dashboard(binance_payload: dict[str, Any], regime: dict[str, Any]) -> dict[str, Any]:
+def build_crypto_operational_dashboard(
+    binance_payload: dict[str, Any],
+    regime: dict[str, Any],
+    coingecko_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     rows = []
     alerts = []
     regime_name = str((regime or {}).get("regime") or "Neutro")
     risk_on = "Risk-on" in regime_name or regime_name == "Euforia"
     risk_off = "Risk-off" in regime_name or regime_name in {"Capitulacao", "Desalavancagem"}
 
-    for asset in _asset_rows(binance_payload):
+    for asset in _normalized_rows(binance_payload, coingecko_payload):
         symbol = str(asset.get("symbol") or "")
         if not symbol:
             continue

@@ -5059,7 +5059,7 @@ def load_crypto_terminal_payload(refresh_key: int = 0):
     fear_greed = fetch_fear_greed_snapshot()
     defillama = fetch_defillama_crypto_snapshot()
     regime = calculate_crypto_regime(binance, coingecko, fear_greed, defillama)
-    operational = build_crypto_operational_dashboard(binance, regime)
+    operational = build_crypto_operational_dashboard(binance, regime, coingecko)
     return {
         "binance": binance,
         "coingecko": coingecko,
@@ -5160,11 +5160,6 @@ def pagina_crypto_terminal():
     coingecko_data = coingecko.get("data", {}) if isinstance(coingecko, dict) else {}
     defillama_data = defillama.get("data", {}) if isinstance(defillama, dict) else {}
     fear_data = fear_greed.get("data", {}) if isinstance(fear_greed, dict) else {}
-    symbols = {
-        str(item.get("symbol")): item
-        for item in (binance_data.get("assets") or [])
-        if isinstance(item, dict) and item.get("symbol")
-    }
 
     def _num(value, default=0.0):
         try:
@@ -5173,6 +5168,52 @@ def pagina_crypto_terminal():
             return float(value)
         except Exception:
             return default
+
+    symbols = {
+        str(item.get("symbol")): item
+        for item in (binance_data.get("assets") or [])
+        if isinstance(item, dict) and item.get("symbol")
+    }
+    if not symbols:
+        import time as _time
+        now_ts = int(_time.time())
+        for item in (coingecko_data.get("markets") or [])[:20]:
+            if not isinstance(item, dict):
+                continue
+            symbol = str(item.get("symbol") or "").upper()
+            if not symbol:
+                continue
+            spark = ((item.get("sparkline_in_7d") or {}).get("price") or [])[-80:]
+            candles = []
+            for idx, price in enumerate(spark):
+                px = _num(price)
+                if px <= 0:
+                    continue
+                candles.append({
+                    "time": now_ts - (len(spark) - idx) * 3600,
+                    "open": px,
+                    "high": px,
+                    "low": px,
+                    "close": px,
+                    "volume": 0,
+                })
+            symbols[f"{symbol}USDT"] = {
+                "symbol": f"{symbol}USDT",
+                "price": _num(item.get("current_price")),
+                "change_pct_24h": _num(item.get("price_change_percentage_24h")),
+                "quote_volume": _num(item.get("total_volume")),
+                "high_24h": _num(item.get("high_24h")),
+                "low_24h": _num(item.get("low_24h")),
+                "funding_rate": 0,
+                "candles_1h": candles,
+                "trend_80h_pct": _num(item.get("price_change_percentage_7d_in_currency")),
+            }
+    if not isinstance(operational, dict) or not operational.get("ranking"):
+        try:
+            from execution.crypto_signals import build_crypto_operational_dashboard
+            operational = build_crypto_operational_dashboard(binance, regime, coingecko)
+        except Exception:
+            operational = {}
 
     def _money(value, decimals=2):
         value = _num(value)
