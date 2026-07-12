@@ -3583,6 +3583,144 @@ def render_terminal_global_layout_css():
     )
 
 
+def render_terminal_global_macro_class_comparatives():
+    """Render four compact macro class comparison charts below Terminal Global charts."""
+    def render_macro_class_chart(title, description, container_id, main_symbol, main_color, overlays):
+        chart_height = 860
+        interval = "5"
+        studies = ",\n          ".join(
+            [
+                '{{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "{}" }}, "plots": {{ "Plot": {{ "color": "{}" }} }} }}'.format(symbol, color)
+                for symbol, color, _label in overlays
+            ]
+        )
+        legend_items = "".join(
+            [
+                f"<span style='display:inline-flex; align-items:center; gap:5px; margin-right:9px; margin-bottom:5px; color:#CBD5E1; font-size:0.68rem; font-weight:800;'><i style='width:8px; height:8px; border-radius:50%; background:{color}; display:inline-block;'></i>{label}</span>"
+                for _symbol, color, label in [(main_symbol, main_color, "Base")] + overlays
+            ]
+        )
+        st.markdown(f"#### {title}")
+        st.markdown(
+            f"<div style='color:#94A3B8; font-size:0.76rem; line-height:1.25; min-height:34px; margin-bottom:7px;'>{description}</div>"
+            f"<div style='margin-bottom:8px;'>{legend_items}</div>",
+            unsafe_allow_html=True,
+        )
+        tv_html_class = f"""
+        <div class="tradingview-widget-container" style="height: {chart_height}px; width: 100%; background:#0b0f17;">
+          <div id="{container_id}" style="height: 100%; width: 100%;"></div>
+          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+          <script type="text/javascript">
+          new TradingView.widget(
+          {{
+            "autosize": true,
+            "symbol": "{main_symbol}",
+            "interval": "{interval}",
+            "timezone": "America/Sao_Paulo",
+            "theme": "dark",
+            "style": "2",
+            "locale": "br",
+            "toolbar_bg": "#0b0f17",
+            "enable_publishing": false,
+            "hide_top_toolbar": false,
+            "hide_side_toolbar": true,
+            "allow_symbol_change": true,
+            "save_image": true,
+            "details": false,
+            "hotlist": false,
+            "calendar": false,
+            "hide_volume": true,
+            "container_id": "{container_id}",
+            "overrides": {{
+                "mainSeriesProperties.lineStyle.color": "{main_color}",
+                "mainSeriesProperties.lineStyle.linewidth": 3,
+                "scalesProperties.scaleMode": 2,
+                "paneProperties.background": "#0b0f17",
+                "paneProperties.vertGridProperties.color": "#1f2937",
+                "paneProperties.horzGridProperties.color": "#1f2937"
+            }},
+            "studies": [
+              {studies}
+            ]
+          }}
+          );
+          </script>
+        </div>
+        """
+        components.html(tv_html_class, height=chart_height + 20)
+
+    st.markdown("---")
+    st.markdown("### Comparativo por Classe Macro")
+    st.markdown(
+        "<p style='color:#94A3B8; font-size:0.88rem; margin-top:-4px;'>Quatro leituras lado a lado em 5 minutos: commodities, moedas, equity e bonds.</p>",
+        unsafe_allow_html=True,
+    )
+    commodity_col, fx_col, equity_col, bonds_col = st.columns(4, gap="medium")
+    with commodity_col:
+        render_macro_class_chart(
+            "Commodities",
+            "Energia, metais industriais e metais preciosos pela fonte ActivTrades.",
+            "tg_macro_commodities",
+            "ACTIVTRADES:BRENT",
+            "#22C55E",
+            [
+                ("ACTIVTRADES:LCRUDE", "#F97316", "Petroleo WTI"),
+                ("ACTIVTRADES:NGAS", "#60A5FA", "Gas natural"),
+                ("ACTIVTRADES:COPPERN2026", "#D97706", "Cobre"),
+                ("ACTIVTRADES:GOLD", "#FACC15", "Ouro"),
+                ("ACTIVTRADES:SILVER", "#E2E8F0", "Prata"),
+            ],
+        )
+    with fx_col:
+        render_macro_class_chart(
+            "FX",
+            "Moedas de commodities, safe havens/majors, emergentes e carry.",
+            "tg_macro_fx",
+            "CAPITALCOM:DXY",
+            "#F8FAFC",
+            [
+                ("OANDA:AUDUSD", "#22C55E", "AUDUSD"),
+                ("OANDA:USDCAD", "#F97316", "USDCAD"),
+                ("OANDA:GBPUSD", "#A855F7", "GBPUSD"),
+                ("OANDA:EURUSD", "#38BDF8", "EURUSD"),
+                ("FX_IDC:USDBRL", "#FACC15", "USDBRL"),
+                ("OANDA:USDJPY", "#EF4444", "USDJPY"),
+            ],
+        )
+    with equity_col:
+        render_macro_class_chart(
+            "Equity",
+            "Indices globais: volatilidade, EUA, Brasil, Europa e Japao.",
+            "tg_macro_equity",
+            "ACTIVTRADES:USA500",
+            "#A855F7",
+            [
+                ("ACTIVTRADES:VXX.US", "#EF4444", "VIX/VXX"),
+                ("ACTIVTRADES:JP225", "#38BDF8", "Nikkei"),
+                ("ACTIVTRADES:BRA50", "#22C55E", "IBOV/BRA50"),
+                ("ACTIVTRADES:EURO50", "#F97316", "EuroStoxx"),
+                ("ACTIVTRADES:USARUS", "#FACC15", "RTY/Russell"),
+                ("ACTIVTRADES:USATEC", "#60A5FA", "Nasdaq"),
+            ],
+        )
+    with bonds_col:
+        render_macro_class_chart(
+            "Bonds",
+            "Curvas globais: EUA, Brasil e Alemanha.",
+            "tg_macro_bonds",
+            "OTCB:US10Y",
+            "#FF9800",
+            [
+                ("OTCB:US02Y", "#FACC15", "2Y USA"),
+                ("OTCB:US30Y", "#00BFFF", "30Y USA"),
+                ("BMFBOVESPA:DI1F2029", "#22C55E", "DI1F2029 BR"),
+                ("BMFBOVESPA:DI1F2032", "#14B8A6", "DI1F2032 BR"),
+                ("BMFBOVESPA:DI1F2035", "#84CC16", "DI1F2035 BR"),
+                ("OANDA:DE10YBEUR", "#38BDF8", "10Y Alemanha"),
+            ],
+        )
+
+
 def pagina_terminal_global():
     """Página de Terminal Global."""
     render_terminal_global_layout_css()
@@ -3776,6 +3914,8 @@ def pagina_terminal_global():
             </div>
             """
             components.html(tv_html_4, height=500)
+
+        render_terminal_global_macro_class_comparatives()
 
         secao_calendario_global_fragment()
 
