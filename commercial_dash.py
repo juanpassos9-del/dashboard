@@ -5079,7 +5079,7 @@ def load_crypto_mvrv_history(refresh_key: int = 0):
     try:
         from execution.crypto_bgeometrics import fetch_bgeometrics_mvrv_zscore_history
 
-        return fetch_bgeometrics_mvrv_zscore_history()
+        return fetch_bgeometrics_mvrv_zscore_history(days=6000)
     except Exception as exc:
         return {
             "source": "BGeometrics",
@@ -5356,7 +5356,7 @@ def _render_crypto_mvrv_pricing_bands_chart(points: list[dict[str, Any]]) -> Non
         }
         for row in points
         if row.get("time") and row.get("btc_price") and row.get("realized_price")
-    ][-2200:]
+    ]
     if not chart_points:
         st.markdown("<div class='crypto-empty'>Sem dados suficientes para MVRV Pricing Bands agora.</div>", unsafe_allow_html=True)
         return
@@ -5367,34 +5367,34 @@ def _render_crypto_mvrv_pricing_bands_chart(points: list[dict[str, Any]]) -> Non
     df["date"] = pd.to_datetime(df["time"], unit="s", utc=True)
     if not (df["mvrv"] > 0).any():
         df["mvrv"] = df["btc_price"] / df["realized_price"].replace({0: pd.NA})
-    mvrv_window = 365
-    min_periods = min(180, max(30, len(df) // 3))
-    df["mvrv_mean"] = df["mvrv"].rolling(mvrv_window, min_periods=min_periods).mean()
-    df["mvrv_std"] = df["mvrv"].rolling(mvrv_window, min_periods=min_periods).std()
-    if df["mvrv_mean"].isna().all() or df["mvrv_std"].isna().all():
+
+    valid_mvrv = df.loc[df["mvrv"] > 0, "mvrv"]
+    if len(valid_mvrv) < 365:
         st.markdown("<div class='crypto-empty'>Historico insuficiente para calcular bandas estatisticas do MVRV.</div>", unsafe_allow_html=True)
         return
-    df["mvrv_mean"] = df["mvrv_mean"].ffill().bfill()
-    df["mvrv_std"] = df["mvrv_std"].ffill().bfill().fillna(0)
-    sigma_defs = [
-        ("-1.0σ", -1.0, "#10B981", "solid"),
-        ("-0.5σ", -0.5, "#34D399", "solid"),
+    mvrv_mean = float(valid_mvrv.mean())
+    mvrv_std = float(valid_mvrv.std())
+    if not mvrv_std or pd.isna(mvrv_std):
+        st.markdown("<div class='crypto-empty'>Desvio do MVRV indisponivel para calcular bandas.</div>", unsafe_allow_html=True)
+        return
+
+    band_defs = [
+        ("-1.0sd", -1.0, "#10B981", "solid"),
+        ("-0.5sd", -0.5, "#34D399", "solid"),
         ("Mean", 0.0, "#F59E0B", "solid"),
-        ("+0.5σ", 0.5, "#60A5FA", "solid"),
-        ("+1.0σ", 1.0, "#8B5CF6", "solid"),
-        ("+2.0σ", 2.0, "#FB7185", "solid"),
+        ("+0.5sd", 0.5, "#60A5FA", "solid"),
+        ("+1.0sd", 1.0, "#8B5CF6", "solid"),
+        ("+2.0sd", 2.0, "#FB7185", "solid"),
     ]
-    for label, sigma, _color, _dash in sigma_defs:
-        multiple = (df["mvrv_mean"] + (df["mvrv_std"] * sigma)).clip(lower=0.05)
+    for label, sigma, _color, _dash in band_defs:
+        multiple = max(0.05, mvrv_mean + (mvrv_std * sigma))
         df[f"band_{label}"] = df["realized_price"] * multiple
 
     latest = chart_points[-1]
     latest_btc = float(latest.get("btc_price") or 0)
     latest_realized = float(latest.get("realized_price") or 0)
     latest_mvrv = float(latest.get("mvrv") or (latest_btc / latest_realized if latest_realized else 0))
-    latest_mean = float(df["mvrv_mean"].iloc[-1] or 0)
-    latest_std = float(df["mvrv_std"].iloc[-1] or 0)
-    latest_sigma = (latest_mvrv - latest_mean) / latest_std if latest_std else 0
+    latest_sigma = (latest_mvrv - mvrv_mean) / mvrv_std if mvrv_std else 0
     if latest_sigma >= 2:
         zone, zone_cls, zone_text = "Euforia / risco alto", "red", "Preco esticado contra o realized price."
     elif latest_sigma >= 1:
@@ -5406,11 +5406,11 @@ def _render_crypto_mvrv_pricing_bands_chart(points: list[dict[str, Any]]) -> Non
 
     fig = go.Figure()
     fill_pairs = [
-        ("band_-1.0σ", "band_-0.5σ", "rgba(16,185,129,.10)"),
-        ("band_-0.5σ", "band_Mean", "rgba(52,211,153,.08)"),
-        ("band_Mean", "band_+0.5σ", "rgba(245,158,11,.08)"),
-        ("band_+0.5σ", "band_+1.0σ", "rgba(96,165,250,.09)"),
-        ("band_+1.0σ", "band_+2.0σ", "rgba(244,63,94,.12)"),
+        ("band_-1.0sd", "band_-0.5sd", "rgba(16,185,129,.10)"),
+        ("band_-0.5sd", "band_Mean", "rgba(52,211,153,.08)"),
+        ("band_Mean", "band_+0.5sd", "rgba(245,158,11,.08)"),
+        ("band_+0.5sd", "band_+1.0sd", "rgba(96,165,250,.09)"),
+        ("band_+1.0sd", "band_+2.0sd", "rgba(244,63,94,.12)"),
     ]
     for lower, upper, fill_color in fill_pairs:
         fig.add_trace(go.Scatter(
@@ -5440,7 +5440,7 @@ def _render_crypto_mvrv_pricing_bands_chart(points: list[dict[str, Any]]) -> Non
         line={"color": "#22D3EE", "width": 2},
         hovertemplate="%{x|%d/%m/%Y}<br>Realized: US$ %{y:,.0f}<extra></extra>",
     ))
-    for label, _sigma, color, dash in sigma_defs:
+    for label, _sigma, color, dash in band_defs:
         fig.add_trace(go.Scatter(
             x=df["date"],
             y=df[f"band_{label}"],
@@ -5481,7 +5481,7 @@ def _render_crypto_mvrv_pricing_bands_chart(points: list[dict[str, Any]]) -> Non
         <div>
           <span class="crypto-label">Bitcoin MVRV Pricing Bands</span>
           <b>US$ {latest_btc:,.0f}</b>
-          <small style="display:block;color:#8EA3B8;margin-top:5px;">MVRV {latest_mvrv:.2f}x | z {latest_sigma:+.2f}σ | Realized US$ {latest_realized:,.0f}</small>
+          <small style="display:block;color:#8EA3B8;margin-top:5px;">MVRV {latest_mvrv:.2f}x | z {latest_sigma:+.2f}sd | Realized US$ {latest_realized:,.0f}</small>
         </div>
         <div class="crypto-mvrv-legend">
           <span class="{zone_cls}">{sanitize_text(zone)}</span>
