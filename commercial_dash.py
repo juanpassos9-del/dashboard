@@ -3721,6 +3721,7 @@ def pagina_terminal_global():
     painel_topo_global()
     render_source_health_panel()
     render_yield_curve_regime_panel()
+    secao_calendario_global_fragment()
     
     body_col, corr_col = st.columns([0.74, 0.26], gap="medium")
 
@@ -3909,8 +3910,6 @@ def pagina_terminal_global():
             components.html(tv_html_4, height=500)
 
         render_terminal_global_macro_class_comparatives()
-
-        secao_calendario_global_fragment()
 
         with st.container():
             st.markdown("#### 🤖 Analista Técnico IA")
