@@ -90,6 +90,53 @@ def _classify(score: float, fear_value: float, funding_pressure: bool) -> str:
     return "Neutro"
 
 
+def _bias_from_regime(regime: str, score: float) -> str:
+    text = str(regime or "").lower()
+    if "capitulacao" in text:
+        return "Stress / possivel acumulacao"
+    if "desalavancagem" in text:
+        return "Defensivo"
+    if "euforia" in text:
+        return "Risk-on esticado"
+    if "risk-on forte" in text:
+        return "Comprador seletivo"
+    if "risk-on" in text:
+        return "Comprador moderado"
+    if "risk-off forte" in text:
+        return "Defensivo forte"
+    if "risk-off" in text:
+        return "Defensivo moderado"
+    if score >= 58:
+        return "Levemente comprador"
+    if score <= 42:
+        return "Levemente defensivo"
+    return "Neutro"
+
+
+def _build_summary(
+    regime: str,
+    score: float,
+    positive: list[str],
+    negative: list[str],
+    alerts: list[str],
+    stable_dom: float | None,
+    btc_dom: float,
+    eth_dom: float,
+) -> str:
+    primary = positive[0] if positive else "sem driver positivo dominante"
+    risk = negative[0] if negative else (alerts[0] if alerts else "sem alerta critico")
+    dom = ""
+    if btc_dom and eth_dom:
+        dom = f" Dominancia: BTC {btc_dom:.1f}%, ETH {eth_dom:.1f}%."
+    stable = ""
+    if stable_dom is not None:
+        stable = f" Stables {stable_dom:.1f}% do market cap."
+    return (
+        f"{regime} ({score:.0f}/100). Driver principal: {primary}. "
+        f"Risco monitorado: {risk}.{dom}{stable}"
+    )
+
+
 def _append_history(result: dict[str, Any]) -> None:
     os.makedirs(CACHE_DIR, exist_ok=True)
     try:
@@ -186,6 +233,7 @@ def calculate_crypto_regime(
 
     stable_mcap = safe_float(defi.get("stablecoin_market_cap_usd"))
     total_mcap = safe_float(gecko.get("total_market_cap_usd"))
+    stable_dom = None
     if stable_mcap and total_mcap:
         stable_dom = stable_mcap / total_mcap * 100
         if stable_dom > 9:
@@ -289,6 +337,8 @@ def calculate_crypto_regime(
     score = max(0, min(100, score))
     confidence = max(25, min(95, 100 - len(missing) * 10))
     regime = _classify(score, fear_value, funding_pressure)
+    bias = _bias_from_regime(regime, score)
+    summary = _build_summary(regime, score, positive, negative, alerts, stable_dom, btc_dom, eth_dom)
     result = {
         "source": "TTS Crypto Regime Engine",
         "status": "ok",
@@ -297,6 +347,8 @@ def calculate_crypto_regime(
         "score": round(score, 1),
         "confidence": confidence,
         "regime": regime,
+        "bias": bias,
+        "summary": summary,
         "drivers_positive": positive[:8],
         "drivers_negative": negative[:8],
         "alerts": alerts[:8],

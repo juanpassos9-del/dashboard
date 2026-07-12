@@ -6040,6 +6040,12 @@ def pagina_crypto_terminal():
     regime_name = sanitize_text(regime.get("regime", "Neutro"))
     regime_bias = sanitize_text(regime.get("bias", "Neutro"))
     score = _num(regime.get("score"), 50)
+    regime_confidence = _num(regime.get("confidence"), 0)
+    regime_summary = sanitize_text(regime.get("summary", "Leitura local indisponivel."))
+    positive_drivers = [sanitize_text(item) for item in (regime.get("drivers_positive") or [])[:3]]
+    negative_drivers = [sanitize_text(item) for item in (regime.get("drivers_negative") or regime.get("alerts") or [])[:3]]
+    positive_drivers_html = "".join(f"<li>{item}</li>" for item in positive_drivers) or "<li>Sem driver positivo forte.</li>"
+    negative_drivers_html = "".join(f"<li>{item}</li>" for item in negative_drivers) or "<li>Sem alerta critico agora.</li>"
     fng_value = _num((fear_data.get("current") or {}).get("value"), 0)
     fng_label = sanitize_text((fear_data.get("current") or {}).get("classification", "---"))
     fng_gauge_value = max(0, min(100, fng_value))
@@ -6181,6 +6187,18 @@ def pagina_crypto_terminal():
           .crypto-label {{display:block; color:#8FB6E8; font-size:.72rem; font-weight:900; text-transform:uppercase; letter-spacing:.02em;}}
           .crypto-regime strong {{display:block; color:#F8FAFC; font-size:2.35rem; line-height:1.05; margin-top:5px;}}
           .crypto-bias {{display:inline-flex; margin-top:9px; padding:5px 9px; border-radius:999px; background:#0B2440; color:#7DD3FC; font-weight:900;}}
+          .crypto-regime-top {{display:flex; align-items:flex-start; justify-content:space-between; gap:14px;}}
+          .crypto-regime-scorebox {{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; min-width:210px;}}
+          .crypto-regime-scorebox span {{display:block; background:#08111F; border:1px solid #203047; border-radius:8px; padding:8px; color:#8FA4BD; font-size:.66rem; font-weight:900; text-transform:uppercase;}}
+          .crypto-regime-scorebox b {{display:block; color:#F8FAFC; font-size:1.15rem; margin-top:3px;}}
+          .crypto-regime-summary {{margin:12px 0 0; color:#CBD5E1; font-weight:850; line-height:1.35;}}
+          .crypto-regime-drivers {{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:12px;}}
+          .crypto-regime-driver {{background:#08111F; border:1px solid #203047; border-radius:8px; padding:10px;}}
+          .crypto-regime-driver.good {{border-color:rgba(0,208,132,.30);}}
+          .crypto-regime-driver.bad {{border-color:rgba(255,75,75,.35);}}
+          .crypto-regime-driver span {{display:block; color:#8FB6E8; font-size:.66rem; font-weight:950; text-transform:uppercase; margin-bottom:6px;}}
+          .crypto-regime-driver ul {{margin:0; padding-left:16px; color:#CBD5E1; font-size:.76rem; line-height:1.35; font-weight:760;}}
+          .crypto-regime-driver li {{margin-bottom:4px;}}
           .crypto-score {{font-size:2.15rem; color:#FFB020; font-weight:950; text-align:right;}}
           .crypto-risk-card {{display:block;}}
           .crypto-fng-panel {{background:#08111F; border:1px solid #203047; border-radius:8px; padding:12px; min-height:118px;}}
@@ -6321,6 +6339,9 @@ def pagina_crypto_terminal():
           .crypto-drivers li {{margin-bottom:7px;}}
           @media (max-width: 1200px) {{
             .crypto-hero {{grid-template-columns:1fr;}}
+            .crypto-regime-top {{display:block;}}
+            .crypto-regime-scorebox {{grid-template-columns:1fr 1fr; min-width:0; margin-top:10px;}}
+            .crypto-regime-drivers {{grid-template-columns:1fr;}}
             .crypto-grid {{grid-template-columns:repeat(2,minmax(0,1fr));}}
             .crypto-cycle-dashboard {{grid-template-columns:1fr;}}
             .crypto-btc-strength-head {{display:block;}}
@@ -6342,10 +6363,22 @@ def pagina_crypto_terminal():
         </style>
         <div class="crypto-hero">
           <div class="crypto-card crypto-regime">
-            <span class="crypto-label">Regime Cripto</span>
-            <strong>{regime_name}</strong>
-            <div class="crypto-bias">{regime_bias}</div>
-            <p style="margin:12px 0 0;color:#CBD5E1;">{sanitize_text(regime.get("summary", "Leitura local indisponivel."))}</p>
+            <div class="crypto-regime-top">
+              <div>
+                <span class="crypto-label">Regime Cripto</span>
+                <strong>{regime_name}</strong>
+                <div class="crypto-bias">{regime_bias}</div>
+              </div>
+              <div class="crypto-regime-scorebox">
+                <span>Score<b>{score:.0f}/100</b></span>
+                <span>Confiança<b>{regime_confidence:.0f}%</b></span>
+              </div>
+            </div>
+            <p class="crypto-regime-summary">{regime_summary}</p>
+            <div class="crypto-regime-drivers">
+              <div class="crypto-regime-driver good"><span>Suportes do regime</span><ul>{positive_drivers_html}</ul></div>
+              <div class="crypto-regime-driver bad"><span>Riscos monitorados</span><ul>{negative_drivers_html}</ul></div>
+            </div>
           </div>
           <div class="crypto-card crypto-risk-card">
             <span class="crypto-label">Score de risco</span>
