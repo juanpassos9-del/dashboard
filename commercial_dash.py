@@ -3500,13 +3500,7 @@ def pagina_terminal_bloomberg():
     """, unsafe_allow_html=True)
 
 def render_terminal_global_correlation_panel():
-    interval = st.selectbox(
-        "Intervalo",
-        ["5", "15", "60", "D", "W"],
-        index=3,
-        key="tg_side_corr_interval",
-        label_visibility="collapsed",
-    )
+    interval = "1"
     st.markdown(
         """
         <div style="border:1px solid #243244; border-radius:8px 8px 0 0; padding:10px 12px; background:#0b1220;">
