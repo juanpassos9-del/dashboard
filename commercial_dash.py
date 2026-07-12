@@ -44,6 +44,9 @@ def init_supabase() -> Client:
 supabase = init_supabase()
 
 
+LOCAL_TMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".tmp")
+
+
 MAX_AUTH_USERS = 1000
 AUTH_REQUIRED = False
 APP_STATE_ALLOWED_KEYS = {
@@ -5105,6 +5108,74 @@ def load_crypto_rainbow_chart(refresh_key: int = 0):
         }
 
 
+def update_usdt_dominance_flow(usdt_dom: float | None) -> dict[str, Any]:
+    """Persist a lightweight USDT dominance trail and classify cash flow."""
+    if usdt_dom is None:
+        return {
+            "status": "Sem dado",
+            "cls": "neutral",
+            "delta": None,
+            "text": "Aguardando market cap de USDT e mercado cripto.",
+            "history": [],
+        }
+    path = os.path.join(LOCAL_TMP_DIR, "crypto_usdt_dominance_history.json")
+    os.makedirs(LOCAL_TMP_DIR, exist_ok=True)
+    history: list[dict[str, Any]] = []
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, list):
+                history = loaded
+    except Exception:
+        history = []
+
+    now_ts = time.time()
+    last = history[-1] if history else {}
+    try:
+        last_value = float(last.get("value")) if isinstance(last, dict) and last.get("value") is not None else None
+    except Exception:
+        last_value = None
+    delta = None if last_value is None else float(usdt_dom) - float(last_value)
+    if not history or abs(float(usdt_dom) - float(last_value or 0)) >= 0.001 or now_ts - float(last.get("ts") or 0) > 900:
+        history.append({
+            "ts": now_ts,
+            "updated_at": datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d %H:%M:%S"),
+            "value": round(float(usdt_dom), 4),
+        })
+        history = history[-200:]
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(history, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    if delta is None:
+        return {
+            "status": "Monitorando",
+            "cls": "neutral",
+            "delta": None,
+            "text": "Primeira leitura registrada. Proxima atualizacao define fluxo.",
+            "history": history,
+        }
+    if delta >= 0.08:
+        status, cls = "Caixa subindo", "bad"
+        text = "USDT dominance subiu: dinheiro realizando cripto e indo para stable/caixa."
+    elif delta <= -0.08:
+        status, cls = "Caixa saindo", "good"
+        text = "USDT dominance caiu: dinheiro saindo de stable e entrando em cripto."
+    elif delta > 0:
+        status, cls = "Leve defesa", "warn"
+        text = "USDT dominance subiu pouco; fluxo marginal mais defensivo."
+    elif delta < 0:
+        status, cls = "Leve risco", "good"
+        text = "USDT dominance caiu pouco; fluxo marginal favorece risco cripto."
+    else:
+        status, cls = "Estavel", "neutral"
+        text = "USDT dominance sem mudanca relevante."
+    return {"status": status, "cls": cls, "delta": delta, "text": text, "history": history}
+
+
 def _crypto_mini_chart_html(symbol: str, asset: dict[str, Any], uid: str) -> str:
     candles = asset.get("candles_1h") or []
     chart_candles = [
@@ -5824,6 +5895,9 @@ def pagina_crypto_terminal():
             usdt_cap = _num((stable.get("circulating") or {}).get("peggedUSD"), 0)
             break
     usdt_dom = (usdt_cap / market_cap * 100) if market_cap and usdt_cap else None
+    usdt_flow = update_usdt_dominance_flow(usdt_dom)
+    usdt_delta = usdt_flow.get("delta")
+    usdt_delta_text = "---" if usdt_delta is None else f"{usdt_delta:+.3f} p.p."
     mvrv_z = _num(bgeometrics_data.get("mvrv_z_score"), None)
     mvrv_ratio = _num(bgeometrics_data.get("mvrv"), None)
     mvrv_zone, mvrv_cls, mvrv_text = _mvrv_zone(mvrv_z)
@@ -5936,7 +6010,7 @@ def pagina_crypto_terminal():
           .crypto-kpi span {{display:block; color:#94A3B8; font-size:.7rem; font-weight:900; text-transform:uppercase;}}
           .crypto-kpi strong {{display:block; color:#F8FAFC; font-size:1.22rem; margin-top:5px;}}
           .crypto-kpi em {{display:block; color:#94A3B8; font-size:.72rem; font-style:normal; margin-top:4px;}}
-          .crypto-cycle-dashboard {{display:grid; grid-template-columns:1.1fr .9fr .9fr .9fr; gap:10px; margin:-2px 0 16px;}}
+          .crypto-cycle-dashboard {{display:grid; grid-template-columns:1.1fr .85fr .9fr .9fr .9fr; gap:10px; margin:-2px 0 16px;}}
           .crypto-cycle-box {{background:#07111F; border:1px solid #1F334A; border-radius:8px; padding:13px; min-height:128px;}}
           .crypto-cycle-box.good {{border-left:5px solid #00D084; background:linear-gradient(180deg,rgba(0,208,132,.08),#07111F);}}
           .crypto-cycle-box.warn {{border-left:5px solid #FFB020; background:linear-gradient(180deg,rgba(255,176,32,.08),#07111F);}}
@@ -6106,6 +6180,15 @@ def pagina_crypto_terminal():
             <div class="crypto-cycle-mini">
               <div><span>MVRV Z</span><strong>{'---' if mvrv_z is None else f'{mvrv_z:.2f}'}</strong></div>
               <div><span>F&G</span><strong>{fng_gauge_value:.0f}</strong></div>
+            </div>
+          </div>
+          <div class="crypto-cycle-box {sanitize_text(usdt_flow.get('cls', 'neutral'))}">
+            <span class="crypto-label">Fluxo USDT</span>
+            <b>{sanitize_text(usdt_flow.get('status', 'Monitorando'))}</b>
+            <p>{sanitize_text(usdt_flow.get('text', 'Aguardando leitura.'))}</p>
+            <div class="crypto-cycle-mini">
+              <div><span>USDT dom.</span><strong>{'---' if usdt_dom is None else f'{usdt_dom:.2f}%'}</strong></div>
+              <div><span>Delta</span><strong>{sanitize_text(usdt_delta_text)}</strong></div>
             </div>
           </div>
         </div>
