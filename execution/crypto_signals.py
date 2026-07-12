@@ -198,6 +198,54 @@ def _build_rotation(rows: list[dict[str, Any]], regime: dict[str, Any]) -> dict[
     }
 
 
+def _build_operational_groups(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Separate the ranking into action-oriented buckets for faster triage."""
+    ranked = list(rows)
+    strong = [
+        row for row in ranked
+        if safe_float(row.get("score")) >= 65
+        and safe_float(row.get("change_24h")) > 0
+        and safe_float(row.get("trend_80h")) > 0
+        and safe_float(row.get("funding_annual_pct")) <= 45
+    ]
+    alt_strength = [
+        row for row in ranked
+        if row.get("symbol") not in {"BTCUSDT", "ETHUSDT"}
+        and safe_float(row.get("relative_to_btc_24h")) > 0
+        and safe_float(row.get("score")) >= 55
+    ]
+    pullback = [
+        row for row in ranked
+        if safe_float(row.get("score")) >= 55
+        and safe_float(row.get("trend_80h")) > 0
+        and 35 <= safe_float(row.get("range_position")) <= 72
+        and safe_float(row.get("change_24h")) <= 2.5
+    ]
+    avoid = [
+        row for row in ranked
+        if safe_float(row.get("score")) <= 42
+        or (
+            safe_float(row.get("relative_to_btc_24h")) < -1
+            and safe_float(row.get("change_24h")) < 0
+        )
+    ]
+    leverage_risk = [
+        row for row in ranked
+        if safe_float(row.get("funding_annual_pct")) > 45
+        or (
+            safe_float(row.get("range_position")) >= 88
+            and safe_float(row.get("funding_annual_pct")) > 25
+        )
+    ]
+    return {
+        "buy_strength": strong[:5],
+        "alt_vs_btc": sorted(alt_strength, key=lambda item: safe_float(item.get("relative_to_btc_24h")), reverse=True)[:5],
+        "pullback_watch": pullback[:5],
+        "avoid_defensive": sorted(avoid, key=lambda item: safe_float(item.get("score")))[:5],
+        "leverage_risk": sorted(leverage_risk, key=lambda item: safe_float(item.get("funding_annual_pct")), reverse=True)[:5],
+    }
+
+
 def build_crypto_operational_dashboard(
     binance_payload: dict[str, Any],
     regime: dict[str, Any],
@@ -208,6 +256,11 @@ def build_crypto_operational_dashboard(
     regime_name = str((regime or {}).get("regime") or "Neutro")
     risk_on = "Risk-on" in regime_name or regime_name == "Euforia"
     risk_off = "Risk-off" in regime_name or regime_name in {"Capitulacao", "Desalavancagem"}
+    btc_change_24h = 0.0
+    for asset in _normalized_rows(binance_payload, coingecko_payload):
+        if str(asset.get("symbol") or "") == "BTCUSDT":
+            btc_change_24h = safe_float(asset.get("change_pct_24h"))
+            break
 
     for asset in _normalized_rows(binance_payload, coingecko_payload):
         symbol = str(asset.get("symbol") or "")
@@ -221,6 +274,7 @@ def build_crypto_operational_dashboard(
         funding = _funding_annual_pct(asset)
         range_pos = _range_position(asset)
         realized_vol = _realized_vol_pct(asset.get("candles_1h") or [])
+        relative_to_btc = change_24h - btc_change_24h
 
         score = 50.0
         score += max(-18, min(18, change_24h * 3))
@@ -270,6 +324,7 @@ def build_crypto_operational_dashboard(
             "funding_annual_pct": round(funding, 2),
             "range_position": round(range_pos, 1),
             "realized_vol_48h_pct": round(realized_vol, 2),
+            "relative_to_btc_24h": round(relative_to_btc, 2),
             "score": round(score, 1),
             "bias": bias,
             "subclass": subclass,
@@ -278,10 +333,12 @@ def build_crypto_operational_dashboard(
 
     rows.sort(key=lambda row: row["score"], reverse=True)
     rotation = _build_rotation(rows, regime)
+    operational_groups = _build_operational_groups(rows)
     return {
         "leaders": rows[:5],
         "laggards": sorted(rows, key=lambda row: row["score"])[:5],
         "ranking": rows,
+        "operational_groups": operational_groups,
         "alerts": alerts[:10],
         "rotation": rotation,
     }

@@ -5890,6 +5890,7 @@ def pagina_crypto_terminal():
             score_cls = _score_class(row.get("score"))
             change_cls = "pos" if _num(row.get("change_24h")) >= 0 else "neg"
             trend_cls = "pos" if _num(row.get("trend_80h")) >= 0 else "neg"
+            rel_cls = "pos" if _num(row.get("relative_to_btc_24h")) >= 0 else "neg"
             cards.append(
                 "<div class='crypto-rank-card'>"
                 "<div class='crypto-rank-head'>"
@@ -5903,13 +5904,33 @@ def pagina_crypto_terminal():
                 "<div class='crypto-rank-grid'>"
                 f"<span>24h <strong class='{change_cls}'>{_plain_pct(row.get('change_24h'))}</strong></span>"
                 f"<span>Tend. <strong class='{trend_cls}'>{_plain_pct(row.get('trend_80h'))}</strong></span>"
+                f"<span>vs BTC <strong class='{rel_cls}'>{_plain_pct(row.get('relative_to_btc_24h'))}</strong></span>"
                 f"<span>Funding <strong>{_num(row.get('funding_annual_pct')):.2f}%</strong></span>"
-                f"<span>Faixa <strong>{_num(row.get('range_position')):.0f}%</strong></span>"
                 "</div>"
                 "</div>"
             )
         empty = "Sem ranking de lideres agora." if mode == "leader" else "Sem ranking defensivo agora."
         return "".join(cards) or f"<div class='crypto-empty'>{empty}</div>"
+
+    def _operational_group_html(groups):
+        specs = [
+            ("buy_strength", "Comprar forca", "Tendencia + score forte, sem funding excessivo.", "good"),
+            ("alt_vs_btc", "Alts contra BTC", "Ativos batendo Bitcoin em forca relativa.", "good"),
+            ("pullback_watch", "Monitorar pullback", "Tendencia viva, mas sem compra perseguida.", "warn"),
+            ("avoid_defensive", "Evitar / defensivos", "Baixo score ou perda de forca contra BTC.", "bad"),
+            ("leverage_risk", "Risco de alavancagem", "Funding/faixa esticados; cuidado com squeeze.", "warn"),
+        ]
+        panels = []
+        for key, title, subtitle, cls in specs:
+            rows = groups.get(key, []) if isinstance(groups, dict) else []
+            panels.append(
+                f"<div class='crypto-rank-panel crypto-op-panel {cls}'>"
+                f"<h5>{sanitize_text(title)}</h5>"
+                f"<p>{sanitize_text(subtitle)}</p>"
+                f"<div class='crypto-rank-list'>{_ranking_cards_html(rows, key)}</div>"
+                "</div>"
+            )
+        return "".join(panels)
 
     def _relative_btc_strength(symbols_map):
         btc_asset = symbols_map.get("BTCUSDT") or {}
@@ -6319,7 +6340,12 @@ def pagina_crypto_terminal():
           .crypto-class-metrics strong, .crypto-rank-grid strong {{color:#F8FAFC;}}
           .crypto-rank-wrap {{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:8px;}}
           .crypto-rank-panel {{background:#050B14; border:1px solid #1A2B42; border-radius:8px; padding:12px;}}
+          .crypto-op-wrap {{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; margin-top:8px;}}
+          .crypto-op-panel.good {{border-top:3px solid #00D084;}}
+          .crypto-op-panel.warn {{border-top:3px solid #FFB020;}}
+          .crypto-op-panel.bad {{border-top:3px solid #FF4B4B;}}
           .crypto-rank-panel h5 {{margin:0 0 10px; color:#F8FAFC; font-size:.94rem;}}
+          .crypto-rank-panel p {{margin:-4px 0 10px; color:#8FA4BD; font-size:.70rem; line-height:1.3; font-weight:800;}}
           .crypto-rank-list {{display:grid; gap:9px;}}
           .crypto-rank-card {{background:#08111F; border:1px solid #203047; border-radius:8px; padding:10px;}}
           .crypto-rank-head {{display:flex; justify-content:space-between; gap:10px; margin-bottom:7px;}}
@@ -6358,6 +6384,7 @@ def pagina_crypto_terminal():
             .crypto-rotation {{grid-template-columns:1fr;}}
             .crypto-class-grid {{grid-template-columns:repeat(2,minmax(0,1fr));}}
             .crypto-rank-wrap {{grid-template-columns:1fr;}}
+            .crypto-op-wrap {{grid-template-columns:1fr;}}
             .crypto-mini-wrap {{grid-template-columns:1fr;}}
           }}
         </style>
@@ -6550,15 +6577,22 @@ def pagina_crypto_terminal():
     else:
         st.success("Sem alertas criticos de alavancagem, faixa extrema ou volatilidade agora.")
 
+    operational_groups = operational.get("operational_groups", {}) if isinstance(operational, dict) else {}
     leaders = operational.get("leaders", []) if isinstance(operational, dict) else []
     laggards = operational.get("laggards", []) if isinstance(operational, dict) else []
+    if operational_groups:
+        ranking_html = f"<div class='crypto-op-wrap'>{_operational_group_html(operational_groups)}</div>"
+    else:
+        ranking_html = (
+            "<div class='crypto-rank-wrap'>"
+            "<div class='crypto-rank-panel'><h5>Lideres de risco</h5>"
+            f"<div class='crypto-rank-list'>{_ranking_cards_html(leaders, 'leader')}</div></div>"
+            "<div class='crypto-rank-panel'><h5>Mais fracos / defensivos</h5>"
+            f"<div class='crypto-rank-list'>{_ranking_cards_html(laggards, 'laggard')}</div></div>"
+            "</div>"
+        )
     st.markdown(
-        "<div class='crypto-rank-wrap'>"
-        "<div class='crypto-rank-panel'><h5>Lideres de risco</h5>"
-        f"<div class='crypto-rank-list'>{_ranking_cards_html(leaders, 'leader')}</div></div>"
-        "<div class='crypto-rank-panel'><h5>Mais fracos / defensivos</h5>"
-        f"<div class='crypto-rank-list'>{_ranking_cards_html(laggards, 'laggard')}</div></div>"
-        "</div>",
+        ranking_html,
         unsafe_allow_html=True,
     )
 
