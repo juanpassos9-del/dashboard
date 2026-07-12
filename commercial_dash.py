@@ -5346,6 +5346,136 @@ def _render_crypto_rainbow_chart(points: list[dict[str, Any]]) -> None:
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
+def _render_crypto_mvrv_pricing_bands_chart(points: list[dict[str, Any]]) -> None:
+    chart_points = [
+        {
+            "time": int(row.get("time") or 0),
+            "btc_price": float(row.get("btc_price") or 0),
+            "realized_price": float(row.get("realized_price") or 0),
+            "mvrv": float(row.get("mvrv") or 0),
+        }
+        for row in points
+        if row.get("time") and row.get("btc_price") and row.get("realized_price")
+    ][-2200:]
+    if not chart_points:
+        st.markdown("<div class='crypto-empty'>Sem dados suficientes para MVRV Pricing Bands agora.</div>", unsafe_allow_html=True)
+        return
+
+    import plotly.graph_objects as go
+
+    df = pd.DataFrame(chart_points)
+    df["date"] = pd.to_datetime(df["time"], unit="s", utc=True)
+    band_defs = [
+        ("0.8x", 0.8, "#10B981", "dot"),
+        ("1.0x Realized", 1.0, "#22D3EE", "solid"),
+        ("1.5x", 1.5, "#60A5FA", "solid"),
+        ("2.0x", 2.0, "#8B5CF6", "solid"),
+        ("2.4x", 2.4, "#F59E0B", "solid"),
+        ("3.2x", 3.2, "#FB7185", "solid"),
+        ("4.0x", 4.0, "#F43F5E", "dash"),
+    ]
+    for label, multiplier, _color, _dash in band_defs:
+        df[f"band_{label}"] = df["realized_price"] * multiplier
+
+    latest = chart_points[-1]
+    latest_btc = float(latest.get("btc_price") or 0)
+    latest_realized = float(latest.get("realized_price") or 0)
+    latest_mvrv = float(latest.get("mvrv") or (latest_btc / latest_realized if latest_realized else 0))
+    if latest_mvrv >= 3.2:
+        zone, zone_cls, zone_text = "Euforia / risco alto", "red", "Preco esticado contra o realized price."
+    elif latest_mvrv >= 2.4:
+        zone, zone_cls, zone_text = "Aquecido", "yellow", "Ciclo positivo, mas com assimetria menor."
+    elif latest_mvrv >= 1.5:
+        zone, zone_cls, zone_text = "Expansao saudavel", "green", "BTC acima do custo realizado com premio moderado."
+    elif latest_mvrv >= 1.0:
+        zone, zone_cls, zone_text = "Neutro construtivo", "green", "Mercado acima do realized price."
+    else:
+        zone, zone_cls, zone_text = "Acumulacao / desconto", "green", "Preco abaixo ou perto do realized price."
+
+    fig = go.Figure()
+    fill_pairs = [
+        ("band_0.8x", "band_1.0x Realized", "rgba(16,185,129,.10)"),
+        ("band_1.0x Realized", "band_1.5x", "rgba(34,211,238,.08)"),
+        ("band_1.5x", "band_2.0x", "rgba(96,165,250,.09)"),
+        ("band_2.0x", "band_2.4x", "rgba(139,92,246,.10)"),
+        ("band_2.4x", "band_3.2x", "rgba(245,158,11,.11)"),
+        ("band_3.2x", "band_4.0x", "rgba(244,63,94,.12)"),
+    ]
+    for lower, upper, fill_color in fill_pairs:
+        fig.add_trace(go.Scatter(
+            x=df["date"],
+            y=df[upper],
+            mode="lines",
+            line={"width": 0},
+            showlegend=False,
+            hoverinfo="skip",
+        ))
+        fig.add_trace(go.Scatter(
+            x=df["date"],
+            y=df[lower],
+            mode="lines",
+            line={"width": 0},
+            fill="tonexty",
+            fillcolor=fill_color,
+            showlegend=False,
+            hoverinfo="skip",
+        ))
+
+    for label, _multiplier, color, dash in band_defs:
+        fig.add_trace(go.Scatter(
+            x=df["date"],
+            y=df[f"band_{label}"],
+            mode="lines",
+            name=label,
+            line={"color": color, "width": 1.5, "dash": dash},
+            hovertemplate=f"%{{x|%d/%m/%Y}}<br>{label}: US$ %{{y:,.0f}}<extra></extra>",
+        ))
+    fig.add_trace(go.Scatter(
+        x=df["date"],
+        y=df["btc_price"],
+        mode="lines",
+        name="BTC Price",
+        line={"color": "#F8FAFC", "width": 2.4},
+        hovertemplate="%{x|%d/%m/%Y}<br>BTC: US$ %{y:,.0f}<extra></extra>",
+    ))
+
+    fig.update_layout(
+        height=520,
+        margin={"l": 10, "r": 22, "t": 8, "b": 10},
+        paper_bgcolor="#050B14",
+        plot_bgcolor="#050B14",
+        font={"color": "#AAB7C4"},
+        legend={"orientation": "h", "y": -0.08, "x": 0.01, "font": {"size": 10}},
+        xaxis={"gridcolor": "rgba(148,163,184,.08)", "zeroline": False},
+        yaxis={
+            "type": "log",
+            "title": "MVRV Pricing Bands",
+            "gridcolor": "rgba(148,163,184,.08)",
+            "zeroline": False,
+            "tickprefix": "US$ ",
+        },
+    )
+    st.markdown(
+        f"""
+    <div class="crypto-mvrv-card">
+      <div class="crypto-mvrv-head">
+        <div>
+          <span class="crypto-label">Bitcoin MVRV Pricing Bands</span>
+          <b>US$ {latest_btc:,.0f}</b>
+          <small style="display:block;color:#8EA3B8;margin-top:5px;">MVRV {latest_mvrv:.2f}x | Realized US$ {latest_realized:,.0f}</small>
+        </div>
+        <div class="crypto-mvrv-legend">
+          <span class="{zone_cls}">{sanitize_text(zone)}</span>
+          <span class="yellow">{sanitize_text(zone_text)}</span>
+        </div>
+      </div>
+    </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
 def pagina_crypto_terminal():
     """Crypto Terminal phase 1: public crypto data, regime and source health."""
     st.title("Crypto Terminal")
@@ -5885,6 +6015,7 @@ def pagina_crypto_terminal():
     bgeometrics_rainbow = load_crypto_rainbow_chart(mvrv_refresh_key)
     rainbow_data = bgeometrics_rainbow.get("data", {}) if isinstance(bgeometrics_rainbow, dict) else {}
     _render_crypto_rainbow_chart(rainbow_data.get("points") or [])
+    _render_crypto_mvrv_pricing_bands_chart(mvrv_history_data.get("points") or [])
 
     st.markdown("#### Majors e Altcoins")
     top_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "LINKUSDT", "AVAXUSDT", "SUIUSDT"]
