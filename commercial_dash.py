@@ -5994,7 +5994,7 @@ def pagina_crypto_terminal():
                 body.append(
                     f"<div class='crypto-btc-strength-token {score_cls}'>"
                     "<div class='crypto-btc-token-head'>"
-                    f"<span class='crypto-token-logo' style='--token-color:{logo_color};'>{sanitize_text(logo_text)}</span>"
+                    f"<span class='crypto-token-logo' style='background:linear-gradient(135deg,{logo_color},#0B1220);'>{sanitize_text(logo_text)}</span>"
                     "<div>"
                     f"<b>{sanitize_text(row['asset'])}</b>"
                     f"<small>{sanitize_text(row['status'])}</small>"
@@ -6228,7 +6228,7 @@ def pagina_crypto_terminal():
           .crypto-btc-strength-token.warn {{border-color:rgba(255,176,32,.45); box-shadow:inset 0 0 0 1px rgba(255,176,32,.08);}}
           .crypto-btc-strength-token.bad {{border-color:rgba(255,75,75,.48); box-shadow:inset 0 0 0 1px rgba(255,75,75,.08);}}
           .crypto-btc-token-head {{display:flex; align-items:center; gap:9px;}}
-          .crypto-token-logo {{display:flex; align-items:center; justify-content:center; width:38px; height:38px; border-radius:999px; background:linear-gradient(135deg,var(--token-color),#0B1220); color:#FFFFFF; font-size:.62rem; font-weight:950; border:1px solid rgba(255,255,255,.18); box-shadow:0 0 18px rgba(34,211,238,.18);}}
+          .crypto-token-logo {{display:flex; align-items:center; justify-content:center; width:38px; height:38px; border-radius:999px; color:#FFFFFF; font-size:.62rem; font-weight:950; border:1px solid rgba(255,255,255,.18); box-shadow:0 0 18px rgba(34,211,238,.18);}}
           .crypto-btc-token-head b {{display:block; color:#F8FAFC; font-size:1.05rem; line-height:1;}}
           .crypto-btc-token-head small {{display:block; color:#8FA4BD; font-size:.66rem; font-weight:900; margin-top:4px; text-transform:uppercase;}}
           .crypto-btc-token-head em {{margin-left:auto; color:#F8FAFC; font-style:normal; font-size:1.45rem; font-weight:950;}}
