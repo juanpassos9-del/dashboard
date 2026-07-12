@@ -662,7 +662,6 @@ def render_auth_screen():
                     st.session_state["auth_loading_message"] = "Carregando dashboard..."
                     st.session_state["auth_loading_until"] = time.time() + 8.0
                     _auth_rerun()
-    st.markdown("</div></div>", unsafe_allow_html=True)
     st.stop()
 
 
@@ -7944,8 +7943,6 @@ def pagina_gestao_risco():
                 save_manual_trades(trades)
                 st.success(f"✅ Trade registrado em **{estrategia_final}**: R$ {resultado:+.2f}")
                 st.rerun()
-
-        st.markdown("</div>", unsafe_allow_html=True)
 
     with col_hist:
         if trades:
