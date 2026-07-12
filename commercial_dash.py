@@ -4041,17 +4041,19 @@ def sidebar_mercados():
                 if accel_label else ""
             )
             
-            st.markdown(f"""
-                <div style='display:flex; justify-content:space-between; border-bottom:1px solid #1a1a1a; padding:4px 0; align-items:center;'>
-                    <span style='font-size:0.75rem; color:#AAA; max-width:60%;'>{item.get('name', '---')}</span>
-                    <div style='text-align:right; min-width:78px;'>
-                        <div style='font-size:0.96rem; font-weight:900; line-height:1.08;'>{price_fmt}</div>
-                        <div style='color:{color}; font-weight:900; font-size:0.76rem; line-height:1.12;'>{change_val:+.2f}%</div>
-                        <div style='color:{mom_5m_color}; font-weight:800; font-size:0.64rem; line-height:1.08;'>{mom_5m}</div>
-                        {accel_badge}
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
+            item_name = html.escape(str(item.get('name', '---')))
+            quote_html = (
+                "<div style='display:flex; justify-content:space-between; border-bottom:1px solid #1a1a1a; "
+                "padding:4px 0; align-items:center;'>"
+                f"<span style='font-size:0.75rem; color:#AAA; max-width:60%;'>{item_name}</span>"
+                "<div style='text-align:right; min-width:78px;'>"
+                f"<div style='font-size:0.96rem; font-weight:900; line-height:1.08;'>{price_fmt}</div>"
+                f"<div style='color:{color}; font-weight:900; font-size:0.76rem; line-height:1.12;'>{change_val:+.2f}%</div>"
+                f"<div style='color:{mom_5m_color}; font-weight:800; font-size:0.64rem; line-height:1.08;'>{mom_5m}</div>"
+                f"{accel_badge}"
+                "</div></div>"
+            )
+            st.markdown(quote_html, unsafe_allow_html=True)
         st.markdown("<div style='margin-bottom:15px;'></div>", unsafe_allow_html=True)
 
 
