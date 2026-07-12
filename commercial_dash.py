@@ -5202,22 +5202,6 @@ def _render_crypto_mvrv_chart(points: list[dict[str, Any]]) -> None:
         line={"color": "#22D3EE", "width": 2},
         hovertemplate="%{x|%d/%m/%Y}<br>Realized: US$ %{y:,.0f}<extra></extra>",
     ))
-    mvrv_bands = [
-        (1.5, "MVRV 1.5x", "#00D084", "dot"),
-        (2.0, "MVRV 2.0x", "#FFB020", "dash"),
-        (3.0, "MVRV 3.0x", "#FF7A45", "dash"),
-        (4.0, "MVRV 4.0x", "#FF4B4B", "dash"),
-    ]
-    for multiple, name, color, dash in mvrv_bands:
-        band_values = df["realized_price"] * multiple
-        fig.add_trace(go.Scatter(
-            x=df["date"],
-            y=band_values,
-            mode="lines",
-            name=name,
-            line={"color": color, "width": 1.15, "dash": dash},
-            hovertemplate=f"%{{x|%d/%m/%Y}}<br>{name}: US$ %{{y:,.0f}}<extra></extra>",
-        ))
     fig.update_layout(
         height=470,
         margin={"l": 10, "r": 22, "t": 8, "b": 10},
@@ -5242,7 +5226,6 @@ def _render_crypto_mvrv_chart(points: list[dict[str, Any]]) -> None:
         <div class="crypto-mvrv-legend">
           <span class="green">BTC</span>
           <span class="yellow">Realized US$ {latest_realized:,.0f}</span>
-          <span class="red">MVRV bands</span>
         </div>
       </div>
     </div>
