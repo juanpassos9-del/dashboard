@@ -3992,20 +3992,25 @@ def sidebar_mercados():
     def quote_5m_momentum(name, current_price):
         points = st.session_state.get("sidebar_quote_history", {}).get(str(name), [])
         if not points:
-            return ("5m ...", "#64748B")
+            return ("5m ...", "#64748B", "")
         target_ts = time.time() - (5 * 60)
         older_points = [(ts, px) for ts, px in points if ts <= target_ts]
         if not older_points:
-            return ("5m ...", "#64748B")
+            return ("5m ...", "#64748B", "")
         ref_ts, ref_price = min(older_points, key=lambda point: abs(point[0] - target_ts))
         if ref_price <= 0:
-            return ("5m ...", "#64748B")
+            return ("5m ...", "#64748B", "")
         pct = ((current_price - ref_price) / ref_price) * 100
         if abs(pct) < 0.01:
-            return ("5m 0.00%", "#94A3B8")
+            return ("5m 0.00%", "#94A3B8", "")
         arrow = "&#9650;" if pct > 0 else "&#9660;"
         color = "#00FFA3" if pct > 0 else "#FF4B4B"
-        return (f"{arrow} 5m {pct:+.2f}%", color)
+        accel_label = ""
+        if abs(pct) >= 0.35:
+            accel_label = "FORTE"
+        elif abs(pct) >= 0.12:
+            accel_label = "ACELERA"
+        return (f"{arrow} 5m {pct:+.2f}%", color, accel_label)
 
     remember_sidebar_quotes(categories)
 
@@ -4029,7 +4034,13 @@ def sidebar_mercados():
 
             # Formatação de preço: 4 casas se for pequeno (moedas), 2 se for grande
             price_fmt = f"{price_val:.4f}" if price_val < 10 else f"{price_val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            mom_5m, mom_5m_color = quote_5m_momentum(item.get('name', '---'), price_val)
+            mom_5m, mom_5m_color, accel_label = quote_5m_momentum(item.get('name', '---'), price_val)
+            accel_badge = (
+                f"<span style='display:inline-block; margin-top:2px; padding:1px 5px; border-radius:999px; "
+                f"background:{mom_5m_color}22; border:1px solid {mom_5m_color}88; color:{mom_5m_color}; "
+                f"font-size:0.56rem; font-weight:900; letter-spacing:0.02em;'>{accel_label}</span>"
+                if accel_label else ""
+            )
             
             st.markdown(f"""
                 <div style='display:flex; justify-content:space-between; border-bottom:1px solid #1a1a1a; padding:4px 0; align-items:center;'>
@@ -4038,6 +4049,7 @@ def sidebar_mercados():
                         <div style='font-size:0.96rem; font-weight:900; line-height:1.08;'>{price_fmt}</div>
                         <div style='color:{color}; font-weight:900; font-size:0.76rem; line-height:1.12;'>{change_val:+.2f}%</div>
                         <div style='color:{mom_5m_color}; font-weight:800; font-size:0.64rem; line-height:1.08;'>{mom_5m}</div>
+                        {accel_badge}
                     </div>
                 </div>
             """, unsafe_allow_html=True)
