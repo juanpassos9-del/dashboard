@@ -5971,6 +5971,12 @@ def pagina_crypto_terminal():
         return rows, title, text, cls
 
     def _btc_strength_html(rows, title, text, cls):
+        logo_meta = {
+            "ETH": ("#627EEA", "ETH"),
+            "SOL": ("#14F195", "SOL"),
+            "AAVE": ("#B6509E", "AAVE"),
+            "LINK": ("#2A5ADA", "LINK"),
+        }
         if not rows:
             table = "<div class='crypto-empty'>Sem dados suficientes para forca BTC/Alts agora.</div>"
             leader = "---"
@@ -5982,15 +5988,29 @@ def pagina_crypto_terminal():
             for row in rows:
                 rel_cls = "pos" if row["rel_24h"] >= 0 else "neg"
                 ratio_cls = "neg" if row["ratio_24h"] >= 0 else "pos"
+                logo_color, logo_text = logo_meta.get(row["asset"], ("#60A5FA", row["asset"][:4]))
+                score_width = max(0, min(100, row["score"]))
+                score_cls = sanitize_text(row["cls"])
                 body.append(
-                    "<div class='crypto-btc-strength-row'>"
+                    f"<div class='crypto-btc-strength-token {score_cls}'>"
+                    "<div class='crypto-btc-token-head'>"
+                    f"<span class='crypto-token-logo' style='--token-color:{logo_color};'>{sanitize_text(logo_text)}</span>"
+                    "<div>"
                     f"<b>{sanitize_text(row['asset'])}</b>"
-                    f"<span>{row['ratio']:.4f}</span>"
-                    f"<span class='{rel_cls}'>{row['rel_1h']:+.2f}%</span>"
-                    f"<span class='{rel_cls}'>{row['rel_24h']:+.2f}%</span>"
-                    f"<span class='{rel_cls}'>{row['rel_7d']:+.2f}%</span>"
-                    f"<span class='{ratio_cls}'>{row['ratio_24h']:+.2f}%</span>"
-                    f"<em class='crypto-chip {sanitize_text(row['cls'])}'>{sanitize_text(row['status'])}</em>"
+                    f"<small>{sanitize_text(row['status'])}</small>"
+                    "</div>"
+                    f"<em>{row['score']:.0f}</em>"
+                    "</div>"
+                    "<div class='crypto-btc-scorebar'>"
+                    f"<div class='{score_cls}' style='width:{score_width:.0f}%;'></div>"
+                    "</div>"
+                    "<div class='crypto-btc-token-grid'>"
+                    f"<span>BTC/{sanitize_text(row['asset'])}<b>{row['ratio']:.4f}</b></span>"
+                    f"<span>1h<b class='{rel_cls}'>{row['rel_1h']:+.2f}%</b></span>"
+                    f"<span>24h<b class='{rel_cls}'>{row['rel_24h']:+.2f}%</b></span>"
+                    f"<span>7d<b class='{rel_cls}'>{row['rel_7d']:+.2f}%</b></span>"
+                    f"<span>Ratio 24h<b class='{ratio_cls}'>{row['ratio_24h']:+.2f}%</b></span>"
+                    "</div>"
                     "</div>"
                 )
             table = "".join(body)
@@ -6007,8 +6027,7 @@ def pagina_crypto_terminal():
             f"<span>Mais fraca vs BTC <b>{sanitize_text(weakest)}</b></span>"
             "</div>"
             "</div>"
-            "<div class='crypto-btc-strength-table'>"
-            "<div class='crypto-btc-strength-row header'><b>Par</b><span>BTC/ALT</span><span>1h</span><span>24h</span><span>7d</span><span>Ratio 24h</span><em>Status</em></div>"
+            "<div class='crypto-btc-strength-grid'>"
             f"{table}"
             "</div>"
             "</div>"
@@ -6203,12 +6222,24 @@ def pagina_crypto_terminal():
           .crypto-btc-strength-kpis {{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; min-width:310px;}}
           .crypto-btc-strength-kpis span {{background:#08111F; border:1px solid #203047; border-radius:8px; padding:8px; color:#8FA4BD; font-size:.68rem; font-weight:900; text-transform:uppercase;}}
           .crypto-btc-strength-kpis b {{display:block; color:#F8FAFC; font-size:1.05rem; margin-top:3px;}}
-          .crypto-btc-strength-table {{display:grid; gap:6px;}}
-          .crypto-btc-strength-row {{display:grid; grid-template-columns:.75fr .9fr .62fr .62fr .62fr .82fr .9fr; gap:8px; align-items:center; background:#08111F; border:1px solid #203047; border-radius:8px; padding:8px 10px;}}
-          .crypto-btc-strength-row.header {{background:#0F1B2B; color:#8FA4BD; font-size:.68rem; font-weight:900; text-transform:uppercase;}}
-          .crypto-btc-strength-row b {{color:#F8FAFC;}}
-          .crypto-btc-strength-row span {{color:#CBD5E1; font-weight:850;}}
-          .crypto-btc-strength-row em {{font-style:normal; justify-self:start;}}
+          .crypto-btc-strength-grid {{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px;}}
+          .crypto-btc-strength-token {{background:radial-gradient(circle at top left,rgba(96,165,250,.16),#08111F 44%,#050B14); border:1px solid #203047; border-radius:8px; padding:11px; min-height:178px;}}
+          .crypto-btc-strength-token.good {{border-color:rgba(0,208,132,.45); box-shadow:inset 0 0 0 1px rgba(0,208,132,.08);}}
+          .crypto-btc-strength-token.warn {{border-color:rgba(255,176,32,.45); box-shadow:inset 0 0 0 1px rgba(255,176,32,.08);}}
+          .crypto-btc-strength-token.bad {{border-color:rgba(255,75,75,.48); box-shadow:inset 0 0 0 1px rgba(255,75,75,.08);}}
+          .crypto-btc-token-head {{display:flex; align-items:center; gap:9px;}}
+          .crypto-token-logo {{display:flex; align-items:center; justify-content:center; width:38px; height:38px; border-radius:999px; background:linear-gradient(135deg,var(--token-color),#0B1220); color:#FFFFFF; font-size:.62rem; font-weight:950; border:1px solid rgba(255,255,255,.18); box-shadow:0 0 18px rgba(34,211,238,.18);}}
+          .crypto-btc-token-head b {{display:block; color:#F8FAFC; font-size:1.05rem; line-height:1;}}
+          .crypto-btc-token-head small {{display:block; color:#8FA4BD; font-size:.66rem; font-weight:900; margin-top:4px; text-transform:uppercase;}}
+          .crypto-btc-token-head em {{margin-left:auto; color:#F8FAFC; font-style:normal; font-size:1.45rem; font-weight:950;}}
+          .crypto-btc-scorebar {{height:8px; border-radius:999px; background:#132338; overflow:hidden; margin:11px 0; border:1px solid rgba(148,163,184,.18);}}
+          .crypto-btc-scorebar div {{height:100%; border-radius:999px;}}
+          .crypto-btc-scorebar div.good {{background:linear-gradient(90deg,#0EA5E9,#00D084);}}
+          .crypto-btc-scorebar div.warn {{background:linear-gradient(90deg,#64748B,#FFB020);}}
+          .crypto-btc-scorebar div.bad {{background:linear-gradient(90deg,#FFB020,#FF4B4B);}}
+          .crypto-btc-token-grid {{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px;}}
+          .crypto-btc-token-grid span {{background:#07111F; border:1px solid #18283D; border-radius:7px; padding:7px; color:#8FA4BD; font-size:.66rem; font-weight:900; text-transform:uppercase;}}
+          .crypto-btc-token-grid b {{display:block; color:#F8FAFC; font-size:.82rem; margin-top:3px; text-transform:none;}}
           .crypto-onchain {{display:grid; grid-template-columns:.85fr 1.15fr; gap:12px; margin:-2px 0 16px;}}
           .crypto-onchain-main {{background:linear-gradient(135deg,#07111F,#101728); border:1px solid #28405E; border-left:5px solid #22D3EE; border-radius:8px; padding:13px;}}
           .crypto-onchain-main strong {{display:block; color:#F8FAFC; font-size:2rem; line-height:1; margin-top:5px;}}
@@ -6294,8 +6325,7 @@ def pagina_crypto_terminal():
             .crypto-cycle-dashboard {{grid-template-columns:1fr;}}
             .crypto-btc-strength-head {{display:block;}}
             .crypto-btc-strength-kpis {{grid-template-columns:1fr; min-width:0; margin-top:10px;}}
-            .crypto-btc-strength-row {{grid-template-columns:1fr 1fr;}}
-            .crypto-btc-strength-row.header {{display:none;}}
+            .crypto-btc-strength-grid {{grid-template-columns:1fr;}}
             .crypto-assets {{grid-template-columns:repeat(2,minmax(0,1fr));}}
             .crypto-onchain {{grid-template-columns:1fr;}}
             .crypto-onchain-grid {{grid-template-columns:1fr;}}
