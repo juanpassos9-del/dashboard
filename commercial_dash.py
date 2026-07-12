@@ -5143,18 +5143,53 @@ def update_usdt_dominance_flow(usdt_dom: float | None) -> dict[str, Any]:
             "updated_at": datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d %H:%M:%S"),
             "value": round(float(usdt_dom), 4),
         })
-        history = history[-200:]
+        history = history[-3000:]
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(history, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
 
+    lookback_seconds = 15 * 24 * 60 * 60
+    window_rows = [
+        row for row in history
+        if isinstance(row, dict) and now_ts - float(row.get("ts") or 0) <= lookback_seconds and row.get("value") is not None
+    ]
+    window_values = []
+    for row in window_rows:
+        try:
+            window_values.append(float(row.get("value")))
+        except Exception:
+            continue
+    high_15d = max(window_values) if window_values else float(usdt_dom)
+    low_15d = min(window_values) if window_values else float(usdt_dom)
+    distance_from_high = float(usdt_dom) - high_15d
+    distance_from_low = float(usdt_dom) - low_15d
+    range_15d = high_15d - low_15d
+    near_high = abs(distance_from_high) <= 0.05
+    near_low = abs(distance_from_low) <= 0.05
+    flow_context = "Aguardando janela de 15 dias ganhar historico."
+    if len(window_values) >= 2:
+        if near_high and (delta or 0) > 0:
+            flow_context = "USDT perto/rompendo maxima de 15d: realizacao em cripto e caixa aumentando."
+        elif near_high:
+            flow_context = "USDT perto da maxima de 15d: mercado ainda com caixa defensivo elevado."
+        elif (delta or 0) < -0.05 and range_15d > 0:
+            flow_context = "USDT afastando da maxima de 15d: caixa saindo de stable e voltando para cripto."
+        elif near_low:
+            flow_context = "USDT perto da minima de 15d: caixa em stable comprimido, apetite por cripto maior."
+        elif (delta or 0) > 0.05:
+            flow_context = "USDT subindo dentro da janela de 15d: fluxo marginal indo para stable."
+
     if delta is None:
         return {
             "status": "Monitorando",
             "cls": "neutral",
             "delta": None,
+            "high_15d": high_15d,
+            "low_15d": low_15d,
+            "distance_from_high": distance_from_high,
+            "flow_context": flow_context,
             "text": "Primeira leitura registrada. Proxima atualizacao define fluxo.",
             "history": history,
         }
@@ -5173,7 +5208,17 @@ def update_usdt_dominance_flow(usdt_dom: float | None) -> dict[str, Any]:
     else:
         status, cls = "Estavel", "neutral"
         text = "USDT dominance sem mudanca relevante."
-    return {"status": status, "cls": cls, "delta": delta, "text": text, "history": history}
+    return {
+        "status": status,
+        "cls": cls,
+        "delta": delta,
+        "high_15d": high_15d,
+        "low_15d": low_15d,
+        "distance_from_high": distance_from_high,
+        "flow_context": flow_context,
+        "text": f"{text} {flow_context}",
+        "history": history,
+    }
 
 
 def _crypto_mini_chart_html(symbol: str, asset: dict[str, Any], uid: str) -> str:
@@ -5898,6 +5943,10 @@ def pagina_crypto_terminal():
     usdt_flow = update_usdt_dominance_flow(usdt_dom)
     usdt_delta = usdt_flow.get("delta")
     usdt_delta_text = "---" if usdt_delta is None else f"{usdt_delta:+.3f} p.p."
+    usdt_high_15d = usdt_flow.get("high_15d")
+    usdt_distance_high = usdt_flow.get("distance_from_high")
+    usdt_high_15d_text = "---" if usdt_high_15d is None else f"{float(usdt_high_15d):.2f}%"
+    usdt_distance_high_text = "---" if usdt_distance_high is None else f"{float(usdt_distance_high):+.3f} p.p."
     mvrv_z = _num(bgeometrics_data.get("mvrv_z_score"), None)
     mvrv_ratio = _num(bgeometrics_data.get("mvrv"), None)
     mvrv_zone, mvrv_cls, mvrv_text = _mvrv_zone(mvrv_z)
@@ -6189,6 +6238,8 @@ def pagina_crypto_terminal():
             <div class="crypto-cycle-mini">
               <div><span>USDT dom.</span><strong>{'---' if usdt_dom is None else f'{usdt_dom:.2f}%'}</strong></div>
               <div><span>Delta</span><strong>{sanitize_text(usdt_delta_text)}</strong></div>
+              <div><span>Max 15d</span><strong>{sanitize_text(usdt_high_15d_text)}</strong></div>
+              <div><span>Dist. max</span><strong>{sanitize_text(usdt_distance_high_text)}</strong></div>
             </div>
           </div>
         </div>
