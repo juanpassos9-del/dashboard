@@ -6063,6 +6063,19 @@ def pagina_crypto_terminal():
     score = _num(regime.get("score"), 50)
     regime_confidence = _num(regime.get("confidence"), 0)
     regime_summary = sanitize_text(regime.get("summary", "Leitura local indisponivel."))
+    allocation = regime.get("allocation") if isinstance(regime.get("allocation"), dict) else {}
+    allocation_action = sanitize_text(allocation.get("action", "NEUTRO"))
+    allocation_bias = sanitize_text(allocation.get("bias", "Aguardar assimetria"))
+    allocation_reason = sanitize_text(allocation.get("reason", "sem assimetria clara de ciclo"))
+    allocation_risk_note = sanitize_text(allocation.get("risk_note", "sem risco extremo dominante"))
+    allocation_condition = sanitize_text(allocation.get("condition", "Aguardar novo sinal de ciclo."))
+    allocation_score = _num(allocation.get("score"), 50)
+    allocation_crypto_pct = _num(allocation.get("crypto_pct"), 45)
+    allocation_usdt_pct = _num(allocation.get("usdt_pct"), 55)
+    allocation_btc_pct = _num(allocation.get("btc_pct"), 25)
+    allocation_eth_pct = _num(allocation.get("eth_pct"), 10)
+    allocation_alts_pct = _num(allocation.get("alts_pct"), 10)
+    allocation_action_cls = "good" if "ACUMULAR" in allocation_action else "bad" if "CAIXA" in allocation_action or "REALIZAR" in allocation_action else "warn"
     positive_drivers = [sanitize_text(item) for item in (regime.get("drivers_positive") or [])[:3]]
     negative_drivers = [sanitize_text(item) for item in (regime.get("drivers_negative") or regime.get("alerts") or [])[:3]]
     positive_drivers_html = "".join(f"<li>{item}</li>" for item in positive_drivers) or "<li>Sem driver positivo forte.</li>"
@@ -6220,6 +6233,25 @@ def pagina_crypto_terminal():
           .crypto-regime-driver span {{display:block; color:#8FB6E8; font-size:.66rem; font-weight:950; text-transform:uppercase; margin-bottom:6px;}}
           .crypto-regime-driver ul {{margin:0; padding-left:16px; color:#CBD5E1; font-size:.76rem; line-height:1.35; font-weight:760;}}
           .crypto-regime-driver li {{margin-bottom:4px;}}
+          .crypto-allocation-card {{margin-top:12px; background:linear-gradient(135deg,#08111F,#050B14); border:1px solid #203047; border-radius:8px; padding:12px;}}
+          .crypto-allocation-top {{display:flex; align-items:flex-start; justify-content:space-between; gap:12px;}}
+          .crypto-allocation-action {{display:inline-flex; border-radius:999px; padding:6px 10px; font-size:.76rem; font-weight:950; text-transform:uppercase; border:1px solid rgba(148,163,184,.25);}}
+          .crypto-allocation-action.good {{background:rgba(0,208,132,.14); color:#2DFFAA; border-color:rgba(0,208,132,.40);}}
+          .crypto-allocation-action.warn {{background:rgba(255,176,32,.14); color:#FFCB6B; border-color:rgba(255,176,32,.40);}}
+          .crypto-allocation-action.bad {{background:rgba(255,75,75,.14); color:#FF8A8A; border-color:rgba(255,75,75,.40);}}
+          .crypto-allocation-card strong {{display:block; color:#F8FAFC; font-size:1.35rem; margin-top:6px;}}
+          .crypto-allocation-card p {{margin:8px 0 0; color:#CBD5E1; font-weight:800; line-height:1.35;}}
+          .crypto-allocation-score {{text-align:right; color:#8FA4BD; font-size:.66rem; font-weight:900; text-transform:uppercase;}}
+          .crypto-allocation-score b {{display:block; color:#F8FAFC; font-size:1.45rem; margin-top:3px;}}
+          .crypto-allocation-meter {{height:12px; display:flex; overflow:hidden; border-radius:999px; background:#132338; margin:12px 0 8px; border:1px solid rgba(148,163,184,.18);}}
+          .crypto-allocation-meter span {{display:block; height:100%;}}
+          .crypto-allocation-meter .btc {{background:#F7931A; width:{allocation_btc_pct:.0f}%;}}
+          .crypto-allocation-meter .eth {{background:#627EEA; width:{allocation_eth_pct:.0f}%;}}
+          .crypto-allocation-meter .alts {{background:#14F195; width:{allocation_alts_pct:.0f}%;}}
+          .crypto-allocation-meter .usdt {{background:#26A17B; width:{allocation_usdt_pct:.0f}%;}}
+          .crypto-allocation-split {{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px;}}
+          .crypto-allocation-split span {{background:#07111F; border:1px solid #18283D; border-radius:7px; padding:7px; color:#8FA4BD; font-size:.64rem; font-weight:900; text-transform:uppercase;}}
+          .crypto-allocation-split b {{display:block; color:#F8FAFC; font-size:.88rem; margin-top:3px;}}
           .crypto-score {{font-size:2.15rem; color:#FFB020; font-weight:950; text-align:right;}}
           .crypto-risk-card {{display:block;}}
           .crypto-fng-panel {{background:#08111F; border:1px solid #203047; border-radius:8px; padding:12px; min-height:118px;}}
@@ -6368,6 +6400,9 @@ def pagina_crypto_terminal():
             .crypto-regime-top {{display:block;}}
             .crypto-regime-scorebox {{grid-template-columns:1fr 1fr; min-width:0; margin-top:10px;}}
             .crypto-regime-drivers {{grid-template-columns:1fr;}}
+            .crypto-allocation-top {{display:block;}}
+            .crypto-allocation-score {{text-align:left; margin-top:8px;}}
+            .crypto-allocation-split {{grid-template-columns:repeat(2,minmax(0,1fr));}}
             .crypto-grid {{grid-template-columns:repeat(2,minmax(0,1fr));}}
             .crypto-cycle-dashboard {{grid-template-columns:1fr;}}
             .crypto-btc-strength-head {{display:block;}}
@@ -6402,6 +6437,24 @@ def pagina_crypto_terminal():
               </div>
             </div>
             <p class="crypto-regime-summary">{regime_summary}</p>
+            <div class="crypto-allocation-card">
+              <div class="crypto-allocation-top">
+                <div>
+                  <span class="crypto-allocation-action {allocation_action_cls}">{allocation_action}</span>
+                  <strong>{allocation_bias}</strong>
+                  <p><b>Motivo:</b> {allocation_reason}. <b>Risco:</b> {allocation_risk_note}.</p>
+                </div>
+                <div class="crypto-allocation-score">Score ciclo + momentum<b>{allocation_score:.0f}/100</b></div>
+              </div>
+              <div class="crypto-allocation-meter"><span class="btc"></span><span class="eth"></span><span class="alts"></span><span class="usdt"></span></div>
+              <div class="crypto-allocation-split">
+                <span>BTC<b>{allocation_btc_pct:.0f}%</b></span>
+                <span>ETH<b>{allocation_eth_pct:.0f}%</b></span>
+                <span>Alts<b>{allocation_alts_pct:.0f}%</b></span>
+                <span>USDT<b>{allocation_usdt_pct:.0f}%</b></span>
+              </div>
+              <p><b>Condição de mudança:</b> {allocation_condition}</p>
+            </div>
             <div class="crypto-regime-drivers">
               <div class="crypto-regime-driver good"><span>Suportes do regime</span><ul>{positive_drivers_html}</ul></div>
               <div class="crypto-regime-driver bad"><span>Riscos monitorados</span><ul>{negative_drivers_html}</ul></div>

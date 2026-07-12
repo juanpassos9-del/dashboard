@@ -137,6 +137,178 @@ def _build_summary(
     )
 
 
+def _cycle_allocation_decision(
+    score: float,
+    fear_value: float,
+    mvrv_z: float,
+    mvrv: float,
+    mayer: float,
+    puell: float,
+    aviv: float,
+    stable_dom: float | None,
+    breadth_delta: float,
+    btc_asset: dict[str, Any] | None,
+    eth_asset: dict[str, Any] | None,
+    funding_pressure: bool,
+) -> dict[str, Any]:
+    """Contrarian cycle allocation with momentum confirmation."""
+    cycle_score = 50.0
+    reasons: list[str] = []
+    risks: list[str] = []
+
+    if fear_value:
+        if fear_value <= 20:
+            cycle_score += 18
+            reasons.append(f"medo extremo no Fear & Greed ({fear_value:.0f})")
+        elif fear_value <= 35:
+            cycle_score += 10
+            reasons.append(f"medo ainda elevado ({fear_value:.0f})")
+        elif fear_value >= 80:
+            cycle_score -= 20
+            risks.append(f"ganancia extrema ({fear_value:.0f})")
+        elif fear_value >= 70:
+            cycle_score -= 10
+            risks.append(f"sentimento aquecido ({fear_value:.0f})")
+
+    if mvrv_z:
+        if mvrv_z <= 0:
+            cycle_score += 22
+            reasons.append(f"MVRV Z em desconto/capitulacao ({mvrv_z:.2f})")
+        elif mvrv_z <= 2:
+            cycle_score += 10
+            reasons.append(f"MVRV Z saudavel ({mvrv_z:.2f})")
+        elif mvrv_z >= 7:
+            cycle_score -= 26
+            risks.append(f"MVRV Z em euforia de ciclo ({mvrv_z:.2f})")
+        elif mvrv_z >= 4:
+            cycle_score -= 14
+            risks.append(f"MVRV Z aquecido ({mvrv_z:.2f})")
+
+    if mvrv:
+        if mvrv < 1:
+            cycle_score += 16
+            reasons.append(f"BTC abaixo do realized price agregado ({mvrv:.2f}x)")
+        elif mvrv < 1.8:
+            cycle_score += 6
+            reasons.append(f"MVRV sem euforia ({mvrv:.2f}x)")
+        elif mvrv >= 3:
+            cycle_score -= 13
+            risks.append(f"MVRV esticado ({mvrv:.2f}x)")
+
+    if mayer:
+        if mayer < 0.8:
+            cycle_score += 9
+            reasons.append(f"Mayer descontado ({mayer:.2f}x)")
+        elif mayer > 2.4:
+            cycle_score -= 12
+            risks.append(f"Mayer em zona historicamente esticada ({mayer:.2f}x)")
+        elif mayer > 1.7:
+            cycle_score -= 6
+            risks.append(f"Mayer aquecendo ({mayer:.2f}x)")
+
+    if puell:
+        if puell < 0.6:
+            cycle_score += 7
+            reasons.append(f"Puell em miner stress/acumulacao ({puell:.2f})")
+        elif puell > 3:
+            cycle_score -= 10
+            risks.append(f"Puell em euforia mineradora ({puell:.2f})")
+        elif puell > 2:
+            cycle_score -= 5
+            risks.append(f"Puell aquecendo ({puell:.2f})")
+
+    if aviv:
+        if aviv < 0.75:
+            cycle_score += 6
+            reasons.append(f"AVIV em desconto ({aviv:.2f})")
+        elif aviv > 2:
+            cycle_score -= 8
+            risks.append(f"AVIV esticado ({aviv:.2f})")
+
+    if stable_dom is not None:
+        if stable_dom >= 10:
+            cycle_score += 5
+            reasons.append(f"muito caixa em stablecoins ({stable_dom:.1f}%)")
+        elif stable_dom <= 6:
+            cycle_score -= 5
+            risks.append(f"stable dominance baixa, pouco caixa defensivo ({stable_dom:.1f}%)")
+
+    btc_change = safe_float((btc_asset or {}).get("change_pct_24h"))
+    btc_trend = safe_float((btc_asset or {}).get("trend_80h_pct"))
+    eth_change = safe_float((eth_asset or {}).get("change_pct_24h"))
+    momentum_score = 0.0
+    if btc_change > 0 and btc_trend > 0:
+        momentum_score += 8
+        reasons.append(f"momentum BTC confirma ({btc_change:+.2f}% 24h, {btc_trend:+.2f}% 80h)")
+    elif btc_change < -2 and btc_trend < -3:
+        momentum_score -= 8
+        risks.append(f"momentum BTC ainda negativo ({btc_change:+.2f}% 24h)")
+    if eth_change > btc_change:
+        momentum_score += 4
+        reasons.append("ETH lidera BTC no curto prazo, sinal de apetite por beta")
+    if breadth_delta > 0:
+        momentum_score += 5
+        reasons.append("breadth cripto positiva")
+    elif breadth_delta < 0:
+        momentum_score -= 5
+        risks.append("breadth cripto negativa")
+    if funding_pressure:
+        momentum_score -= 8
+        risks.append("funding esticado aumenta risco de desalavancagem")
+
+    final_score = max(0.0, min(100.0, cycle_score + momentum_score))
+    if final_score >= 72:
+        action = "ACUMULAR"
+        bias = "Acumular medo/desconto"
+        crypto_pct, usdt_pct = 75, 25
+        risk = "Baixo/medio"
+        condition = "Reduzir se MVRV/Fear & Greed aquecerem ou USDT.D cair demais."
+    elif final_score >= 58:
+        action = "ACUMULAR SELETIVO"
+        bias = "Seguir tendencia saudavel"
+        crypto_pct, usdt_pct = 60, 40
+        risk = "Medio"
+        condition = "Aumentar apenas em pullbacks ou com USDT.D caindo sem euforia."
+    elif final_score >= 43:
+        action = "NEUTRO"
+        bias = "Aguardar assimetria"
+        crypto_pct, usdt_pct = 45, 55
+        risk = "Medio"
+        condition = "Comprar medo/desconto; vender se euforia/on-chain esticar."
+    elif final_score >= 28:
+        action = "REALIZAR PARCIAL"
+        bias = "Reduzir beta"
+        crypto_pct, usdt_pct = 30, 70
+        risk = "Medio/alto"
+        condition = "Voltar a acumular se medo aumentar e MVRV voltar a zona saudavel."
+    else:
+        action = "FAZER CAIXA USDT"
+        bias = "Vender caro / proteger lucro"
+        crypto_pct, usdt_pct = 15, 85
+        risk = "Alto"
+        condition = "Priorizar caixa ate euforia aliviar e aparecer desconto de ciclo."
+
+    btc_pct = round(crypto_pct * 0.55)
+    eth_pct = round(crypto_pct * 0.20)
+    alts_pct = max(0, crypto_pct - btc_pct - eth_pct)
+    return {
+        "action": action,
+        "bias": bias,
+        "score": round(final_score, 1),
+        "cycle_score": round(cycle_score, 1),
+        "momentum_score": round(momentum_score, 1),
+        "crypto_pct": crypto_pct,
+        "usdt_pct": usdt_pct,
+        "btc_pct": btc_pct,
+        "eth_pct": eth_pct,
+        "alts_pct": alts_pct,
+        "risk": risk,
+        "reason": "; ".join(reasons[:3]) or "sem assimetria clara de ciclo",
+        "risk_note": "; ".join(risks[:3]) or "sem risco extremo dominante",
+        "condition": condition,
+    }
+
+
 def _append_history(result: dict[str, Any]) -> None:
     os.makedirs(CACHE_DIR, exist_ok=True)
     try:
@@ -339,6 +511,20 @@ def calculate_crypto_regime(
     regime = _classify(score, fear_value, funding_pressure)
     bias = _bias_from_regime(regime, score)
     summary = _build_summary(regime, score, positive, negative, alerts, stable_dom, btc_dom, eth_dom)
+    allocation = _cycle_allocation_decision(
+        score=score,
+        fear_value=fear_value,
+        mvrv_z=mvrv_z,
+        mvrv=mvrv,
+        mayer=mayer,
+        puell=puell,
+        aviv=aviv,
+        stable_dom=stable_dom,
+        breadth_delta=breadth_delta,
+        btc_asset=asset_by_symbol.get("BTCUSDT"),
+        eth_asset=asset_by_symbol.get("ETHUSDT"),
+        funding_pressure=funding_pressure,
+    )
     result = {
         "source": "TTS Crypto Regime Engine",
         "status": "ok",
@@ -349,6 +535,7 @@ def calculate_crypto_regime(
         "regime": regime,
         "bias": bias,
         "summary": summary,
+        "allocation": allocation,
         "drivers_positive": positive[:8],
         "drivers_negative": negative[:8],
         "alerts": alerts[:8],
