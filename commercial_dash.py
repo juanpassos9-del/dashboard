@@ -5841,6 +5841,62 @@ def pagina_crypto_terminal():
     else:
         cycle_regime, cycle_cls, cycle_text = "Construtivo", "good", "On-chain ainda construtivo, com risco de ciclo controlado."
 
+    today_brt = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    last_halving = datetime(2024, 4, 20).date()
+    next_halving = datetime(2028, 4, 15).date()
+    days_since_halving = max(0, (today_brt - last_halving).days)
+    days_to_next_halving = max(0, (next_halving - today_brt).days)
+    cycle_progress = min(100, max(0, days_since_halving / max(1, (next_halving - last_halving).days) * 100))
+    btc_change_24h = _num(btc.get("change_pct_24h"), 0)
+    btc_trend_80h = _num(btc.get("trend_80h_pct"), 0)
+    stable_dom = (stable_cap / market_cap * 100) if market_cap and stable_cap else None
+    macro_liquidity_score = 0
+    macro_liquidity_score += 1 if btc_change_24h >= 0 else -1
+    macro_liquidity_score += 1 if btc_trend_80h >= 0 else -1
+    if stable_dom is not None:
+        macro_liquidity_score += -1 if stable_dom > 9 else 1
+    if fng_gauge_value >= 75:
+        macro_liquidity_score -= 1
+    elif fng_gauge_value <= 25:
+        macro_liquidity_score -= 1
+    elif fng_gauge_value >= 55:
+        macro_liquidity_score += 1
+    if macro_liquidity_score >= 2:
+        macro_liquidity, macro_cls = "Liquidez favoravel", "good"
+        macro_text = "Preco e sentimento ainda sustentam apetite por risco cripto."
+    elif macro_liquidity_score <= -2:
+        macro_liquidity, macro_cls = "Liquidez restritiva", "bad"
+        macro_text = "Fluxo curto sugere defesa; evitar alavancagem e compras emocionais."
+    else:
+        macro_liquidity, macro_cls = "Liquidez neutra", "warn"
+        macro_text = "Confirmar com DXY, juros e Nasdaq antes de aumentar risco."
+
+    if mvrv_z is not None and mvrv_z >= 4:
+        btc_cycle_phase, btc_cycle_cls = "Distribuicao / euforia", "bad"
+        btc_cycle_read = "On-chain em zona quente; foco em protecao de lucro."
+    elif mvrv_z is not None and mvrv_z <= 0:
+        btc_cycle_phase, btc_cycle_cls = "Capitulacao / acumulacao", "good"
+        btc_cycle_read = "Valuation frio; historicamente boa assimetria para longo prazo."
+    elif days_since_halving < 180:
+        btc_cycle_phase, btc_cycle_cls = "Pos-halving inicial", "neutral"
+        btc_cycle_read = "Oferta nova menor, mas ainda precisa de liquidez para tracao."
+    elif days_since_halving < 540:
+        btc_cycle_phase, btc_cycle_cls = "Expansao de ciclo", "good"
+        btc_cycle_read = "Janela historicamente favoravel se liquidez e on-chain confirmarem."
+    elif days_since_halving < 900:
+        btc_cycle_phase, btc_cycle_cls = "Maturacao / pos-pico", "warn"
+        btc_cycle_read = "Ciclo avancado; priorizar confirmacao por MVRV, DXY e fluxo."
+    else:
+        btc_cycle_phase, btc_cycle_cls = "Late-cycle / pre-halving", "warn"
+        btc_cycle_read = "Aproximacao do proximo halving; buscar sinais de acumulacao."
+
+    if btc_cycle_cls == "good" and macro_cls == "good":
+        cycle_operational_bias, cycle_operational_cls = "Risk-on seletivo", "good"
+    elif btc_cycle_cls == "bad" or macro_cls == "bad":
+        cycle_operational_bias, cycle_operational_cls = "Defensivo", "bad"
+    else:
+        cycle_operational_bias, cycle_operational_cls = "Neutro com confirmacao", "warn"
+
     st.markdown(
         f"""
         <style>
@@ -5869,6 +5925,19 @@ def pagina_crypto_terminal():
           .crypto-kpi span {{display:block; color:#94A3B8; font-size:.7rem; font-weight:900; text-transform:uppercase;}}
           .crypto-kpi strong {{display:block; color:#F8FAFC; font-size:1.22rem; margin-top:5px;}}
           .crypto-kpi em {{display:block; color:#94A3B8; font-size:.72rem; font-style:normal; margin-top:4px;}}
+          .crypto-cycle-dashboard {{display:grid; grid-template-columns:1.1fr .9fr .9fr .9fr; gap:10px; margin:-2px 0 16px;}}
+          .crypto-cycle-box {{background:#07111F; border:1px solid #1F334A; border-radius:8px; padding:13px; min-height:128px;}}
+          .crypto-cycle-box.good {{border-left:5px solid #00D084; background:linear-gradient(180deg,rgba(0,208,132,.08),#07111F);}}
+          .crypto-cycle-box.warn {{border-left:5px solid #FFB020; background:linear-gradient(180deg,rgba(255,176,32,.08),#07111F);}}
+          .crypto-cycle-box.bad {{border-left:5px solid #FF4B4B; background:linear-gradient(180deg,rgba(255,75,75,.09),#07111F);}}
+          .crypto-cycle-box.neutral {{border-left:5px solid #60A5FA;}}
+          .crypto-cycle-box b {{display:block; color:#F8FAFC; font-size:1.3rem; line-height:1.05; margin-top:5px;}}
+          .crypto-cycle-box p {{margin:8px 0 0; color:#CBD5E1; font-weight:800; font-size:.82rem; line-height:1.35;}}
+          .crypto-cycle-meter {{height:10px; border-radius:999px; background:#132338; overflow:hidden; margin-top:12px; border:1px solid rgba(148,163,184,.18);}}
+          .crypto-cycle-meter div {{height:100%; width:{cycle_progress:.0f}%; background:linear-gradient(90deg,#22D3EE,#FFB020,#FF4B4B); border-radius:999px;}}
+          .crypto-cycle-mini {{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:10px;}}
+          .crypto-cycle-mini span {{display:block; color:#8FA4BD; font-size:.66rem; font-weight:900; text-transform:uppercase;}}
+          .crypto-cycle-mini strong {{display:block; color:#F8FAFC; font-size:.9rem;}}
           .crypto-onchain {{display:grid; grid-template-columns:.85fr 1.15fr; gap:12px; margin:-2px 0 16px;}}
           .crypto-onchain-main {{background:linear-gradient(135deg,#07111F,#101728); border:1px solid #28405E; border-left:5px solid #22D3EE; border-radius:8px; padding:13px;}}
           .crypto-onchain-main strong {{display:block; color:#F8FAFC; font-size:2rem; line-height:1; margin-top:5px;}}
@@ -5951,6 +6020,7 @@ def pagina_crypto_terminal():
           @media (max-width: 1200px) {{
             .crypto-hero {{grid-template-columns:1fr;}}
             .crypto-grid {{grid-template-columns:repeat(2,minmax(0,1fr));}}
+            .crypto-cycle-dashboard {{grid-template-columns:1fr;}}
             .crypto-assets {{grid-template-columns:repeat(2,minmax(0,1fr));}}
             .crypto-onchain {{grid-template-columns:1fr;}}
             .crypto-onchain-grid {{grid-template-columns:1fr;}}
@@ -5989,6 +6059,42 @@ def pagina_crypto_terminal():
             <div style="display:flex;justify-content:space-between;margin-top:12px;gap:10px;">
               <div><span class="crypto-label">BTC Dominance</span><b>{btc_dom:.2f}%</b><br><small>ETH {eth_dom:.2f}%</small></div>
               <div style="text-align:right;"><span class="crypto-label">Fonte</span><b>{sanitize_text(fng_label or fng_gauge_text)}</b><br><small>sentimento</small></div>
+            </div>
+          </div>
+        </div>
+        <div class="crypto-cycle-dashboard">
+          <div class="crypto-cycle-box {btc_cycle_cls}">
+            <span class="crypto-label">Bitcoin 4-Year Cycle</span>
+            <b>{sanitize_text(btc_cycle_phase)}</b>
+            <p>{sanitize_text(btc_cycle_read)}</p>
+            <div class="crypto-cycle-meter"><div></div></div>
+            <p style="font-size:.72rem;color:#8FA4BD;margin-top:7px;">Progresso halving: {cycle_progress:.0f}%</p>
+          </div>
+          <div class="crypto-cycle-box neutral">
+            <span class="crypto-label">Calendario do halving</span>
+            <b>{days_since_halving} dias</b>
+            <p>Desde o halving de 20/04/2024. Proximo estimado: {days_to_next_halving} dias.</p>
+            <div class="crypto-cycle-mini">
+              <div><span>Ultimo</span><strong>20/04/2024</strong></div>
+              <div><span>Prox.</span><strong>Abr/2028</strong></div>
+            </div>
+          </div>
+          <div class="crypto-cycle-box {macro_cls}">
+            <span class="crypto-label">Liquidez / macro cripto</span>
+            <b>{sanitize_text(macro_liquidity)}</b>
+            <p>{sanitize_text(macro_text)}</p>
+            <div class="crypto-cycle-mini">
+              <div><span>BTC 24h</span><strong>{_plain_pct(btc_change_24h)}</strong></div>
+              <div><span>Stables dom.</span><strong>{'---' if stable_dom is None else f'{stable_dom:.1f}%'}</strong></div>
+            </div>
+          </div>
+          <div class="crypto-cycle-box {cycle_operational_cls}">
+            <span class="crypto-label">Vies operacional</span>
+            <b>{sanitize_text(cycle_operational_bias)}</b>
+            <p>Combina ciclo, on-chain e fluxo curto. Use como filtro de contexto, nao como gatilho isolado.</p>
+            <div class="crypto-cycle-mini">
+              <div><span>MVRV Z</span><strong>{'---' if mvrv_z is None else f'{mvrv_z:.2f}'}</strong></div>
+              <div><span>F&G</span><strong>{fng_gauge_value:.0f}</strong></div>
             </div>
           </div>
         </div>
