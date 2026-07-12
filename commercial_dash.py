@@ -5813,6 +5813,17 @@ def pagina_crypto_terminal():
     eth_dom = _num(global_data.get("eth_dominance"))
     tvl = _num(defillama_data.get("total_tvl_usd"))
     stable_cap = _num(defillama_data.get("stablecoin_market_cap_usd"))
+    stablecoin_rows = defillama_data.get("stablecoins") if isinstance(defillama_data, dict) else []
+    usdt_cap = 0.0
+    for stable in stablecoin_rows or []:
+        if not isinstance(stable, dict):
+            continue
+        stable_symbol = str(stable.get("symbol") or stable.get("gecko_id") or stable.get("name") or "").upper()
+        stable_name = str(stable.get("name") or "").upper()
+        if stable_symbol == "USDT" or "TETHER" in stable_name:
+            usdt_cap = _num((stable.get("circulating") or {}).get("peggedUSD"), 0)
+            break
+    usdt_dom = (usdt_cap / market_cap * 100) if market_cap and usdt_cap else None
     mvrv_z = _num(bgeometrics_data.get("mvrv_z_score"), None)
     mvrv_ratio = _num(bgeometrics_data.get("mvrv"), None)
     mvrv_zone, mvrv_cls, mvrv_text = _mvrv_zone(mvrv_z)
@@ -6057,7 +6068,7 @@ def pagina_crypto_terminal():
               <div style="display:flex;justify-content:space-between;color:#64748B;font-size:.62rem;font-weight:900;margin-top:6px;"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
             </div>
             <div style="display:flex;justify-content:space-between;margin-top:12px;gap:10px;">
-              <div><span class="crypto-label">BTC Dominance</span><b>{btc_dom:.2f}%</b><br><small>ETH {eth_dom:.2f}%</small></div>
+              <div><span class="crypto-label">Dominance</span><b>BTC {btc_dom:.2f}%</b><br><small>ETH {eth_dom:.2f}% | USDT {'---' if usdt_dom is None else f'{usdt_dom:.2f}%'}</small></div>
               <div style="text-align:right;"><span class="crypto-label">Fonte</span><b>{sanitize_text(fng_label or fng_gauge_text)}</b><br><small>sentimento</small></div>
             </div>
           </div>
