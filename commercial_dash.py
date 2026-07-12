@@ -5089,6 +5089,22 @@ def load_crypto_mvrv_history(refresh_key: int = 0):
         }
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def load_crypto_rainbow_chart(refresh_key: int = 0):
+    """Load Bitcoin Rainbow Chart lazily to avoid slowing app boot."""
+    try:
+        from execution.crypto_bgeometrics import fetch_bgeometrics_rainbow_chart
+
+        return fetch_bgeometrics_rainbow_chart()
+    except Exception as exc:
+        return {
+            "source": "BGeometrics",
+            "status": "error",
+            "data": {"points": []},
+            "warnings": [f"Rainbow Chart indisponivel: {exc}"],
+        }
+
+
 def _crypto_mini_chart_html(symbol: str, asset: dict[str, Any], uid: str) -> str:
     candles = asset.get("candles_1h") or []
     chart_candles = [
@@ -5257,6 +5273,117 @@ def _render_crypto_mvrv_chart(points: list[dict[str, Any]]) -> None:
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
+def _render_crypto_rainbow_chart(points: list[dict[str, Any]]) -> None:
+    chart_points = [
+        {
+            "time": int(row.get("time") or 0),
+            "price": float(row.get("price") or 0),
+            "band_index": int(float(row.get("band_index") or 0)),
+            "band_label": str(row.get("band_label") or "---"),
+            **{f"band{i}": float(row.get(f"band{i}") or 0) for i in range(1, 10)},
+        }
+        for row in points
+        if row.get("time") and row.get("price")
+    ]
+    if not chart_points:
+        st.markdown("<div class='crypto-empty'>Sem historico Rainbow Chart disponivel agora.</div>", unsafe_allow_html=True)
+        return
+
+    import plotly.graph_objects as go
+
+    df = pd.DataFrame(chart_points)
+    df["date"] = pd.to_datetime(df["time"], unit="s", utc=True)
+    latest = chart_points[-1]
+    zone_label = sanitize_text(latest.get("band_label", "---"))
+    zone_idx = int(latest.get("band_index") or 0)
+    price = float(latest.get("price") or 0)
+    band_colors = [
+        "rgba(0,208,132,.16)",
+        "rgba(45,255,170,.14)",
+        "rgba(125,211,252,.13)",
+        "rgba(255,203,107,.14)",
+        "rgba(255,176,32,.15)",
+        "rgba(255,138,76,.16)",
+        "rgba(255,93,93,.17)",
+        "rgba(190,24,93,.18)",
+    ]
+    fig = go.Figure()
+    for idx in range(1, 9):
+        lower = f"band{idx}"
+        upper = f"band{idx + 1}"
+        if not (df[lower] > 0).any() or not (df[upper] > 0).any():
+            continue
+        fig.add_trace(go.Scatter(
+            x=df["date"],
+            y=df[upper],
+            mode="lines",
+            line={"width": 0},
+            showlegend=False,
+            hoverinfo="skip",
+        ))
+        fig.add_trace(go.Scatter(
+            x=df["date"],
+            y=df[lower],
+            mode="lines",
+            line={"width": 0},
+            fill="tonexty",
+            fillcolor=band_colors[idx - 1],
+            name=f"Banda {idx}",
+            hoverinfo="skip",
+        ))
+    for idx, color in [(1, "#00D084"), (3, "#22D3EE"), (5, "#FFB020"), (7, "#FF5D5D"), (9, "#BE185D")]:
+        col = f"band{idx}"
+        if (df[col] > 0).any():
+            fig.add_trace(go.Scatter(
+                x=df["date"],
+                y=df[col],
+                mode="lines",
+                name=col.upper(),
+                line={"color": color, "width": 1, "dash": "dot"},
+                hovertemplate="%{x|%d/%m/%Y}<br>%{y:,.0f}<extra></extra>",
+            ))
+    fig.add_trace(go.Scatter(
+        x=df["date"],
+        y=df["price"],
+        mode="lines",
+        name="BTC",
+        line={"color": "#F8FAFC", "width": 2.2},
+        hovertemplate="%{x|%d/%m/%Y}<br>BTC: US$ %{y:,.0f}<extra></extra>",
+    ))
+    fig.update_layout(
+        height=500,
+        margin={"l": 10, "r": 22, "t": 8, "b": 10},
+        paper_bgcolor="#050B14",
+        plot_bgcolor="#050B14",
+        font={"color": "#AAB7C4"},
+        legend={"orientation": "h", "y": -0.08, "x": 0.01, "font": {"size": 10}},
+        xaxis={"gridcolor": "rgba(148,163,184,.08)", "zeroline": False},
+        yaxis={
+            "type": "log",
+            "title": "BTC Rainbow",
+            "gridcolor": "rgba(148,163,184,.08)",
+            "zeroline": False,
+            "tickprefix": "US$ ",
+        },
+    )
+    st.markdown(
+        f"""
+    <div class="crypto-mvrv-card">
+      <div class="crypto-mvrv-head">
+        <div><span class="crypto-label">Bitcoin Rainbow Chart</span><b>US$ {price:,.0f}</b></div>
+        <div class="crypto-mvrv-legend">
+          <span class="green">zona {zone_idx}</span>
+          <span class="yellow">{zone_label}</span>
+          <span class="red">ciclo</span>
+        </div>
+      </div>
+    </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
 def pagina_crypto_terminal():
     """Crypto Terminal phase 1: public crypto data, regime and source health."""
     st.title("Crypto Terminal")
@@ -5392,6 +5519,105 @@ def pagina_crypto_terminal():
             return "Risco de ciclo", "bad", "On-chain aquecido; reduzir complacencia em beta cripto."
         return "Euforia", "bad", "Zona historicamente associada a assimetria pior para novas compras."
 
+    def _onchain_metric_zone(metric, value):
+        v = _num(value, None)
+        if v is None or (v == 0 and metric not in {"mvrv_z_score"}):
+            return "Sem dado", "neutral", "Aguardando leitura."
+        if metric == "mvrv_z_score":
+            if v < 0:
+                return "Acumulacao", "good", "Abaixo de 0 sugere assimetria historicamente favoravel."
+            if v < 2:
+                return "Saudavel", "good", "Ciclo construtivo, sem euforia on-chain."
+            if v < 4:
+                return "Aquecendo", "warn", "Risco ainda moderado, monitorar aceleracao."
+            return "Risco", "bad", "Valuation de ciclo exige cautela."
+        if metric == "mvrv":
+            if v < 1:
+                return "Desconto", "good", "Preco abaixo do realizado."
+            if v < 1.8:
+                return "Saudavel", "good", "Lucro agregado controlado."
+            if v < 3:
+                return "Aquecendo", "warn", "Lucro agregado ja relevante."
+            return "Euforia", "bad", "Lucro agregado historicamente esticado."
+        if metric == "mayer_multiple":
+            if v < 0.8:
+                return "Desconto", "good", "BTC abaixo da media longa; ciclo frio."
+            if v < 1.7:
+                return "Neutro", "neutral", "Preco dentro de faixa normal vs media longa."
+            if v < 2.4:
+                return "Aquecendo", "warn", "Preco acelerando contra media longa."
+            return "Risco", "bad", "Zona historicamente esticada."
+        if metric == "puell_multiple":
+            if v < 0.6:
+                return "Miner stress", "good", "Receita dos mineradores comprimida; zona de acumulacao."
+            if v < 2:
+                return "Normal", "neutral", "Sem excesso minerador relevante."
+            if v < 3:
+                return "Aquecendo", "warn", "Receita mineradora elevada."
+            return "Euforia", "bad", "Excesso minerador de ciclo."
+        if metric == "aviv":
+            if v < 0.75:
+                return "Desconto", "good", "Preco descontado vs valor ativo."
+            if v < 1.5:
+                return "Saudavel", "good", "Valuation ativo sem estresse."
+            if v < 2:
+                return "Aquecendo", "warn", "Valuation ativo em expansao."
+            return "Risco", "bad", "Valuation ativo esticado."
+        if metric == "fear_greed":
+            if v <= 25:
+                return "Medo", "warn", "Sentimento defensivo; pode indicar stress."
+            if v < 55:
+                return "Neutro", "neutral", "Sentimento sem excesso."
+            if v < 75:
+                return "Apetite", "good", "Sentimento favoravel ao risco."
+            return "Ganancia", "bad", "Sentimento esticado."
+        if metric in {"active_addresses", "hashrate"}:
+            return "Online", "good", "Dado de rede carregado para contexto."
+        return "Monitorado", "neutral", "Metrica acompanhada no painel."
+
+    def _compact_number(value):
+        v = _num(value, None)
+        if v is None:
+            return "---"
+        if abs(v) >= 1_000_000_000:
+            return f"{v / 1_000_000_000:.2f}B"
+        if abs(v) >= 1_000_000:
+            return f"{v / 1_000_000:.2f}M"
+        if abs(v) >= 1_000:
+            return f"{v / 1_000:.1f}K"
+        return f"{v:.2f}"
+
+    def _onchain_heatmap_html(data):
+        metrics = [
+            ("mvrv_z_score", "MVRV Z", "{:.2f}"),
+            ("mvrv", "MVRV", "{:.2f}x"),
+            ("mayer_multiple", "Mayer", "{:.2f}x"),
+            ("puell_multiple", "Puell", "{:.2f}"),
+            ("aviv", "AVIV", "{:.2f}"),
+            ("fear_greed", "Fear & Greed", "{:.0f}"),
+            ("active_addresses", "Enderecos ativos", None),
+            ("hashrate", "Hashrate", None),
+        ]
+        cards = []
+        for key, label, fmt in metrics:
+            value = _num(data.get(key), None)
+            zone, cls, text = _onchain_metric_zone(key, value)
+            display = "---" if value is None else (_compact_number(value) if fmt is None else fmt.format(value))
+            cards.append(
+                "<div class='crypto-onchain-tile {cls}'>"
+                "<div><span>{label}</span><b>{display}</b></div>"
+                "<em>{zone}</em>"
+                "<small>{text}</small>"
+                "</div>".format(
+                    cls=cls,
+                    label=sanitize_text(label),
+                    display=sanitize_text(display),
+                    zone=sanitize_text(zone),
+                    text=sanitize_text(text),
+                )
+            )
+        return "".join(cards)
+
     def _rotation_cards_html(rows):
         cards = []
         for row in rows[:8]:
@@ -5449,6 +5675,26 @@ def pagina_crypto_terminal():
     score = _num(regime.get("score"), 50)
     fng_value = _num((fear_data.get("current") or {}).get("value"), 0)
     fng_label = sanitize_text((fear_data.get("current") or {}).get("classification", "---"))
+    fng_gauge_value = max(0, min(100, fng_value))
+    fng_bar_width = f"{fng_gauge_value:.0f}%"
+    if fng_gauge_value <= 25:
+        fng_gauge_cls = "fear"
+        fng_gauge_text = "Medo"
+    elif fng_gauge_value < 55:
+        fng_gauge_cls = "neutral"
+        fng_gauge_text = "Neutro"
+    elif fng_gauge_value < 75:
+        fng_gauge_cls = "greed"
+        fng_gauge_text = "Apetite"
+    else:
+        fng_gauge_cls = "extreme"
+        fng_gauge_text = "Ganancia"
+    fng_badge_color = {
+        "fear": "#FF8A8A",
+        "neutral": "#FFCB6B",
+        "greed": "#2DFFAA",
+        "extreme": "#FF8A8A",
+    }.get(fng_gauge_cls, "#CBD5E1")
     global_data = coingecko_data
     market_cap = _num(global_data.get("total_market_cap_usd"))
     volume_24h = _num(global_data.get("total_volume_usd"))
@@ -5461,6 +5707,28 @@ def pagina_crypto_terminal():
     mvrv_zone, mvrv_cls, mvrv_text = _mvrv_zone(mvrv_z)
     mvrv_status = sanitize_text(bgeometrics.get("status", "---") if isinstance(bgeometrics, dict) else "---")
     mvrv_date = sanitize_text(bgeometrics_data.get("date", "---"))
+    mayer_multiple = _num(bgeometrics_data.get("mayer_multiple"), None)
+    puell_multiple = _num(bgeometrics_data.get("puell_multiple"), None)
+    aviv_value = _num(bgeometrics_data.get("aviv"), None)
+    onchain_fear = _num(bgeometrics_data.get("fear_greed"), None)
+    cycle_score_parts = []
+    for metric_key in ("mvrv_z_score", "mvrv", "mayer_multiple", "puell_multiple", "aviv", "fear_greed"):
+        _, cls, _ = _onchain_metric_zone(metric_key, bgeometrics_data.get(metric_key))
+        if cls == "good":
+            cycle_score_parts.append(1)
+        elif cls == "bad":
+            cycle_score_parts.append(-1)
+        elif cls == "warn":
+            cycle_score_parts.append(0)
+    cycle_score = sum(cycle_score_parts)
+    if cycle_score >= 3:
+        cycle_regime, cycle_cls, cycle_text = "Acumulacao / saudavel", "good", "Valuation on-chain favorece paciencia compradora e menor risco de euforia."
+    elif cycle_score <= -2:
+        cycle_regime, cycle_cls, cycle_text = "Risco de ciclo", "bad", "Leitura on-chain exige cautela com beta cripto e alavancagem."
+    elif cycle_score <= 0:
+        cycle_regime, cycle_cls, cycle_text = "Neutro / aquecendo", "warn", "Ciclo sem capitulacao, mas tambem sem grande desconto agregado."
+    else:
+        cycle_regime, cycle_cls, cycle_text = "Construtivo", "good", "On-chain ainda construtivo, com risco de ciclo controlado."
 
     st.markdown(
         f"""
@@ -5473,6 +5741,18 @@ def pagina_crypto_terminal():
           .crypto-regime strong {{display:block; color:#F8FAFC; font-size:2.35rem; line-height:1.05; margin-top:5px;}}
           .crypto-bias {{display:inline-flex; margin-top:9px; padding:5px 9px; border-radius:999px; background:#0B2440; color:#7DD3FC; font-weight:900;}}
           .crypto-score {{font-size:2.15rem; color:#FFB020; font-weight:950; text-align:right;}}
+          .crypto-risk-card {{display:block;}}
+          .crypto-fng-panel {{background:#08111F; border:1px solid #203047; border-radius:8px; padding:12px; min-height:118px;}}
+          .crypto-fng-top {{display:flex; align-items:flex-end; justify-content:space-between; gap:10px; margin-top:6px;}}
+          .crypto-fng-value {{color:#F8FAFC; font-size:2rem; line-height:1; font-weight:950;}}
+          .crypto-fng-badge {{border-radius:999px; padding:4px 9px; font-size:.68rem; font-weight:950; text-transform:uppercase;}}
+          .crypto-fng-badge.fear {{color:#FF8A8A; background:rgba(255,75,75,.15); border:1px solid rgba(255,75,75,.35);}}
+          .crypto-fng-badge.neutral {{color:#FFCB6B; background:rgba(255,176,32,.14); border:1px solid rgba(255,176,32,.35);}}
+          .crypto-fng-badge.greed {{color:#2DFFAA; background:rgba(0,208,132,.14); border:1px solid rgba(0,208,132,.35);}}
+          .crypto-fng-badge.extreme {{color:#FF8A8A; background:rgba(255,75,75,.15); border:1px solid rgba(255,75,75,.35);}}
+          .crypto-pressure-track {{height:18px; margin-top:14px; border-radius:999px; background:linear-gradient(90deg,#FF4B4B 0%,#FF4B4B 25%,#FFB020 25%,#FFB020 55%,#00D084 55%,#00D084 75%,#FF5D5D 75%,#FF5D5D 100%); padding:3px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.08);}}
+          .crypto-pressure-fill {{height:12px; width:{fng_bar_width}; border-radius:999px; background:rgba(248,250,252,.88); box-shadow:0 0 12px rgba(248,250,252,.35);}}
+          .crypto-pressure-scale {{display:flex; justify-content:space-between; color:#64748B; font-size:.62rem; font-weight:900; margin-top:6px;}}
           .crypto-grid {{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:16px;}}
           .crypto-kpi {{background:#0B1220; border:1px solid #1E293B; border-radius:8px; padding:12px; min-height:86px;}}
           .crypto-kpi span {{display:block; color:#94A3B8; font-size:.7rem; font-weight:900; text-transform:uppercase;}}
@@ -5482,10 +5762,26 @@ def pagina_crypto_terminal():
           .crypto-onchain-main {{background:linear-gradient(135deg,#07111F,#101728); border:1px solid #28405E; border-left:5px solid #22D3EE; border-radius:8px; padding:13px;}}
           .crypto-onchain-main strong {{display:block; color:#F8FAFC; font-size:2rem; line-height:1; margin-top:5px;}}
           .crypto-onchain-main p {{margin:8px 0 0; color:#CBD5E1; font-weight:800;}}
-          .crypto-onchain-grid {{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px;}}
+          .crypto-onchain-grid {{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px;}}
           .crypto-onchain-grid div {{background:#08111F; border:1px solid #203047; border-radius:8px; padding:10px;}}
           .crypto-onchain-grid span {{display:block; color:#94A3B8; font-size:.68rem; font-weight:900; text-transform:uppercase;}}
           .crypto-onchain-grid b {{display:block; color:#F8FAFC; font-size:1rem; margin-top:4px;}}
+          .crypto-onchain-cycle {{display:grid; grid-template-columns:.78fr 1.22fr; gap:12px; margin:-6px 0 18px;}}
+          .crypto-cycle-card {{background:linear-gradient(135deg,#07111F,#0B1727); border:1px solid #28405E; border-radius:8px; padding:13px;}}
+          .crypto-cycle-card.good {{border-left:5px solid #00D084;}}
+          .crypto-cycle-card.warn {{border-left:5px solid #FFB020;}}
+          .crypto-cycle-card.bad {{border-left:5px solid #FF4B4B;}}
+          .crypto-cycle-card strong {{display:block; color:#F8FAFC; font-size:1.45rem; margin-top:5px;}}
+          .crypto-cycle-card p {{color:#CBD5E1; font-weight:800; margin:8px 0 0;}}
+          .crypto-onchain-heatmap {{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px;}}
+          .crypto-onchain-tile {{background:#08111F; border:1px solid #203047; border-radius:8px; padding:10px; min-height:96px;}}
+          .crypto-onchain-tile.good {{border-color:rgba(0,208,132,.45); background:linear-gradient(180deg,rgba(0,208,132,.10),#08111F);}}
+          .crypto-onchain-tile.warn {{border-color:rgba(255,176,32,.45); background:linear-gradient(180deg,rgba(255,176,32,.10),#08111F);}}
+          .crypto-onchain-tile.bad {{border-color:rgba(255,75,75,.50); background:linear-gradient(180deg,rgba(255,75,75,.11),#08111F);}}
+          .crypto-onchain-tile span {{display:block; color:#94A3B8; font-size:.66rem; font-weight:900; text-transform:uppercase;}}
+          .crypto-onchain-tile b {{display:block; color:#F8FAFC; font-size:1.18rem; margin-top:3px;}}
+          .crypto-onchain-tile em {{display:inline-flex; margin-top:7px; border-radius:999px; padding:2px 7px; color:#E5E7EB; background:rgba(148,163,184,.12); font-size:.66rem; font-style:normal; font-weight:950; text-transform:uppercase;}}
+          .crypto-onchain-tile small {{display:block; color:#AAB7C4; font-size:.68rem; line-height:1.25; margin-top:7px;}}
           .crypto-mvrv-card {{background:#050B14; border:1px solid #1F334A; border-radius:8px; padding:12px; margin:-4px 0 18px;}}
           .crypto-mvrv-head {{display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:8px;}}
           .crypto-mvrv-head b {{display:block; color:#F8FAFC; font-size:1.45rem; line-height:1; margin-top:4px;}}
@@ -5547,6 +5843,8 @@ def pagina_crypto_terminal():
             .crypto-assets {{grid-template-columns:repeat(2,minmax(0,1fr));}}
             .crypto-onchain {{grid-template-columns:1fr;}}
             .crypto-onchain-grid {{grid-template-columns:1fr;}}
+            .crypto-onchain-cycle {{grid-template-columns:1fr;}}
+            .crypto-onchain-heatmap {{grid-template-columns:repeat(2,minmax(0,1fr));}}
             .crypto-mvrv-head {{display:block;}}
             .crypto-mvrv-legend {{justify-content:flex-start; margin-top:8px;}}
             .crypto-alerts {{grid-template-columns:1fr;}}
@@ -5563,12 +5861,23 @@ def pagina_crypto_terminal():
             <div class="crypto-bias">{regime_bias}</div>
             <p style="margin:12px 0 0;color:#CBD5E1;">{sanitize_text(regime.get("summary", "Leitura local indisponivel."))}</p>
           </div>
-          <div class="crypto-card">
+          <div class="crypto-card crypto-risk-card">
             <span class="crypto-label">Score de risco</span>
             <div class="crypto-score">{score:.0f}/100</div>
-            <div style="display:flex;justify-content:space-between;margin-top:10px;gap:10px;">
-              <div><span class="crypto-label">Fear & Greed</span><b>{fng_value:.0f}</b><br><small>{fng_label}</small></div>
-              <div style="text-align:right;"><span class="crypto-label">BTC Dominance</span><b>{btc_dom:.2f}%</b><br><small>ETH {eth_dom:.2f}%</small></div>
+            <div style="background:#08111F;border:1px solid #203047;border-radius:8px;padding:12px;min-height:110px;margin-top:12px;">
+              <span style="display:block;color:#8FB6E8;font-size:.72rem;font-weight:900;text-transform:uppercase;">Fear & Greed</span>
+              <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-top:6px;">
+                <div style="color:#F8FAFC;font-size:2rem;line-height:1;font-weight:950;">{fng_gauge_value:.0f}</div>
+                <div style="color:{fng_badge_color};background:rgba(148,163,184,.12);border:1px solid {fng_badge_color}55;border-radius:999px;padding:4px 9px;font-size:.68rem;font-weight:950;text-transform:uppercase;">{sanitize_text(fng_label or fng_gauge_text)}</div>
+              </div>
+              <div style="height:18px;margin-top:14px;border-radius:999px;background:linear-gradient(90deg,#FF4B4B 0%,#FF4B4B 25%,#FFB020 25%,#FFB020 55%,#00D084 55%,#00D084 75%,#FF5D5D 75%,#FF5D5D 100%);padding:3px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08);">
+                <div style="height:12px;width:{fng_bar_width};border-radius:999px;background:#F8FAFC;box-shadow:0 0 12px rgba(248,250,252,.35);"></div>
+              </div>
+              <div style="display:flex;justify-content:space-between;color:#64748B;font-size:.62rem;font-weight:900;margin-top:6px;"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:12px;gap:10px;">
+              <div><span class="crypto-label">BTC Dominance</span><b>{btc_dom:.2f}%</b><br><small>ETH {eth_dom:.2f}%</small></div>
+              <div style="text-align:right;"><span class="crypto-label">Fonte</span><b>{sanitize_text(fng_label or fng_gauge_text)}</b><br><small>sentimento</small></div>
             </div>
           </div>
         </div>
@@ -5587,8 +5896,20 @@ def pagina_crypto_terminal():
           </div>
           <div class="crypto-onchain-grid">
             <div><span>MVRV</span><b>{'---' if mvrv_ratio is None else f'{mvrv_ratio:.2f}x'}</b></div>
+            <div><span>Mayer / Puell</span><b>{'---' if mayer_multiple is None else f'{mayer_multiple:.2f}x'} / {'---' if puell_multiple is None else f'{puell_multiple:.2f}'}</b></div>
+            <div><span>AVIV / F&G</span><b>{'---' if aviv_value is None else f'{aviv_value:.2f}'} / {'---' if onchain_fear is None else f'{onchain_fear:.0f}'}</b></div>
             <div><span>Data on-chain</span><b>{mvrv_date}</b></div>
             <div><span>Fonte</span><b>BGeometrics · {mvrv_status}</b></div>
+          </div>
+        </div>
+        <div class="crypto-onchain-cycle">
+          <div class="crypto-cycle-card {cycle_cls}">
+            <span class="crypto-label">Regime on-chain BTC</span>
+            <strong>{sanitize_text(cycle_regime)}</strong>
+            <p>{sanitize_text(cycle_text)}</p>
+          </div>
+          <div class="crypto-onchain-heatmap">
+            {_onchain_heatmap_html(bgeometrics_data)}
           </div>
         </div>
         """,
@@ -5599,6 +5920,9 @@ def pagina_crypto_terminal():
     bgeometrics_mvrv_history = load_crypto_mvrv_history(mvrv_refresh_key)
     mvrv_history_data = bgeometrics_mvrv_history.get("data", {}) if isinstance(bgeometrics_mvrv_history, dict) else {}
     _render_crypto_mvrv_chart(mvrv_history_data.get("points") or [])
+    bgeometrics_rainbow = load_crypto_rainbow_chart(mvrv_refresh_key)
+    rainbow_data = bgeometrics_rainbow.get("data", {}) if isinstance(bgeometrics_rainbow, dict) else {}
+    _render_crypto_rainbow_chart(rainbow_data.get("points") or [])
 
     st.markdown("#### Majors e Altcoins")
     top_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "LINKUSDT", "AVAXUSDT", "SUIUSDT"]

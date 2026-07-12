@@ -204,6 +204,12 @@ def calculate_crypto_regime(
 
     mvrv_z = safe_float(onchain.get("mvrv_z_score"))
     mvrv = safe_float(onchain.get("mvrv"))
+    mayer = safe_float(onchain.get("mayer_multiple"))
+    puell = safe_float(onchain.get("puell_multiple"))
+    aviv = safe_float(onchain.get("aviv"))
+    fear_onchain = safe_float(onchain.get("fear_greed"))
+    active_addresses = safe_float(onchain.get("active_addresses"))
+    hashrate = safe_float(onchain.get("hashrate"))
     if mvrv_z:
         if mvrv_z >= 7:
             score -= 14
@@ -225,6 +231,61 @@ def calculate_crypto_regime(
     else:
         missing.append("MVRV Z-Score BGeometrics")
 
+    if mayer:
+        if mayer < 0.8:
+            score += 5
+            positive.append(f"Mayer Multiple descontado ({mayer:.2f}x)")
+        elif mayer > 2.4:
+            score -= 8
+            negative.append(f"Mayer Multiple esticado ({mayer:.2f}x)")
+        elif mayer > 1.7:
+            score -= 3
+            negative.append(f"Mayer Multiple aquecendo ({mayer:.2f}x)")
+        else:
+            positive.append(f"Mayer Multiple controlado ({mayer:.2f}x)")
+    else:
+        missing.append("Mayer Multiple")
+
+    if puell:
+        if puell < 0.6:
+            score += 5
+            positive.append(f"Puell Multiple em zona de miner stress/acumulacao ({puell:.2f})")
+        elif puell > 3.0:
+            score -= 8
+            negative.append(f"Puell Multiple em zona de euforia mineradora ({puell:.2f})")
+        elif puell > 2.0:
+            score -= 3
+            negative.append(f"Puell Multiple aquecendo ({puell:.2f})")
+        else:
+            positive.append(f"Puell Multiple sem estresse de topo ({puell:.2f})")
+    else:
+        missing.append("Puell Multiple")
+
+    if aviv:
+        if aviv < 0.75:
+            score += 4
+            positive.append(f"AVIV descontado ({aviv:.2f})")
+        elif aviv > 2.0:
+            score -= 6
+            negative.append(f"AVIV esticado ({aviv:.2f})")
+        else:
+            positive.append(f"AVIV neutro/saudavel ({aviv:.2f})")
+    else:
+        missing.append("AVIV")
+
+    if fear_onchain and not fear_value:
+        if fear_onchain <= 25:
+            score -= 5
+            alerts.append(f"Fear & Greed BGeometrics em medo ({fear_onchain:.0f})")
+        elif fear_onchain >= 75:
+            score += 3
+            alerts.append(f"Fear & Greed BGeometrics em ganancia ({fear_onchain:.0f})")
+
+    if active_addresses:
+        positive.append(f"Enderecos ativos BTC: {active_addresses/1000:.0f} mil")
+    if hashrate:
+        positive.append(f"Hashrate BTC monitorado: {hashrate/1_000_000:.0f} EH/s")
+
     score = max(0, min(100, score))
     confidence = max(25, min(95, 100 - len(missing) * 10))
     regime = _classify(score, fear_value, funding_pressure)
@@ -243,6 +304,12 @@ def calculate_crypto_regime(
         "onchain": {
             "mvrv": round(mvrv, 4) if mvrv else None,
             "mvrv_z_score": round(mvrv_z, 4) if mvrv_z else None,
+            "mayer_multiple": round(mayer, 4) if mayer else None,
+            "puell_multiple": round(puell, 4) if puell else None,
+            "aviv": round(aviv, 4) if aviv else None,
+            "fear_greed": round(fear_onchain, 2) if fear_onchain else None,
+            "active_addresses": round(active_addresses, 2) if active_addresses else None,
+            "hashrate": round(hashrate, 2) if hashrate else None,
             "date": onchain.get("date"),
         },
     }

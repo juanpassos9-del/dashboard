@@ -19,9 +19,11 @@ except ModuleNotFoundError:
 
 CACHE_NAME = "crypto_bgeometrics.json"
 HISTORY_CACHE_NAME = "crypto_bgeometrics_mvrv_zscore_history.json"
+RAINBOW_CACHE_NAME = "crypto_bgeometrics_rainbow_chart.json"
 SOURCE = "BGeometrics"
 SNAPSHOT_URL = "https://bitcoin-data.com/api/v1/snapshot"
 MVRV_ZSCORE_URL = "https://bitcoin-data.com/api/v1/mvrv-zscore"
+RAINBOW_CHART_URL = "https://bitcoin-data.com/api/v1/rainbow-chart"
 PUBLIC_MVRV_CHART_URL = "https://charts.bgeometrics.com/graphics/mvrv_400.html"
 PUBLIC_MVRV_PRICE_URL = "https://charts.bgeometrics.com/files/mvrv_zscore_btc_price.json"
 
@@ -61,6 +63,11 @@ def _normalize_snapshot(raw: dict[str, Any]) -> dict[str, Any]:
         "puell_multiple": safe_float(raw.get("puellMultiple")),
         "mayer_multiple": safe_float(raw.get("mayerMultiple")),
         "aviv": safe_float(raw.get("aviv")),
+        "cdd": safe_float(raw.get("cdd")),
+        "sopr": safe_float(raw.get("sopr")),
+        "nvt": safe_float(raw.get("nvt")),
+        "reserve_risk": safe_float(raw.get("reserveRisk")),
+        "rhodl_ratio": safe_float(raw.get("rhodlRatio")),
     }
 
 
@@ -87,6 +94,38 @@ def _normalize_mvrv_history(raw: Any) -> list[dict[str, Any]]:
             "date": date_value,
             "value": round(value, 4),
         })
+    points.sort(key=lambda row: int(row.get("time") or 0))
+    return points
+
+
+def _normalize_rainbow_history(raw: Any) -> list[dict[str, Any]]:
+    rows = raw if isinstance(raw, list) else []
+    points: list[dict[str, Any]] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        unix_ts = int(safe_float(item.get("unixTs")))
+        date_value = item.get("d")
+        if not unix_ts and date_value:
+            try:
+                unix_ts = int(datetime.fromisoformat(str(date_value)).replace(tzinfo=timezone.utc).timestamp())
+            except Exception:
+                unix_ts = 0
+        price = safe_float(item.get("priceUsd"))
+        if not unix_ts or not price:
+            continue
+        point: dict[str, Any] = {
+            "time": unix_ts,
+            "date": date_value,
+            "price": round(price, 2),
+            "band_index": int(safe_float(item.get("bandIndex"))),
+            "band_label": item.get("bandLabel"),
+        }
+        for idx in range(1, 10):
+            value = safe_float(item.get(f"band{idx}"))
+            if value:
+                point[f"band{idx}"] = round(value, 2)
+        points.append(point)
     points.sort(key=lambda row: int(row.get("time") or 0))
     return points
 
@@ -327,6 +366,63 @@ def fetch_bgeometrics_mvrv_zscore_history(
             payload = stale_payload(HISTORY_CACHE_NAME, SOURCE, warning)
             mark_source("Crypto BGeometrics MVRV", payload.get("status", "error"), rows=0, source=SOURCE, message=warning)
             return payload
+
+
+def fetch_bgeometrics_rainbow_chart(
+    days: int = 6000,
+    max_age_seconds: int = 86400,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    """Fetch Bitcoin Rainbow Chart bands using BGeometrics with long cache."""
+    if not force_refresh:
+        cached = load_cache(RAINBOW_CACHE_NAME, max_age_seconds=max_age_seconds)
+        if cached:
+            rows = len((cached.get("data") or {}).get("points") or [])
+            mark_source("Crypto BGeometrics Rainbow", "ok", rows=rows, source=SOURCE, message="Rainbow em cache.")
+            return cached
+
+    api_key = _read_env_key("BGEOMETRICS_API_KEY")
+    if not api_key:
+        payload = stale_payload(RAINBOW_CACHE_NAME, SOURCE, "BGEOMETRICS_API_KEY nao configurada.")
+        payload["status"] = "disabled" if not payload.get("data") else payload.get("status", "stale")
+        mark_source("Crypto BGeometrics Rainbow", payload["status"], rows=0, source=SOURCE, message="Chave ausente.")
+        return payload
+
+    started = time.perf_counter()
+    try:
+        response = requests.get(
+            RAINBOW_CHART_URL,
+            params={"size": int(days) + 10},
+            timeout=25,
+            headers={
+                "User-Agent": "TTS-Crypto-Terminal/1.0",
+                "X-API-KEY": api_key,
+            },
+        )
+        response.raise_for_status()
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        points = _normalize_rainbow_history(response.json())[-int(days):]
+        payload = {
+            "source": SOURCE,
+            "status": "ok" if points else "empty",
+            "updated_at": utc_now_iso(),
+            "updated_ts": time.time(),
+            "latency_ms": latency_ms,
+            "data": {
+                "metric": "Bitcoin Rainbow Chart",
+                "points": points,
+                "latest": points[-1] if points else {},
+            },
+            "warnings": [] if points else ["Rainbow Chart vazio."],
+        }
+        save_cache(RAINBOW_CACHE_NAME, payload)
+        mark_source("Crypto BGeometrics Rainbow", "ok" if points else "stale", rows=len(points), source=SOURCE, message=f"Rainbow carregado em {latency_ms}ms.")
+        return payload
+    except Exception as exc:
+        warning = f"Falha Rainbow BGeometrics: {exc}"
+        payload = stale_payload(RAINBOW_CACHE_NAME, SOURCE, warning)
+        mark_source("Crypto BGeometrics Rainbow", payload.get("status", "error"), rows=0, source=SOURCE, message=warning)
+        return payload
 
 
 if __name__ == "__main__":

@@ -58,6 +58,14 @@ Adicionar ao dashboard atual uma pagina `Crypto Terminal` com leitura operaciona
 - A chave nunca deve ser commitada. Usar `.env` local ou secret `BGEOMETRICS_API_KEY` no ambiente online.
 - Por limite de plano gratuito, manter cache de 6 horas e usar cache stale se a API falhar.
 
+## Fase 5 Entregavel
+- Expandir o snapshot BGeometrics no Crypto Terminal sem aumentar chamadas externas.
+- Exibir painel `Regime on-chain BTC` com leitura deterministica de ciclo.
+- Exibir heatmap on-chain com MVRV Z-Score, MVRV, Mayer Multiple, Puell Multiple, AVIV, Fear & Greed, enderecos ativos e hashrate.
+- O motor de regime deve usar Mayer, Puell e AVIV como confirmadores de valuation/ciclo, mantendo MVRV Z-Score como sinal principal.
+- Métricas adicionais da BGeometrics como CDD, SOPR, NVT, Reserve Risk e RHODL podem ser normalizadas no provider, mas so devem aparecer na interface quando houver dado confiavel no snapshot/cache.
+- Manter cache longo e nao criar novas chamadas historicas sem necessidade, para respeitar o plano gratuito.
+
 ## Motor de Regime
 Classificar em:
 - `Risk-on forte`
