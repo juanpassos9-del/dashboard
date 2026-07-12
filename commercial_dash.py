@@ -5365,41 +5365,52 @@ def _render_crypto_mvrv_pricing_bands_chart(points: list[dict[str, Any]]) -> Non
 
     df = pd.DataFrame(chart_points)
     df["date"] = pd.to_datetime(df["time"], unit="s", utc=True)
-    band_defs = [
-        ("0.8x", 0.8, "#10B981", "dot"),
-        ("1.0x Realized", 1.0, "#22D3EE", "solid"),
-        ("1.5x", 1.5, "#60A5FA", "solid"),
-        ("2.0x", 2.0, "#8B5CF6", "solid"),
-        ("2.4x", 2.4, "#F59E0B", "solid"),
-        ("3.2x", 3.2, "#FB7185", "solid"),
-        ("4.0x", 4.0, "#F43F5E", "dash"),
+    if not (df["mvrv"] > 0).any():
+        df["mvrv"] = df["btc_price"] / df["realized_price"].replace({0: pd.NA})
+    mvrv_window = 365
+    min_periods = min(180, max(30, len(df) // 3))
+    df["mvrv_mean"] = df["mvrv"].rolling(mvrv_window, min_periods=min_periods).mean()
+    df["mvrv_std"] = df["mvrv"].rolling(mvrv_window, min_periods=min_periods).std()
+    if df["mvrv_mean"].isna().all() or df["mvrv_std"].isna().all():
+        st.markdown("<div class='crypto-empty'>Historico insuficiente para calcular bandas estatisticas do MVRV.</div>", unsafe_allow_html=True)
+        return
+    df["mvrv_mean"] = df["mvrv_mean"].ffill().bfill()
+    df["mvrv_std"] = df["mvrv_std"].ffill().bfill().fillna(0)
+    sigma_defs = [
+        ("-1.0σ", -1.0, "#10B981", "solid"),
+        ("-0.5σ", -0.5, "#34D399", "solid"),
+        ("Mean", 0.0, "#F59E0B", "solid"),
+        ("+0.5σ", 0.5, "#60A5FA", "solid"),
+        ("+1.0σ", 1.0, "#8B5CF6", "solid"),
+        ("+2.0σ", 2.0, "#FB7185", "solid"),
     ]
-    for label, multiplier, _color, _dash in band_defs:
-        df[f"band_{label}"] = df["realized_price"] * multiplier
+    for label, sigma, _color, _dash in sigma_defs:
+        multiple = (df["mvrv_mean"] + (df["mvrv_std"] * sigma)).clip(lower=0.05)
+        df[f"band_{label}"] = df["realized_price"] * multiple
 
     latest = chart_points[-1]
     latest_btc = float(latest.get("btc_price") or 0)
     latest_realized = float(latest.get("realized_price") or 0)
     latest_mvrv = float(latest.get("mvrv") or (latest_btc / latest_realized if latest_realized else 0))
-    if latest_mvrv >= 3.2:
+    latest_mean = float(df["mvrv_mean"].iloc[-1] or 0)
+    latest_std = float(df["mvrv_std"].iloc[-1] or 0)
+    latest_sigma = (latest_mvrv - latest_mean) / latest_std if latest_std else 0
+    if latest_sigma >= 2:
         zone, zone_cls, zone_text = "Euforia / risco alto", "red", "Preco esticado contra o realized price."
-    elif latest_mvrv >= 2.4:
+    elif latest_sigma >= 1:
         zone, zone_cls, zone_text = "Aquecido", "yellow", "Ciclo positivo, mas com assimetria menor."
-    elif latest_mvrv >= 1.5:
-        zone, zone_cls, zone_text = "Expansao saudavel", "green", "BTC acima do custo realizado com premio moderado."
-    elif latest_mvrv >= 1.0:
+    elif latest_sigma >= -0.5:
         zone, zone_cls, zone_text = "Neutro construtivo", "green", "Mercado acima do realized price."
     else:
         zone, zone_cls, zone_text = "Acumulacao / desconto", "green", "Preco abaixo ou perto do realized price."
 
     fig = go.Figure()
     fill_pairs = [
-        ("band_0.8x", "band_1.0x Realized", "rgba(16,185,129,.10)"),
-        ("band_1.0x Realized", "band_1.5x", "rgba(34,211,238,.08)"),
-        ("band_1.5x", "band_2.0x", "rgba(96,165,250,.09)"),
-        ("band_2.0x", "band_2.4x", "rgba(139,92,246,.10)"),
-        ("band_2.4x", "band_3.2x", "rgba(245,158,11,.11)"),
-        ("band_3.2x", "band_4.0x", "rgba(244,63,94,.12)"),
+        ("band_-1.0σ", "band_-0.5σ", "rgba(16,185,129,.10)"),
+        ("band_-0.5σ", "band_Mean", "rgba(52,211,153,.08)"),
+        ("band_Mean", "band_+0.5σ", "rgba(245,158,11,.08)"),
+        ("band_+0.5σ", "band_+1.0σ", "rgba(96,165,250,.09)"),
+        ("band_+1.0σ", "band_+2.0σ", "rgba(244,63,94,.12)"),
     ]
     for lower, upper, fill_color in fill_pairs:
         fig.add_trace(go.Scatter(
@@ -5421,7 +5432,15 @@ def _render_crypto_mvrv_pricing_bands_chart(points: list[dict[str, Any]]) -> Non
             hoverinfo="skip",
         ))
 
-    for label, _multiplier, color, dash in band_defs:
+    fig.add_trace(go.Scatter(
+        x=df["date"],
+        y=df["realized_price"],
+        mode="lines",
+        name="Realized Price",
+        line={"color": "#22D3EE", "width": 2},
+        hovertemplate="%{x|%d/%m/%Y}<br>Realized: US$ %{y:,.0f}<extra></extra>",
+    ))
+    for label, _sigma, color, dash in sigma_defs:
         fig.add_trace(go.Scatter(
             x=df["date"],
             y=df[f"band_{label}"],
@@ -5462,7 +5481,7 @@ def _render_crypto_mvrv_pricing_bands_chart(points: list[dict[str, Any]]) -> Non
         <div>
           <span class="crypto-label">Bitcoin MVRV Pricing Bands</span>
           <b>US$ {latest_btc:,.0f}</b>
-          <small style="display:block;color:#8EA3B8;margin-top:5px;">MVRV {latest_mvrv:.2f}x | Realized US$ {latest_realized:,.0f}</small>
+          <small style="display:block;color:#8EA3B8;margin-top:5px;">MVRV {latest_mvrv:.2f}x | z {latest_sigma:+.2f}σ | Realized US$ {latest_realized:,.0f}</small>
         </div>
         <div class="crypto-mvrv-legend">
           <span class="{zone_cls}">{sanitize_text(zone)}</span>
