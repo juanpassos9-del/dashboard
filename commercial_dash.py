@@ -4034,10 +4034,10 @@ def sidebar_mercados():
             st.markdown(f"""
                 <div style='display:flex; justify-content:space-between; border-bottom:1px solid #1a1a1a; padding:4px 0; align-items:center;'>
                     <span style='font-size:0.75rem; color:#AAA; max-width:60%;'>{item.get('name', '---')}</span>
-                    <div style='text-align:right;'>
-                        <div style='font-size:0.8rem; font-weight:bold;'>{price_fmt}</div>
-                        <div style='color:{color}; font-weight:bold; font-size:0.65rem;'>{change_val:+.2f}%</div>
-                        <div style='color:{mom_5m_color}; font-weight:800; font-size:0.62rem; line-height:1.05;'>{mom_5m}</div>
+                    <div style='text-align:right; min-width:78px;'>
+                        <div style='font-size:0.96rem; font-weight:900; line-height:1.08;'>{price_fmt}</div>
+                        <div style='color:{color}; font-weight:900; font-size:0.76rem; line-height:1.12;'>{change_val:+.2f}%</div>
+                        <div style='color:{mom_5m_color}; font-weight:800; font-size:0.64rem; line-height:1.08;'>{mom_5m}</div>
                     </div>
                 </div>
             """, unsafe_allow_html=True)
