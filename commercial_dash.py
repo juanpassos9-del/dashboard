@@ -3950,8 +3950,6 @@ def pagina_terminal_global():
                     </div>
                 """, unsafe_allow_html=True)
             
-        painel_corpo_global()
-
     with corr_col:
         st.markdown("---")
         st.markdown("<div id='tg-side-correlation-anchor'></div>", unsafe_allow_html=True)
