@@ -255,8 +255,17 @@ def fetch_bgeometrics_mvrv_zscore_history(
         cached = load_cache(HISTORY_CACHE_NAME, max_age_seconds=max_age_seconds)
         if cached:
             rows = len((cached.get("data") or {}).get("points") or [])
-            mark_source("Crypto BGeometrics MVRV", "ok", rows=rows, source=SOURCE, message="Historico MVRV em cache.")
-            return cached
+            min_cached_rows = min(max(365, int(days) // 2), int(days))
+            if rows >= min_cached_rows:
+                mark_source("Crypto BGeometrics MVRV", "ok", rows=rows, source=SOURCE, message="Historico MVRV em cache.")
+                return cached
+            mark_source(
+                "Crypto BGeometrics MVRV",
+                "stale",
+                rows=rows,
+                source=SOURCE,
+                message=f"Cache MVRV curto ({rows}/{days}); recarregando historico longo.",
+            )
 
     try:
         points, latency_ms = _fetch_public_mvrv_chart_history(days)
