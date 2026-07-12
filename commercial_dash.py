@@ -5691,6 +5691,22 @@ def pagina_crypto_terminal():
                 "candles_1h": candles,
                 "trend_80h_pct": _num(item.get("price_change_percentage_7d_in_currency")),
             }
+    coingecko_symbol_index = {}
+    for item in coingecko_data.get("markets") or []:
+        if not isinstance(item, dict):
+            continue
+        symbol_key = str(item.get("symbol") or "").upper()
+        if symbol_key:
+            coingecko_symbol_index[f"{symbol_key}USDT"] = item
+    for symbol_key, asset in list(symbols.items()):
+        cg_item = coingecko_symbol_index.get(symbol_key)
+        if not isinstance(cg_item, dict):
+            continue
+        asset["change_pct_1h"] = _num(cg_item.get("price_change_percentage_1h_in_currency"), asset.get("change_pct_1h", 0))
+        asset["change_pct_7d"] = _num(cg_item.get("price_change_percentage_7d_in_currency"), asset.get("change_pct_7d", asset.get("trend_80h_pct", 0)))
+        asset["change_pct_30d"] = _num(cg_item.get("price_change_percentage_30d_in_currency"), asset.get("change_pct_30d", 0))
+        asset["market_cap"] = _num(cg_item.get("market_cap"), asset.get("market_cap", 0))
+        asset["total_volume"] = _num(cg_item.get("total_volume"), asset.get("quote_volume", 0))
     if not isinstance(operational, dict) or not operational.get("ranking"):
         try:
             from execution.crypto_signals import build_crypto_operational_dashboard
@@ -5895,8 +5911,113 @@ def pagina_crypto_terminal():
         empty = "Sem ranking de lideres agora." if mode == "leader" else "Sem ranking defensivo agora."
         return "".join(cards) or f"<div class='crypto-empty'>{empty}</div>"
 
+    def _relative_btc_strength(symbols_map):
+        btc_asset = symbols_map.get("BTCUSDT") or {}
+        btc_price = _num(btc_asset.get("price"), None)
+        if not btc_price:
+            return [], "Aguardando BTC", "Sem preco de BTC para comparar as alts.", "neutral"
+
+        def _ratio_change(asset, window):
+            btc_change = _num(btc_asset.get(window), 0)
+            alt_change = _num(asset.get(window), 0)
+            btc_factor = 1 + btc_change / 100
+            alt_factor = 1 + alt_change / 100
+            if alt_factor <= 0:
+                return 0.0
+            return (btc_factor / alt_factor - 1) * 100
+
+        rows = []
+        for alt_symbol in ["ETHUSDT", "SOLUSDT", "AAVEUSDT", "LINKUSDT"]:
+            asset = symbols_map.get(alt_symbol) or {}
+            alt_price = _num(asset.get("price"), None)
+            if not alt_price:
+                continue
+            ratio = btc_price / alt_price if alt_price else 0
+            rel_1h = _num(asset.get("change_pct_1h"), 0) - _num(btc_asset.get("change_pct_1h"), 0)
+            rel_24h = _num(asset.get("change_pct_24h"), 0) - _num(btc_asset.get("change_pct_24h"), 0)
+            rel_7d = _num(asset.get("change_pct_7d"), 0) - _num(btc_asset.get("change_pct_7d"), 0)
+            weighted_rel = rel_1h * 0.25 + rel_24h * 0.45 + rel_7d * 0.30
+            score = max(0, min(100, 50 + weighted_rel * 3.0))
+            ratio_24h = _ratio_change(asset, "change_pct_24h")
+            if score >= 57:
+                status, cls, winner = "ALT > BTC", "good", alt_symbol.replace("USDT", "")
+            elif score <= 43:
+                status, cls, winner = "BTC > ALT", "bad", "BTC"
+            else:
+                status, cls, winner = "Neutro", "neutral", "Misto"
+            rows.append({
+                "asset": alt_symbol.replace("USDT", ""),
+                "ratio": ratio,
+                "score": score,
+                "status": status,
+                "cls": cls,
+                "winner": winner,
+                "rel_1h": rel_1h,
+                "rel_24h": rel_24h,
+                "rel_7d": rel_7d,
+                "ratio_24h": ratio_24h,
+            })
+        rows.sort(key=lambda row: row["score"], reverse=True)
+        alt_wins = sum(1 for row in rows if row["score"] >= 57)
+        btc_wins = sum(1 for row in rows if row["score"] <= 43)
+        if alt_wins >= 3:
+            title, text, cls = "Alts ganhando do BTC", "Rotacao pro-risco: alts monitoradas batem BTC em forca relativa.", "good"
+        elif btc_wins >= 3:
+            title, text, cls = "BTC dominante", "Fluxo defensivo dentro de cripto: BTC performa melhor que as alts monitoradas.", "bad"
+        elif rows:
+            title, text, cls = "Rotacao seletiva", "Forca mista: escolher apenas alts que batem BTC no ranking.", "warn"
+        else:
+            title, text, cls = "Aguardando alts", "Sem dados suficientes para comparar BTC contra ETH, SOL, AAVE e LINK.", "neutral"
+        return rows, title, text, cls
+
+    def _btc_strength_html(rows, title, text, cls):
+        if not rows:
+            table = "<div class='crypto-empty'>Sem dados suficientes para forca BTC/Alts agora.</div>"
+            leader = "---"
+            weakest = "---"
+        else:
+            leader = rows[0]["asset"]
+            weakest = rows[-1]["asset"]
+            body = []
+            for row in rows:
+                rel_cls = "pos" if row["rel_24h"] >= 0 else "neg"
+                ratio_cls = "neg" if row["ratio_24h"] >= 0 else "pos"
+                body.append(
+                    "<div class='crypto-btc-strength-row'>"
+                    f"<b>{sanitize_text(row['asset'])}</b>"
+                    f"<span>{row['ratio']:.4f}</span>"
+                    f"<span class='{rel_cls}'>{row['rel_1h']:+.2f}%</span>"
+                    f"<span class='{rel_cls}'>{row['rel_24h']:+.2f}%</span>"
+                    f"<span class='{rel_cls}'>{row['rel_7d']:+.2f}%</span>"
+                    f"<span class='{ratio_cls}'>{row['ratio_24h']:+.2f}%</span>"
+                    f"<em class='crypto-chip {sanitize_text(row['cls'])}'>{sanitize_text(row['status'])}</em>"
+                    "</div>"
+                )
+            table = "".join(body)
+        return (
+            "<div class='crypto-btc-strength'>"
+            f"<div class='crypto-btc-strength-head {sanitize_text(cls)}'>"
+            "<div>"
+            "<span class='crypto-label'>Forca Bitcoin vs Alts</span>"
+            f"<strong>{sanitize_text(title)}</strong>"
+            f"<p>{sanitize_text(text)}</p>"
+            "</div>"
+            "<div class='crypto-btc-strength-kpis'>"
+            f"<span>Lider contra BTC <b>{sanitize_text(leader)}</b></span>"
+            f"<span>Mais fraca vs BTC <b>{sanitize_text(weakest)}</b></span>"
+            "</div>"
+            "</div>"
+            "<div class='crypto-btc-strength-table'>"
+            "<div class='crypto-btc-strength-row header'><b>Par</b><span>BTC/ALT</span><span>1h</span><span>24h</span><span>7d</span><span>Ratio 24h</span><em>Status</em></div>"
+            f"{table}"
+            "</div>"
+            "</div>"
+        )
+
     btc = symbols.get("BTCUSDT", {})
     eth = symbols.get("ETHUSDT", {})
+    btc_strength_rows, btc_strength_title, btc_strength_text, btc_strength_cls = _relative_btc_strength(symbols)
+    btc_strength_html = _btc_strength_html(btc_strength_rows, btc_strength_title, btc_strength_text, btc_strength_cls)
     regime_name = sanitize_text(regime.get("regime", "Neutro"))
     regime_bias = sanitize_text(regime.get("bias", "Neutro"))
     score = _num(regime.get("score"), 50)
@@ -6072,6 +6193,22 @@ def pagina_crypto_terminal():
           .crypto-cycle-mini {{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:10px;}}
           .crypto-cycle-mini span {{display:block; color:#8FA4BD; font-size:.66rem; font-weight:900; text-transform:uppercase;}}
           .crypto-cycle-mini strong {{display:block; color:#F8FAFC; font-size:.9rem;}}
+          .crypto-btc-strength {{background:linear-gradient(135deg,#06101E,#0B1727); border:1px solid #28405E; border-radius:8px; padding:12px; margin:-2px 0 16px;}}
+          .crypto-btc-strength-head {{display:flex; align-items:flex-start; justify-content:space-between; gap:14px; border-left:5px solid #60A5FA; padding-left:12px; margin-bottom:10px;}}
+          .crypto-btc-strength-head.good {{border-left-color:#00D084;}}
+          .crypto-btc-strength-head.warn {{border-left-color:#FFB020;}}
+          .crypto-btc-strength-head.bad {{border-left-color:#FF4B4B;}}
+          .crypto-btc-strength-head strong {{display:block; color:#F8FAFC; font-size:1.55rem; line-height:1.05; margin-top:4px;}}
+          .crypto-btc-strength-head p {{margin:7px 0 0; color:#CBD5E1; font-weight:800;}}
+          .crypto-btc-strength-kpis {{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; min-width:310px;}}
+          .crypto-btc-strength-kpis span {{background:#08111F; border:1px solid #203047; border-radius:8px; padding:8px; color:#8FA4BD; font-size:.68rem; font-weight:900; text-transform:uppercase;}}
+          .crypto-btc-strength-kpis b {{display:block; color:#F8FAFC; font-size:1.05rem; margin-top:3px;}}
+          .crypto-btc-strength-table {{display:grid; gap:6px;}}
+          .crypto-btc-strength-row {{display:grid; grid-template-columns:.75fr .9fr .62fr .62fr .62fr .82fr .9fr; gap:8px; align-items:center; background:#08111F; border:1px solid #203047; border-radius:8px; padding:8px 10px;}}
+          .crypto-btc-strength-row.header {{background:#0F1B2B; color:#8FA4BD; font-size:.68rem; font-weight:900; text-transform:uppercase;}}
+          .crypto-btc-strength-row b {{color:#F8FAFC;}}
+          .crypto-btc-strength-row span {{color:#CBD5E1; font-weight:850;}}
+          .crypto-btc-strength-row em {{font-style:normal; justify-self:start;}}
           .crypto-onchain {{display:grid; grid-template-columns:.85fr 1.15fr; gap:12px; margin:-2px 0 16px;}}
           .crypto-onchain-main {{background:linear-gradient(135deg,#07111F,#101728); border:1px solid #28405E; border-left:5px solid #22D3EE; border-radius:8px; padding:13px;}}
           .crypto-onchain-main strong {{display:block; color:#F8FAFC; font-size:2rem; line-height:1; margin-top:5px;}}
@@ -6155,6 +6292,10 @@ def pagina_crypto_terminal():
             .crypto-hero {{grid-template-columns:1fr;}}
             .crypto-grid {{grid-template-columns:repeat(2,minmax(0,1fr));}}
             .crypto-cycle-dashboard {{grid-template-columns:1fr;}}
+            .crypto-btc-strength-head {{display:block;}}
+            .crypto-btc-strength-kpis {{grid-template-columns:1fr; min-width:0; margin-top:10px;}}
+            .crypto-btc-strength-row {{grid-template-columns:1fr 1fr;}}
+            .crypto-btc-strength-row.header {{display:none;}}
             .crypto-assets {{grid-template-columns:repeat(2,minmax(0,1fr));}}
             .crypto-onchain {{grid-template-columns:1fr;}}
             .crypto-onchain-grid {{grid-template-columns:1fr;}}
@@ -6243,6 +6384,7 @@ def pagina_crypto_terminal():
             </div>
           </div>
         </div>
+        {btc_strength_html}
         <div class="crypto-grid">
           <div class="crypto-kpi"><span>BTC</span><strong>{_money(btc.get("price"), 2)}</strong><em>24h {_pct(btc.get("change_pct_24h"))}</em></div>
           <div class="crypto-kpi"><span>ETH</span><strong>{_money(eth.get("price"), 2)}</strong><em>24h {_pct(eth.get("change_pct_24h"))}</em></div>
@@ -6288,7 +6430,7 @@ def pagina_crypto_terminal():
     _render_crypto_mvrv_pricing_bands_chart(mvrv_history_data.get("points") or [])
 
     st.markdown("#### Majors e Altcoins")
-    top_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "LINKUSDT", "AVAXUSDT", "SUIUSDT"]
+    top_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "LINKUSDT", "AAVEUSDT", "AVAXUSDT", "SUIUSDT"]
     asset_cards = []
     for sym in top_symbols:
         item = symbols.get(sym, {})

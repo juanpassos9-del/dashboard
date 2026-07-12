@@ -25,6 +25,7 @@ DEFAULT_SYMBOLS = [
     "ADAUSDT",
     "DOGEUSDT",
     "LINKUSDT",
+    "AAVEUSDT",
     "AVAXUSDT",
     "SUIUSDT",
 ]
