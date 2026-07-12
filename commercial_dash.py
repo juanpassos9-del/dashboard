@@ -3965,6 +3965,50 @@ def sidebar_mercados():
         categories = global_data
         last_upd = "---"
 
+    def remember_sidebar_quotes(category_map):
+        now_ts = time.time()
+        history = st.session_state.setdefault("sidebar_quote_history", {})
+        cutoff = now_ts - (30 * 60)
+        for assets in category_map.values():
+            if not isinstance(assets, list):
+                continue
+            for item in assets:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name", "")).strip()
+                if not name:
+                    continue
+                try:
+                    price = float(item.get("price", 0))
+                except (TypeError, ValueError):
+                    continue
+                if price <= 0:
+                    continue
+                points = [(ts, px) for ts, px in history.get(name, []) if ts >= cutoff]
+                if not points or abs(points[-1][0] - now_ts) >= 20:
+                    points.append((now_ts, price))
+                history[name] = points[-80:]
+
+    def quote_5m_momentum(name, current_price):
+        points = st.session_state.get("sidebar_quote_history", {}).get(str(name), [])
+        if not points:
+            return ("5m ...", "#64748B")
+        target_ts = time.time() - (5 * 60)
+        older_points = [(ts, px) for ts, px in points if ts <= target_ts]
+        if not older_points:
+            return ("5m ...", "#64748B")
+        ref_ts, ref_price = min(older_points, key=lambda point: abs(point[0] - target_ts))
+        if ref_price <= 0:
+            return ("5m ...", "#64748B")
+        pct = ((current_price - ref_price) / ref_price) * 100
+        if abs(pct) < 0.01:
+            return ("5m 0.00%", "#94A3B8")
+        arrow = "&#9650;" if pct > 0 else "&#9660;"
+        color = "#00FFA3" if pct > 0 else "#FF4B4B"
+        return (f"{arrow} 5m {pct:+.2f}%", color)
+
+    remember_sidebar_quotes(categories)
+
     st.markdown(f"<div style='text-align:right; font-size:0.65rem; color:#666; margin-bottom:10px;'>ATUALIZADO ÀS: {last_upd}</div>", unsafe_allow_html=True)
 
     for cat_name, assets in categories.items():
@@ -3985,6 +4029,7 @@ def sidebar_mercados():
 
             # Formatação de preço: 4 casas se for pequeno (moedas), 2 se for grande
             price_fmt = f"{price_val:.4f}" if price_val < 10 else f"{price_val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            mom_5m, mom_5m_color = quote_5m_momentum(item.get('name', '---'), price_val)
             
             st.markdown(f"""
                 <div style='display:flex; justify-content:space-between; border-bottom:1px solid #1a1a1a; padding:4px 0; align-items:center;'>
@@ -3992,6 +4037,7 @@ def sidebar_mercados():
                     <div style='text-align:right;'>
                         <div style='font-size:0.8rem; font-weight:bold;'>{price_fmt}</div>
                         <div style='color:{color}; font-weight:bold; font-size:0.65rem;'>{change_val:+.2f}%</div>
+                        <div style='color:{mom_5m_color}; font-weight:800; font-size:0.62rem; line-height:1.05;'>{mom_5m}</div>
                     </div>
                 </div>
             """, unsafe_allow_html=True)
