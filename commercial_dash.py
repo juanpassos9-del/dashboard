@@ -5116,9 +5116,35 @@ def render_regime_juros_section():
     regime_color = "#FF9800" if "bear" in regime.lower() else ("#00FFA3" if "bull" in regime.lower() else "#94A3B8")
     taxa_fmt = f"{taxa:.3f}".replace(".", ",")
     var_fmt = f"{variacao:+.2f}".replace(".", ",")
-    updated = html.escape(str(data.get("updated_at") or "---"))
+    updated_raw = str(data.get("updated_at") or "---")
+    updated = html.escape(updated_raw)
+    freshness_label = "sem horario"
+    freshness_color = "#64748B"
+    try:
+        if len(updated_raw) >= 19:
+            updated_dt = datetime.strptime(updated_raw[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+        elif len(updated_raw) >= 8:
+            today = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+            parsed_time = datetime.strptime(updated_raw[:8], "%H:%M:%S").time()
+            updated_dt = datetime.combine(today, parsed_time, tzinfo=ZoneInfo("America/Sao_Paulo"))
+        else:
+            updated_dt = None
+        if updated_dt:
+            age_seconds = max(0, int((datetime.now(ZoneInfo("America/Sao_Paulo")) - updated_dt).total_seconds()))
+            age_minutes = age_seconds // 60
+            if age_seconds <= 90:
+                freshness_label = "ao vivo"
+                freshness_color = "#00FFA3"
+            elif age_minutes <= 10:
+                freshness_label = f"{age_minutes} min atras"
+                freshness_color = "#FFB020"
+            else:
+                freshness_label = f"atrasado {age_minutes} min"
+                freshness_color = "#FF4B4B"
+    except Exception:
+        pass
     source_map = {
-        "excel_rtd_live": "Excel RTD ao vivo",
+        "excel_rtd_live": "Supabase | Excel RTD ao vivo",
         "excel_rtd_saved": "Excel salvo",
         "supabase": "Supabase RTD",
         "snapshot_excel_local": "Snapshot local",
@@ -5132,7 +5158,7 @@ def render_regime_juros_section():
           <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
             <div>
               <div style="font-size:0.72rem; color:#93C5FD; font-weight:900; letter-spacing:.08em; text-transform:uppercase;">Regime de Juros</div>
-              <div style="font-size:0.68rem; color:#64748B; margin-top:2px;">Indice Atual | {source} | Atualizado {updated}</div>
+              <div style="font-size:0.68rem; color:#64748B; margin-top:2px;">Indice Atual | {source} | Atualizado {updated} <span style="color:{freshness_color}; font-weight:900;">{html.escape(freshness_label)}</span></div>
             </div>
             <div style="display:flex; gap:10px; flex-wrap:wrap;">
               <div style="min-width:150px; padding:9px 12px; border:1px solid #1E293B; border-radius:8px; background:#0F172A;">
