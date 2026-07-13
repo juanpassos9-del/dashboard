@@ -7826,18 +7826,21 @@ def pagina_graficos():
 
     st.markdown("#### Gráfico próprio - Lightweight Charts")
     st.caption("Candles OHLCV, volume, VWAP diária, bandas, médias móveis, oscilador e atualização via Binance WebSocket.")
-    st.markdown("##### Motor de reversao")
-    components.html(
-        render_lightweight_chart_html(signal_mode="reversal", chart_title="Motor de reversao", instance_id="reversal_main"),
-        height=1120,
-        scrolling=True,
-    )
-    st.markdown("##### Motor de reversao - copia")
-    components.html(
-        render_lightweight_chart_html(signal_mode="reversal", chart_title="Motor de reversao - copia", instance_id="reversal_copy"),
-        height=1120,
-        scrolling=True,
-    )
+    chart_col_1, chart_col_2 = st.columns(2)
+    with chart_col_1:
+        st.markdown("##### Motor de reversao")
+        components.html(
+            render_lightweight_chart_html(signal_mode="reversal", chart_title="Motor de reversao", instance_id="reversal_main"),
+            height=1120,
+            scrolling=True,
+        )
+    with chart_col_2:
+        st.markdown("##### Motor de reversao - copia")
+        components.html(
+            render_lightweight_chart_html(signal_mode="reversal", chart_title="Motor de reversao - copia", instance_id="reversal_copy"),
+            height=1120,
+            scrolling=True,
+        )
     
     assets = {
         "MINI ÍNDICE (WIN)": "BRA50",
