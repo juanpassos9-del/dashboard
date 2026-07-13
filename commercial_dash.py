@@ -4540,6 +4540,7 @@ def secao_boletim_focus_fragment():
 # ══════════════════════════════════════════════════════════════════════════════
 
 REGIME_JUROS_EXCEL_PATH = r"C:\Users\Mini PC\Documents\ANALISE JUROS\Curva_DI_RTD_Monitor_PrecoTempo.xlsx"
+REGIME_JUROS_SNAPSHOT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "regime_juros_snapshot.json")
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -4548,20 +4549,27 @@ def get_regime_juros_indice_atual():
     try:
         from openpyxl import load_workbook
 
-        if not os.path.exists(REGIME_JUROS_EXCEL_PATH):
-            return {"error": "Arquivo Excel de juros nao encontrado."}
+        if os.path.exists(REGIME_JUROS_EXCEL_PATH):
+            wb = load_workbook(REGIME_JUROS_EXCEL_PATH, data_only=True, read_only=True)
+            ws = wb["Indice Atual"]
+            return {
+                "taxa_sintetica": ws["E2"].value,
+                "variacao_bps": ws["H2"].value,
+                "regime_estrutural": ws["K2"].value,
+                "updated_at": datetime.fromtimestamp(
+                    os.path.getmtime(REGIME_JUROS_EXCEL_PATH),
+                    ZoneInfo("America/Sao_Paulo"),
+                ).strftime("%H:%M:%S"),
+                "source": "excel_rtd_local",
+            }
 
-        wb = load_workbook(REGIME_JUROS_EXCEL_PATH, data_only=True, read_only=True)
-        ws = wb["Indice Atual"]
-        return {
-            "taxa_sintetica": ws["E2"].value,
-            "variacao_bps": ws["H2"].value,
-            "regime_estrutural": ws["K2"].value,
-            "updated_at": datetime.fromtimestamp(
-                os.path.getmtime(REGIME_JUROS_EXCEL_PATH),
-                ZoneInfo("America/Sao_Paulo"),
-            ).strftime("%H:%M:%S"),
-        }
+        if os.path.exists(REGIME_JUROS_SNAPSHOT_PATH):
+            with open(REGIME_JUROS_SNAPSHOT_PATH, "r", encoding="utf-8") as fp:
+                snapshot = json.load(fp)
+            snapshot["source"] = snapshot.get("source") or "snapshot"
+            return snapshot
+
+        return {"error": "Arquivo Excel de juros e snapshot nao encontrados."}
     except Exception as exc:
         return {"error": str(exc)}
 
@@ -4587,6 +4595,7 @@ def render_regime_juros_section():
     taxa_fmt = f"{taxa:.3f}".replace(".", ",")
     var_fmt = f"{variacao:+.2f}".replace(".", ",")
     updated = html.escape(str(data.get("updated_at") or "---"))
+    source = "Excel RTD ProfitChart" if data.get("source") == "excel_rtd_local" else "Snapshot local"
 
     st.markdown(
         f"""
@@ -4594,7 +4603,7 @@ def render_regime_juros_section():
           <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
             <div>
               <div style="font-size:0.72rem; color:#93C5FD; font-weight:900; letter-spacing:.08em; text-transform:uppercase;">Regime de Juros</div>
-              <div style="font-size:0.68rem; color:#64748B; margin-top:2px;">Indice Atual | Excel RTD ProfitChart | Atualizado {updated}</div>
+              <div style="font-size:0.68rem; color:#64748B; margin-top:2px;">Indice Atual | {source} | Atualizado {updated}</div>
             </div>
             <div style="display:flex; gap:10px; flex-wrap:wrap;">
               <div style="min-width:150px; padding:9px 12px; border:1px solid #1E293B; border-radius:8px; background:#0F172A;">
