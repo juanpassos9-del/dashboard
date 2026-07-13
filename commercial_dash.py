@@ -1956,9 +1956,9 @@ GLOBAL_LINE_CHART_GROUPS = {
         "S&P 500": "^GSPC",
         "Brent": "BZ=F",
     },
-    "EWZ x DXY": {
+    "EWZ x USDBRL": {
         "EWZ": "EWZ",
-        "DXY": "DX-Y.NYB",
+        "USDBRL": "BRL=X",
     },
 }
 
@@ -2074,9 +2074,9 @@ def render_terminal_global_line_chart():
         )
     with col_right:
         render_terminal_line_chart_pair(
-            "EWZ x DXY",
-            GLOBAL_LINE_CHART_GROUPS["EWZ x DXY"],
-            {"EWZ": "#A78BFA", "DXY": "#22C55E"},
+            "EWZ x USDBRL",
+            GLOBAL_LINE_CHART_GROUPS["EWZ x USDBRL"],
+            {"EWZ": "#A78BFA", "USDBRL": "#22C55E"},
         )
 
 @st.fragment(run_every=2)
