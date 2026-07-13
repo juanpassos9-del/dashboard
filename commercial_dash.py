@@ -2043,7 +2043,19 @@ def get_terminal_global_line_chart_data(tickers: tuple[tuple[str, str], ...], pe
             mark_source("Grafico Linha Terminal", "error", message="Nenhuma serie valida.", source="yfinance")
             return pd.DataFrame()
 
-        df = pd.DataFrame(series).sort_index().ffill().dropna(how="all").tail(420)
+        df = pd.DataFrame(series).sort_index().ffill().dropna(how="all")
+        try:
+            br_tz = ZoneInfo("America/Sao_Paulo")
+            if getattr(df.index, "tz", None) is None:
+                br_index = pd.to_datetime(df.index).tz_localize("UTC").tz_convert(br_tz)
+            else:
+                br_index = pd.to_datetime(df.index).tz_convert(br_tz)
+            today_br = datetime.now(br_tz).date()
+            df = df[br_index.date == today_br]
+            df.index = br_index[br_index.date == today_br]
+        except Exception:
+            pass
+        df = df.tail(180)
         mark_source("Grafico Linha Terminal", "ok", rows=len(df), message=", ".join(tickers_map.keys()) + " carregados.", source="yfinance")
         return df
     except Exception as e:
