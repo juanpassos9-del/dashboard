@@ -2025,15 +2025,27 @@ def render_terminal_line_chart_pair(title: str, tickers_map: dict, colors: dict)
 
     import plotly.graph_objects as go
 
+    plot_df = df.reset_index(drop=True).copy()
+    hover_labels = [
+        idx.strftime("%d/%m %H:%M") if hasattr(idx, "strftime") else str(idx)
+        for idx in df.index
+    ]
+    tick_step = max(1, len(plot_df) // 5)
+    tickvals = list(range(0, len(plot_df), tick_step))
+    if len(plot_df) - 1 not in tickvals:
+        tickvals.append(len(plot_df) - 1)
+    ticktext = [hover_labels[i] for i in tickvals]
+
     fig = go.Figure()
-    for col in df.columns:
+    for col in plot_df.columns:
         fig.add_trace(go.Scatter(
-            x=df.index,
-            y=df[col],
+            x=list(range(len(plot_df))),
+            y=plot_df[col],
             mode="lines",
             name=col,
             line=dict(color=colors.get(col, "#E2E8F0"), width=2.2),
-            hovertemplate=f"{col}<br>%{{x|%d/%m %H:%M}}<br>%{{y:+.2f}}%<extra></extra>",
+            customdata=hover_labels,
+            hovertemplate=f"{col}<br>%{{customdata}}<br>%{{y:+.2f}}%<extra></extra>",
         ))
 
     fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="#475569")
@@ -2046,7 +2058,7 @@ def render_terminal_line_chart_pair(title: str, tickers_map: dict, colors: dict)
         height=350,
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=11)),
-        xaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, title=None),
+        xaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, title=None, tickmode="array", tickvals=tickvals, ticktext=ticktext),
         yaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, ticksuffix="%", title="Var. normalizada"),
     )
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
