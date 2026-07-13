@@ -61,6 +61,7 @@ APP_STATE_ALLOWED_KEYS = {
     "market_report",
     "market_report_daily",
     "mercados_globais",
+    "regime_juros",
     "risk_manual_trades",
 }
 
@@ -4549,6 +4550,11 @@ def get_regime_juros_indice_atual():
     try:
         from openpyxl import load_workbook
 
+        online_snapshot = fetch_app_state_fast("regime_juros")
+        if isinstance(online_snapshot, dict):
+            online_snapshot["source"] = online_snapshot.get("source") or "supabase"
+            return online_snapshot
+
         if os.path.exists(REGIME_JUROS_EXCEL_PATH):
             wb = load_workbook(REGIME_JUROS_EXCEL_PATH, data_only=True, read_only=True)
             ws = wb["Indice Atual"]
@@ -4595,7 +4601,13 @@ def render_regime_juros_section():
     taxa_fmt = f"{taxa:.3f}".replace(".", ",")
     var_fmt = f"{variacao:+.2f}".replace(".", ",")
     updated = html.escape(str(data.get("updated_at") or "---"))
-    source = "Excel RTD ProfitChart" if data.get("source") == "excel_rtd_local" else "Snapshot local"
+    source_map = {
+        "excel_rtd_local": "Excel RTD ProfitChart",
+        "supabase": "Supabase RTD",
+        "snapshot_excel_local": "Snapshot local",
+        "snapshot": "Snapshot local",
+    }
+    source = source_map.get(str(data.get("source") or ""), "Snapshot local")
 
     st.markdown(
         f"""
