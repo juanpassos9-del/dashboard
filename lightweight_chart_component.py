@@ -1652,9 +1652,43 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const rvol = state.indicators?.volumeStats?.[i]?.rvol;
         return { ...c, ...candleVolumeStyle(c, rvol) };
       }
+      function compactPriceLineTitle(title) {
+        const raw = String(title || "").trim();
+        const compactMap = {
+          "ATUAL": "ATUAL",
+          "DIA MAX": "D MAX",
+          "DIA MIN": "D MIN",
+          "DIA ANT MAX": "D-1 MAX",
+          "DIA ANT MIN": "D-1 MIN",
+          "SEM ANT MAX": "W-1 MAX",
+          "SEM ANT MIN": "W-1 MIN",
+          "MES ANT MAX": "M-1 MAX",
+          "MES ANT MIN": "M-1 MIN",
+          "BV REF": "REF",
+          "VAH": "VAH",
+          "VAL": "VAL",
+        };
+        return compactMap[raw.toUpperCase()] || raw;
+      }
+      function shouldShowPriceLineLabel(title) {
+        const t = String(title || "").trim().toLowerCase();
+        if (!t) return false;
+        if (t.includes("reg sup") || t.includes("reg inf")) return false;
+        if (t.startsWith("bv garch") || t.startsWith("bv hv")) return false;
+        if (t.startsWith("garch ") || t.startsWith("hv ")) return false;
+        return true;
+      }
       function addPriceLine(series, title, price, color, style=2, width=1) {
         if (!Number.isFinite(price)) return;
-        const line = series.createPriceLine({ price, color, lineWidth:width, lineStyle:style, axisLabelVisible:true, title });
+        const showLabel = shouldShowPriceLineLabel(title);
+        const line = series.createPriceLine({
+          price,
+          color,
+          lineWidth:width,
+          lineStyle:style,
+          axisLabelVisible:showLabel,
+          title: showLabel ? compactPriceLineTitle(title) : "",
+        });
         state.priceLines.push(line);
       }
       function volatilityBandKey(source, multiplier) {
