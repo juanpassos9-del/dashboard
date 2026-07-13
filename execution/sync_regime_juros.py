@@ -1,6 +1,7 @@
 import json
 import os
-from datetime import datetime
+import tomllib
+from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -10,6 +11,61 @@ from supabase import create_client
 
 DEFAULT_EXCEL_PATH = r"C:\Users\Mini PC\Documents\ANALISE JUROS\Curva_DI_RTD_Monitor_PrecoTempo.xlsx"
 APP_STATE_KEY = "regime_juros"
+
+
+def get_secret_value(*names: str) -> str:
+    for name in names:
+        value = os.environ.get(name, "")
+        if value:
+            return value
+
+    secrets_path = Path(".streamlit") / "secrets.toml"
+    if not secrets_path.exists():
+        return ""
+
+    try:
+        with secrets_path.open("rb") as fp:
+            secrets = tomllib.load(fp)
+    except Exception:
+        return ""
+
+    for name in names:
+        value = secrets.get(name, "")
+        if value:
+            return str(value)
+    return ""
+
+
+def read_regime_juros_open_excel(path: str = DEFAULT_EXCEL_PATH) -> dict | None:
+    """Read live RTD values from the workbook already open in desktop Excel."""
+    try:
+        import win32com.client
+    except Exception:
+        return None
+
+    target = Path(path)
+    try:
+        excel = win32com.client.GetActiveObject("Excel.Application")
+    except Exception:
+        return None
+
+    for wb in excel.Workbooks:
+        try:
+            same_file = Path(str(wb.FullName)).resolve().samefile(target)
+        except Exception:
+            same_file = str(wb.Name).lower() == target.name.lower()
+        if not same_file:
+            continue
+
+        ws = wb.Worksheets("Indice Atual")
+        return {
+            "taxa_sintetica": ws.Range("E2").Value,
+            "variacao_bps": ws.Range("H2").Value,
+            "regime_estrutural": ws.Range("K2").Value,
+            "updated_at": datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d %H:%M:%S"),
+            "source": "excel_rtd_live",
+        }
+    return None
 
 
 def read_regime_juros_excel(path: str = DEFAULT_EXCEL_PATH) -> dict:
@@ -27,13 +83,13 @@ def read_regime_juros_excel(path: str = DEFAULT_EXCEL_PATH) -> dict:
             excel_path.stat().st_mtime,
             ZoneInfo("America/Sao_Paulo"),
         ).strftime("%Y-%m-%d %H:%M:%S"),
-        "source": "supabase",
+        "source": "excel_rtd_saved",
     }
 
 
 def sync_to_supabase(payload: dict) -> None:
-    url = os.environ.get("SUPABASE_URL", "") or os.environ.get("SUPABASE", "")
-    key = os.environ.get("SUPABASE_SERVICE_ROLE", "") or os.environ.get("SUPABASE_KEY", "") or os.environ.get("SUPABASE_SERVICE", "")
+    url = get_secret_value("SUPABASE_URL", "SUPABASE")
+    key = get_secret_value("SUPABASE_SERVICE_ROLE", "SUPABASE_KEY", "SUPABASE_SERVICE")
     if not url or not key:
         raise RuntimeError("Configure SUPABASE e SUPABASE_SERVICE no ambiente.")
 
@@ -42,7 +98,7 @@ def sync_to_supabase(payload: dict) -> None:
         {
             "key": APP_STATE_KEY,
             "value": payload,
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         },
         on_conflict="key",
     ).execute()
@@ -50,7 +106,7 @@ def sync_to_supabase(payload: dict) -> None:
 
 def main() -> None:
     excel_path = os.environ.get("REGIME_JUROS_EXCEL_PATH", DEFAULT_EXCEL_PATH)
-    payload = read_regime_juros_excel(excel_path)
+    payload = read_regime_juros_open_excel(excel_path) or read_regime_juros_excel(excel_path)
     sync_to_supabase(payload)
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
