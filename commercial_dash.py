@@ -1990,6 +1990,10 @@ GLOBAL_LINE_CHART_GROUPS = {
         "EWZ": "EWZ",
         "USDBRL": "BRL=X",
     },
+    "6L1 x DXY": {
+        "6L1": "6L=F",
+        "DXY": "DX-Y.NYB",
+    },
 }
 
 
@@ -2096,18 +2100,24 @@ def render_terminal_line_chart_pair(title: str, tickers_map: dict, colors: dict)
 
 
 def render_terminal_global_line_chart():
-    col_left, col_right = st.columns(2)
+    col_left, col_mid, col_right = st.columns(3)
     with col_left:
         render_terminal_line_chart_pair(
             "S&P 500 x Brent",
             GLOBAL_LINE_CHART_GROUPS["S&P 500 x Brent"],
             {"S&P 500": "#38BDF8", "Brent": "#F97316"},
         )
-    with col_right:
+    with col_mid:
         render_terminal_line_chart_pair(
             "EWZ x USDBRL",
             GLOBAL_LINE_CHART_GROUPS["EWZ x USDBRL"],
             {"EWZ": "#A78BFA", "USDBRL": "#22C55E"},
+        )
+    with col_right:
+        render_terminal_line_chart_pair(
+            "6L1 x DXY",
+            GLOBAL_LINE_CHART_GROUPS["6L1 x DXY"],
+            {"6L1": "#00FFA3", "DXY": "#F8FAFC"},
         )
 
 
