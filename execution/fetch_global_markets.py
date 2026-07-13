@@ -73,6 +73,25 @@ def _previous_session_close(ticker_df, latest_session_date):
     return None
 
 
+def _change_5m(ticker_df, last_price):
+    clean_df = ticker_df.dropna(subset=["Close"]).copy()
+    if clean_df.empty or len(clean_df) < 2:
+        return None
+    try:
+        last_ts = clean_df.index[-1]
+        target_ts = last_ts - pd.Timedelta(minutes=5)
+        prior_df = clean_df[clean_df.index <= target_ts]
+        if prior_df.empty:
+            prior_price = float(clean_df["Close"].iloc[-2])
+        else:
+            prior_price = float(prior_df["Close"].iloc[-1])
+        if prior_price <= 0:
+            return None
+        return ((float(last_price) - prior_price) / prior_price) * 100
+    except Exception:
+        return None
+
+
 def fetch_global_data(save_file=True):
     # Estrutura de categorias e nomes amigáveis
     categories_config = {
@@ -197,6 +216,7 @@ def fetch_global_data(save_file=True):
                     prev_close = last_price
 
                 change = ((last_price - prev_close) / prev_close) * 100 if prev_close else 0.0
+                change_5m = _change_5m(ticker_df, last_price)
                 
                 cat_results.append({
                     "name": name,
@@ -205,6 +225,7 @@ def fetch_global_data(save_file=True):
                     "high": float(round(high_price, 2) if high_price > 10 else round(high_price, 4)),
                     "low": float(round(low_price, 2) if low_price > 10 else round(low_price, 4)),
                     "change": float(round(change, 2)),
+                    "change_5m": float(round(change_5m, 2)) if change_5m is not None else None,
                     "prev_close": float(round(prev_close, 2) if prev_close > 10 else round(prev_close, 4)),
                 })
                 valid_data_count += 1

@@ -4547,7 +4547,19 @@ def sidebar_mercados():
                     points.append((now_ts, price))
                 history[name] = points[-80:]
 
-    def quote_5m_momentum(name, current_price):
+    def quote_5m_momentum(name, current_price, direct_change_5m=None):
+        try:
+            if direct_change_5m is not None:
+                pct = float(direct_change_5m)
+                if abs(pct) < 0.01:
+                    return ("5m 0.00%", "#94A3B8", "")
+                arrow = "&#9650;" if pct > 0 else "&#9660;"
+                color = "#00FFA3" if pct > 0 else "#FF4B4B"
+                accel_label = "FORTE" if abs(pct) >= 0.35 else ("ACELERA" if abs(pct) >= 0.12 else "")
+                return (f"{arrow} 5m {pct:+.2f}%", color, accel_label)
+        except (TypeError, ValueError):
+            pass
+
         points = st.session_state.get("sidebar_quote_history", {}).get(str(name), [])
         if not points:
             return ("5m ...", "#64748B", "")
@@ -4592,7 +4604,7 @@ def sidebar_mercados():
 
             # Formatação de preço: 4 casas se for pequeno (moedas), 2 se for grande
             price_fmt = f"{price_val:.4f}" if price_val < 10 else f"{price_val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            mom_5m, mom_5m_color, accel_label = quote_5m_momentum(item.get('name', '---'), price_val)
+            mom_5m, mom_5m_color, accel_label = quote_5m_momentum(item.get('name', '---'), price_val, item.get("change_5m"))
             accel_badge = (
                 f"<span style='display:inline-block; margin-top:2px; padding:1px 5px; border-radius:999px; "
                 f"background:{mom_5m_color}22; border:1px solid {mom_5m_color}88; color:{mom_5m_color}; "
