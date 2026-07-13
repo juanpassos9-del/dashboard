@@ -5242,11 +5242,11 @@ def pagina_terminal():
     render_regime_juros_section()
     render_top_movers_brasil()
     render_terminal_global_line_chart()
+    secao_boletim_focus_fragment() # Estático/Lento (300s)
+    secao_fluxo_estrangeiro_fragment() # Fluxo B3 (300s)
     painel_topo_rtd()       # Tempo Real (1s)
     secao_ia_fragment()     # Estático/Lento (60s)
     painel_inferior_rtd()   # Tempo Real (1s) - Escada de Níveis
-    secao_boletim_focus_fragment() # Estático/Lento (300s)
-    secao_fluxo_estrangeiro_fragment() # Fluxo B3 (300s)
 
 def pagina_market_report():
     """Página dedicada ao Market Report Institucional."""
