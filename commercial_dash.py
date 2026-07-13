@@ -1623,6 +1623,195 @@ def painel_tickers_topo():
                     </div>
                 """, unsafe_allow_html=True)
 
+
+BR_TOP_MOVERS_TICKERS = {
+    "PETR4": "PETR4.SA",
+    "PETR3": "PETR3.SA",
+    "VALE3": "VALE3.SA",
+    "ITUB4": "ITUB4.SA",
+    "BBDC4": "BBDC4.SA",
+    "BBAS3": "BBAS3.SA",
+    "B3SA3": "B3SA3.SA",
+    "WEGE3": "WEGE3.SA",
+    "ABEV3": "ABEV3.SA",
+    "RENT3": "RENT3.SA",
+    "LREN3": "LREN3.SA",
+    "MGLU3": "MGLU3.SA",
+    "PRIO3": "PRIO3.SA",
+    "SUZB3": "SUZB3.SA",
+    "JBSS3": "JBSS3.SA",
+    "RAIL3": "RAIL3.SA",
+    "ELET3": "ELET3.SA",
+    "HAPV3": "HAPV3.SA",
+    "CSNA3": "CSNA3.SA",
+    "GGBR4": "GGBR4.SA",
+    "CMIG4": "CMIG4.SA",
+    "VIVT3": "VIVT3.SA",
+    "RADL3": "RADL3.SA",
+    "EQTL3": "EQTL3.SA",
+    "EMBR3": "EMBR3.SA",
+    "BRFS3": "BRFS3.SA",
+    "BPAC11": "BPAC11.SA",
+    "SANB11": "SANB11.SA",
+}
+
+
+def _fmt_br_money(value) -> str:
+    try:
+        num = float(value)
+        return f"{num:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except Exception:
+        return "---"
+
+
+@st.cache_data(ttl=180, show_spinner=False)
+def get_top_movers_brasil(limit: int = 6) -> dict:
+    """Ranking B3 do dia via yfinance, com mini-universo liquido para nao pesar o app."""
+    try:
+        import yfinance as yf
+
+        symbols = list(BR_TOP_MOVERS_TICKERS.values())
+        df = yf.download(
+            symbols,
+            period="5d",
+            interval="5m",
+            group_by="ticker",
+            progress=False,
+            auto_adjust=False,
+            prepost=False,
+            threads=False,
+            timeout=12,
+        )
+        if df is None or df.empty:
+            mark_source("Top Movers Brasil", "error", message="Yahoo Finance retornou vazio.", source="yfinance")
+            return {"gainers": [], "losers": [], "updated_at": "", "source": "yfinance"}
+
+        rows = []
+        now_label = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%H:%M:%S")
+        for ticker, yf_symbol in BR_TOP_MOVERS_TICKERS.items():
+            try:
+                ticker_df = df[yf_symbol] if isinstance(df.columns, pd.MultiIndex) else df
+                ticker_df = ticker_df.dropna(subset=["Close"])
+                if ticker_df.empty:
+                    continue
+
+                last_session_date = ticker_df.index[-1].date()
+                intraday = ticker_df[ticker_df.index.date == last_session_date]
+                if intraday.empty:
+                    intraday = ticker_df.tail(1)
+
+                last = float(intraday["Close"].iloc[-1])
+                open_price = float(intraday["Open"].dropna().iloc[0]) if "Open" in intraday else last
+                previous_sessions = ticker_df[ticker_df.index.date < last_session_date]
+                prev_close = float(previous_sessions["Close"].dropna().iloc[-1]) if not previous_sessions.empty else open_price
+                reference = prev_close if prev_close > 0 else open_price
+                day_change = ((last - reference) / reference) * 100 if reference else 0.0
+                day_change_abs = last - reference
+
+                five_min_change = None
+                if len(intraday) >= 2:
+                    prev_5m = float(intraday["Close"].iloc[-2])
+                    if prev_5m:
+                        five_min_change = ((last - prev_5m) / prev_5m) * 100
+
+                volume = None
+                if "Volume" in intraday:
+                    vol_series = intraday["Volume"].dropna()
+                    if not vol_series.empty:
+                        volume = float(vol_series.sum())
+
+                rows.append({
+                    "ticker": ticker,
+                    "symbol": yf_symbol,
+                    "price": last,
+                    "change": day_change,
+                    "change_abs": day_change_abs,
+                    "change_5m": five_min_change,
+                    "volume": volume,
+                })
+            except Exception:
+                continue
+
+        rows.sort(key=lambda item: item.get("change", 0), reverse=True)
+        gainers = [row for row in rows if row.get("change", 0) >= 0][:limit]
+        losers = sorted([row for row in rows if row.get("change", 0) < 0], key=lambda item: item.get("change", 0))[:limit]
+        mark_source("Top Movers Brasil", "ok" if rows else "error", rows=len(rows), message="Ranking B3 via yfinance.", source="yfinance")
+        return {"gainers": gainers, "losers": losers, "updated_at": now_label, "source": "yfinance"}
+    except Exception as e:
+        mark_source("Top Movers Brasil", "error", message=str(e), source="yfinance")
+        return {"gainers": [], "losers": [], "updated_at": "", "source": "yfinance"}
+
+
+def render_top_movers_brasil():
+    movers = get_top_movers_brasil()
+    gainers = movers.get("gainers") or []
+    losers = movers.get("losers") or []
+    if not gainers and not losers:
+        st.info("Top Movers Brasil indisponivel agora. Tentando novamente no proximo ciclo de cache.")
+        return
+
+    def render_row(item, positive: bool) -> str:
+        color = "#00FFA3" if positive else "#FF4B4B"
+        bg = "rgba(0,255,163,.07)" if positive else "rgba(255,75,75,.08)"
+        five = item.get("change_5m")
+        accel = ""
+        if isinstance(five, (int, float)):
+            five_color = "#00FFA3" if five >= 0 else "#FF4B4B"
+            arrow = "▲" if five >= 0 else "▼"
+            accel = f"<span class='tm-five' style='color:{five_color};'>{arrow} 5m {five:+.2f}%</span>"
+        return f"""
+        <div class="tm-row" style="background:{bg};">
+          <div>
+            <strong>{html.escape(str(item.get('ticker', '---')))}</strong>
+            <span>{html.escape(str(item.get('symbol', '')))}</span>
+          </div>
+          <div class="tm-price">{_fmt_br_money(item.get('price'))}</div>
+          <div class="tm-change" style="color:{color};">{float(item.get('change') or 0):+.2f}%</div>
+          <div class="tm-abs" style="color:{color};">{float(item.get('change_abs') or 0):+.2f}</div>
+          {accel}
+        </div>
+        """
+
+    css = """
+    <style>
+    .tm-wrap{border:1px solid #1E293B;background:#07111F;border-radius:10px;padding:14px;margin:14px 0 18px 0;}
+    .tm-head{display:flex;justify-content:space-between;gap:12px;align-items:end;margin-bottom:10px;}
+    .tm-title{color:#F8FAFC;font-weight:950;font-size:1.05rem;}
+    .tm-sub{color:#94A3B8;font-size:.72rem;font-weight:800;}
+    .tm-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+    .tm-box{border:1px solid #172338;border-radius:8px;padding:10px;background:#0B1220;}
+    .tm-box h4{margin:0 0 8px 0;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:#CBD5E1;}
+    .tm-row{display:grid;grid-template-columns:1.15fr .8fr .62fr .6fr .75fr;gap:8px;align-items:center;border:1px solid #1F2A3D;border-radius:7px;padding:8px 9px;margin-bottom:7px;}
+    .tm-row strong{display:block;color:#FFF;font-size:.88rem;line-height:1.05;}
+    .tm-row span{display:block;color:#64748B;font-size:.62rem;font-weight:800;margin-top:2px;}
+    .tm-price,.tm-change,.tm-abs{font-weight:950;color:#F8FAFC;text-align:right;}
+    .tm-five{text-align:right;font-size:.65rem!important;font-weight:950!important;}
+    @media(max-width:900px){.tm-grid{grid-template-columns:1fr}.tm-row{grid-template-columns:1fr .8fr .65fr}.tm-abs,.tm-five{display:none!important;}}
+    </style>
+    """
+    html_block = f"""
+    {css}
+    <section class="tm-wrap">
+      <div class="tm-head">
+        <div>
+          <div class="tm-title">Top Movers Brasil</div>
+          <div class="tm-sub">Altas e baixas do dia | Fonte: dados do dashboard + yfinance | Atualizado {html.escape(str(movers.get('updated_at') or '---'))}</div>
+        </div>
+      </div>
+      <div class="tm-grid">
+        <div class="tm-box">
+          <h4>Maiores altas</h4>
+          {''.join(render_row(item, True) for item in gainers)}
+        </div>
+        <div class="tm-box">
+          <h4>Maiores baixas</h4>
+          {''.join(render_row(item, False) for item in losers)}
+        </div>
+      </div>
+    </section>
+    """
+    st.markdown(html_block, unsafe_allow_html=True)
+
 @st.fragment(run_every=2)
 def painel_topo_rtd():
     """Parte superior em tempo real (2s): Preços, Métricas e Semáforo."""
@@ -4642,6 +4831,7 @@ def pagina_terminal():
     """Renderiza o terminal principal de trading."""
     painel_tickers_topo()   # Indicadores Globais no Topo
     render_regime_juros_section()
+    render_top_movers_brasil()
     painel_topo_rtd()       # Tempo Real (1s)
     secao_ia_fragment()     # Estático/Lento (60s)
     painel_inferior_rtd()   # Tempo Real (1s) - Escada de Níveis
