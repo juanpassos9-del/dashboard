@@ -35,7 +35,7 @@ def sync_to_supabase(payload: dict) -> None:
     url = os.environ.get("SUPABASE_URL", "")
     key = os.environ.get("SUPABASE_SERVICE_ROLE", "") or os.environ.get("SUPABASE_KEY", "")
     if not url or not key:
-        raise RuntimeError("Configure SUPABASE_URL e SUPABASE_SERVICE_ROLE/SUPABASE_KEY no ambiente.")
+        raise RuntimeError("Configure SUPABASE_URL e SUPABASE_KEY no ambiente.")
 
     client = create_client(url, key)
     client.table("app_state").upsert(

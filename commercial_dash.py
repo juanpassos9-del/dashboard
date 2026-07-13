@@ -719,9 +719,12 @@ def fetch_app_state(key: str):
 
 def has_supabase_service_role() -> bool:
     try:
-        return bool(st.secrets.get("SUPABASE_SERVICE_ROLE", os.environ.get("SUPABASE_SERVICE_ROLE", "")))
+        return bool(
+            st.secrets.get("SUPABASE_SERVICE_ROLE", os.environ.get("SUPABASE_SERVICE_ROLE", ""))
+            or st.secrets.get("SUPABASE_KEY", os.environ.get("SUPABASE_KEY", ""))
+        )
     except Exception:
-        return bool(os.environ.get("SUPABASE_SERVICE_ROLE", ""))
+        return bool(os.environ.get("SUPABASE_SERVICE_ROLE", "") or os.environ.get("SUPABASE_KEY", ""))
 
 
 def sync_app_state_value(key: str, value) -> tuple[bool, str]:
@@ -741,7 +744,7 @@ def sync_app_state_value(key: str, value) -> tuple[bool, str]:
         message = str(e)
         if "row-level security" in message.lower() or "42501" in message:
             if not has_supabase_service_role():
-                return False, "RLS bloqueou o salvamento online. Configure SUPABASE_SERVICE_ROLE no Streamlit Secrets ou aplique a policy de app_state."
+                return False, "RLS bloqueou o salvamento online. Configure SUPABASE_KEY no Streamlit Secrets com uma chave server/service ou aplique a policy de app_state."
             return False, "RLS bloqueou o salvamento online mesmo com Supabase configurado. Verifique policies da tabela app_state."
         return False, message
 
@@ -8397,7 +8400,7 @@ def pagina_painel_controle():
         2. Vá em **Settings** (Configurações) > **Secrets and variables** > **Actions**.
         3. Clique em **New repository secret** (Novo segredo) e adicione as seguintes chaves:
            - Nome: `SUPABASE_URL` | Valor: *Sua URL do Supabase*
-           - Nome: `SUPABASE_SERVICE_ROLE` | Valor: *Sua service_role key do Supabase*
+           - Nome: `SUPABASE_KEY` | Valor: *Sua chave server/service do Supabase*
            - Nome: `GEMINI_API_KEY` | Valor: *Sua API Key do Google Gemini*
         
         Pronto! Com isso cadastrado, o GitHub atualizará o seu site automaticamente 24 horas por dia, 7 dias por semana, sem que você precise deixar nenhum código rodando no seu computador!

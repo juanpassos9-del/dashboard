@@ -26,9 +26,9 @@ APP_STATE_ALLOWED_KEYS = {
 
 def get_service_client():
     url = os.getenv("SUPABASE_URL")
-    service_key = os.getenv("SUPABASE_SERVICE_ROLE")
+    service_key = os.getenv("SUPABASE_SERVICE_ROLE") or os.getenv("SUPABASE_KEY")
     if not url or not service_key:
-        raise RuntimeError("SUPABASE_URL/SUPABASE_SERVICE_ROLE ausentes para escrita segura em app_state.")
+        raise RuntimeError("SUPABASE_URL/SUPABASE_KEY ausentes para escrita segura em app_state.")
     return create_client(url, service_key)
 
 
