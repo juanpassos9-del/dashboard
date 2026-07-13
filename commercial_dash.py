@@ -1951,18 +1951,25 @@ def render_top_movers_brasil():
     components.html(html_block, height=520, scrolling=False)
 
 
-GLOBAL_LINE_CHART_TICKERS = {
-    "S&P 500": "^GSPC",
-    "Brent": "BZ=F",
+GLOBAL_LINE_CHART_GROUPS = {
+    "S&P 500 x Brent": {
+        "S&P 500": "^GSPC",
+        "Brent": "BZ=F",
+    },
+    "EWZ x DXY": {
+        "EWZ": "EWZ",
+        "DXY": "DX-Y.NYB",
+    },
 }
 
 
 @st.cache_data(ttl=180, show_spinner=False)
-def get_terminal_global_line_chart_data(period: str = "5d", interval: str = "5m") -> pd.DataFrame:
+def get_terminal_global_line_chart_data(tickers: tuple[tuple[str, str], ...], period: str = "5d", interval: str = "5m") -> pd.DataFrame:
     try:
         import yfinance as yf
 
-        symbols = list(GLOBAL_LINE_CHART_TICKERS.values())
+        tickers_map = dict(tickers)
+        symbols = list(tickers_map.values())
         data = yf.download(
             symbols,
             period=period,
@@ -1979,7 +1986,7 @@ def get_terminal_global_line_chart_data(period: str = "5d", interval: str = "5m"
             return pd.DataFrame()
 
         series = {}
-        for label, symbol in GLOBAL_LINE_CHART_TICKERS.items():
+        for label, symbol in tickers_map.items():
             try:
                 if isinstance(data.columns, pd.MultiIndex):
                     if symbol in set(data.columns.get_level_values(0)):
@@ -2003,25 +2010,21 @@ def get_terminal_global_line_chart_data(period: str = "5d", interval: str = "5m"
             return pd.DataFrame()
 
         df = pd.DataFrame(series).dropna(how="all").tail(420)
-        mark_source("Grafico Linha Terminal", "ok", rows=len(df), message="S&P 500 e Brent carregados.", source="yfinance")
+        mark_source("Grafico Linha Terminal", "ok", rows=len(df), message=", ".join(tickers_map.keys()) + " carregados.", source="yfinance")
         return df
     except Exception as e:
         mark_source("Grafico Linha Terminal", "error", message=str(e), source="yfinance")
         return pd.DataFrame()
 
 
-def render_terminal_global_line_chart():
-    df = get_terminal_global_line_chart_data()
+def render_terminal_line_chart_pair(title: str, tickers_map: dict, colors: dict):
+    df = get_terminal_global_line_chart_data(tuple(tickers_map.items()))
     if df.empty:
-        st.info("Grafico comparativo S&P 500, Brent, 6L1 e EWZ indisponivel agora.")
+        st.info(f"Grafico comparativo {title} indisponivel agora.")
         return
 
     import plotly.graph_objects as go
 
-    colors = {
-        "S&P 500": "#38BDF8",
-        "Brent": "#F97316",
-    }
     fig = go.Figure()
     for col in df.columns:
         fig.add_trace(go.Scatter(
@@ -2035,18 +2038,34 @@ def render_terminal_global_line_chart():
 
     fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="#475569")
     fig.update_layout(
-        title=dict(text="Comparativo Intraday | S&P 500 x Brent", x=0.01, font=dict(size=15, color="#F8FAFC")),
+        title=dict(text=f"Comparativo Intraday | {title}", x=0.01, font=dict(size=15, color="#F8FAFC")),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#07111F",
         font=dict(family='"Roboto Mono", monospace', color="#CBD5E1"),
         margin=dict(l=38, r=18, t=48, b=28),
-        height=360,
+        height=350,
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=11)),
         xaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, title=None),
         yaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, ticksuffix="%", title="Var. normalizada"),
     )
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
+def render_terminal_global_line_chart():
+    col_left, col_right = st.columns(2)
+    with col_left:
+        render_terminal_line_chart_pair(
+            "S&P 500 x Brent",
+            GLOBAL_LINE_CHART_GROUPS["S&P 500 x Brent"],
+            {"S&P 500": "#38BDF8", "Brent": "#F97316"},
+        )
+    with col_right:
+        render_terminal_line_chart_pair(
+            "EWZ x DXY",
+            GLOBAL_LINE_CHART_GROUPS["EWZ x DXY"],
+            {"EWZ": "#A78BFA", "DXY": "#22C55E"},
+        )
 
 @st.fragment(run_every=2)
 def painel_topo_rtd():
