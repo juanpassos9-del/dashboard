@@ -4539,9 +4539,88 @@ def secao_boletim_focus_fragment():
 # PÁGINAS DO DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
 
+REGIME_JUROS_EXCEL_PATH = r"C:\Users\Mini PC\Documents\ANALISE JUROS\Curva_DI_RTD_Monitor_PrecoTempo.xlsx"
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def get_regime_juros_indice_atual():
+    """Le apenas os campos principais da aba Indice Atual do monitor RTD de DI."""
+    try:
+        from openpyxl import load_workbook
+
+        if not os.path.exists(REGIME_JUROS_EXCEL_PATH):
+            return {"error": "Arquivo Excel de juros nao encontrado."}
+
+        wb = load_workbook(REGIME_JUROS_EXCEL_PATH, data_only=True, read_only=True)
+        ws = wb["Indice Atual"]
+        return {
+            "taxa_sintetica": ws["E2"].value,
+            "variacao_bps": ws["H2"].value,
+            "regime_estrutural": ws["K2"].value,
+            "updated_at": datetime.fromtimestamp(
+                os.path.getmtime(REGIME_JUROS_EXCEL_PATH),
+                ZoneInfo("America/Sao_Paulo"),
+            ).strftime("%H:%M:%S"),
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def render_regime_juros_section():
+    data = get_regime_juros_indice_atual()
+    if data.get("error"):
+        st.info(f"REGIME DE JUROS indisponivel: {data['error']}")
+        return
+
+    try:
+        taxa = float(data.get("taxa_sintetica") or 0)
+    except (TypeError, ValueError):
+        taxa = 0.0
+    try:
+        variacao = float(data.get("variacao_bps") or 0)
+    except (TypeError, ValueError):
+        variacao = 0.0
+
+    regime = html.escape(str(data.get("regime_estrutural") or "---"))
+    var_color = "#00FFA3" if variacao >= 0 else "#FF4B4B"
+    regime_color = "#FF9800" if "bear" in regime.lower() else ("#00FFA3" if "bull" in regime.lower() else "#94A3B8")
+    taxa_fmt = f"{taxa:.3f}".replace(".", ",")
+    var_fmt = f"{variacao:+.2f}".replace(".", ",")
+    updated = html.escape(str(data.get("updated_at") or "---"))
+
+    st.markdown(
+        f"""
+        <section style="margin:10px 0 14px; padding:12px 14px; border:1px solid #243244; border-radius:8px; background:#0B1220;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+            <div>
+              <div style="font-size:0.72rem; color:#93C5FD; font-weight:900; letter-spacing:.08em; text-transform:uppercase;">Regime de Juros</div>
+              <div style="font-size:0.68rem; color:#64748B; margin-top:2px;">Indice Atual | Excel RTD ProfitChart | Atualizado {updated}</div>
+            </div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+              <div style="min-width:150px; padding:9px 12px; border:1px solid #1E293B; border-radius:8px; background:#0F172A;">
+                <div style="font-size:0.66rem; color:#94A3B8; font-weight:800;">Taxa Sintetica</div>
+                <div style="font-size:1.35rem; color:#FFFFFF; font-weight:950; line-height:1.1;">{taxa_fmt}</div>
+              </div>
+              <div style="min-width:150px; padding:9px 12px; border:1px solid #1E293B; border-radius:8px; background:#0F172A;">
+                <div style="font-size:0.66rem; color:#94A3B8; font-weight:800;">Variacao bps</div>
+                <div style="font-size:1.35rem; color:{var_color}; font-weight:950; line-height:1.1;">{var_fmt}</div>
+              </div>
+              <div style="min-width:210px; padding:9px 12px; border:1px solid {regime_color}88; border-radius:8px; background:{regime_color}18;">
+                <div style="font-size:0.66rem; color:#CBD5E1; font-weight:800;">Regime Estrutural</div>
+                <div style="font-size:1.05rem; color:#FFFFFF; font-weight:950; line-height:1.15;">{regime}</div>
+              </div>
+            </div>
+          </div>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def pagina_terminal():
     """Renderiza o terminal principal de trading."""
     painel_tickers_topo()   # Indicadores Globais no Topo
+    render_regime_juros_section()
     painel_topo_rtd()       # Tempo Real (1s)
     secao_ia_fragment()     # Estático/Lento (60s)
     painel_inferior_rtd()   # Tempo Real (1s) - Escada de Níveis
