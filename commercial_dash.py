@@ -7,6 +7,7 @@ import html
 import json
 import time
 import pandas as pd
+import textwrap
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -1759,18 +1760,18 @@ def render_top_movers_brasil():
             five_color = "#00FFA3" if five >= 0 else "#FF4B4B"
             arrow = "▲" if five >= 0 else "▼"
             accel = f"<span class='tm-five' style='color:{five_color};'>{arrow} 5m {five:+.2f}%</span>"
-        return f"""
-        <div class="tm-row" style="background:{bg};">
-          <div>
-            <strong>{html.escape(str(item.get('ticker', '---')))}</strong>
-            <span>{html.escape(str(item.get('symbol', '')))}</span>
-          </div>
-          <div class="tm-price">{_fmt_br_money(item.get('price'))}</div>
-          <div class="tm-change" style="color:{color};">{float(item.get('change') or 0):+.2f}%</div>
-          <div class="tm-abs" style="color:{color};">{float(item.get('change_abs') or 0):+.2f}</div>
-          {accel}
-        </div>
-        """
+        return textwrap.dedent(f"""
+            <div class="tm-row" style="background:{bg};">
+              <div>
+                <strong>{html.escape(str(item.get('ticker', '---')))}</strong>
+                <span>{html.escape(str(item.get('symbol', '')))}</span>
+              </div>
+              <div class="tm-price">{_fmt_br_money(item.get('price'))}</div>
+              <div class="tm-change" style="color:{color};">{float(item.get('change') or 0):+.2f}%</div>
+              <div class="tm-abs" style="color:{color};">{float(item.get('change_abs') or 0):+.2f}</div>
+              {accel}
+            </div>
+        """).strip()
 
     css = """
     <style>
@@ -1789,28 +1790,28 @@ def render_top_movers_brasil():
     @media(max-width:900px){.tm-grid{grid-template-columns:1fr}.tm-row{grid-template-columns:1fr .8fr .65fr}.tm-abs,.tm-five{display:none!important;}}
     </style>
     """
-    html_block = f"""
-    {css}
-    <section class="tm-wrap">
-      <div class="tm-head">
-        <div>
-          <div class="tm-title">Top Movers Brasil</div>
-          <div class="tm-sub">Altas e baixas do dia | Fonte: dados do dashboard + yfinance | Atualizado {html.escape(str(movers.get('updated_at') or '---'))}</div>
-        </div>
-      </div>
-      <div class="tm-grid">
-        <div class="tm-box">
-          <h4>Maiores altas</h4>
-          {''.join(render_row(item, True) for item in gainers)}
-        </div>
-        <div class="tm-box">
-          <h4>Maiores baixas</h4>
-          {''.join(render_row(item, False) for item in losers)}
-        </div>
-      </div>
-    </section>
-    """
-    st.markdown(html_block, unsafe_allow_html=True)
+    html_block = textwrap.dedent(f"""
+        {css}
+        <section class="tm-wrap">
+          <div class="tm-head">
+            <div>
+              <div class="tm-title">Top Movers Brasil</div>
+              <div class="tm-sub">Altas e baixas do dia | Fonte: dados do dashboard + yfinance | Atualizado {html.escape(str(movers.get('updated_at') or '---'))}</div>
+            </div>
+          </div>
+          <div class="tm-grid">
+            <div class="tm-box">
+              <h4>Maiores altas</h4>
+              {''.join(render_row(item, True) for item in gainers)}
+            </div>
+            <div class="tm-box">
+              <h4>Maiores baixas</h4>
+              {''.join(render_row(item, False) for item in losers)}
+            </div>
+          </div>
+        </section>
+    """).strip()
+    components.html(html_block, height=520, scrolling=False)
 
 @st.fragment(run_every=2)
 def painel_topo_rtd():
