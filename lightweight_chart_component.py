@@ -377,7 +377,8 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
     html = """
     <div id="lw-root">
       <style>
-        #lw-root { background:#080d14; border:1px solid #1f2937; border-radius:8px; color:#e5e7eb; font-family:Inter,"Segoe UI",Arial,sans-serif; overflow:hidden; position:relative; }
+        html, body { margin:0; padding:0; background:transparent; overflow:hidden; }
+        #lw-root { background:#080d14; border:1px solid #1f2937; border-radius:8px; color:#e5e7eb; font-family:Inter,"Segoe UI",Arial,sans-serif; overflow:hidden; position:relative; height:calc(100vh - 4px); min-height:760px; box-sizing:border-box; display:flex; flex-direction:column; }
         .lw-toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; padding:10px 12px; background:#0d1420; border-bottom:1px solid #1f2937; }
         .lw-group { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
         .lw-label { color:#94a3b8; font-size:.72rem; font-weight:800; text-transform:uppercase; letter-spacing:.04em; margin-right:2px; }
@@ -385,10 +386,10 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         .lw-btn.active { border-color:#38bdf8; color:#fff; background:#0f3b5f; }
         .lw-btn.toggle-on { border-color:#22c55e; color:#eafff3; }
         .lw-btn.warn { border-color:#f59e0b; color:#fff7ed; }
-        .lw-main { display:grid; grid-template-columns:minmax(0,1fr) 310px; gap:0; }
-        #lw-chart { height:1320px; min-width:0; }
-        .lw-chart-wrap { position:relative; min-width:0; }
-        .lw-side { border-left:1px solid #1f2937; background:#0b1220; padding:10px; display:grid; align-content:start; gap:8px; }
+        .lw-main { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:0; min-height:0; flex:1 1 auto; }
+        #lw-chart { height:100%; min-height:0; min-width:0; }
+        .lw-chart-wrap { position:relative; min-width:0; min-height:0; }
+        .lw-side { border-left:1px solid #1f2937; background:#0b1220; padding:10px; display:grid; align-content:start; gap:8px; overflow-y:auto; min-height:0; }
         .lw-stat { background:#111827; border:1px solid #253044; border-radius:6px; padding:8px; }
         .lw-stat span { display:block; color:#94a3b8; font-size:.68rem; font-weight:800; text-transform:uppercase; }
         .lw-stat strong { display:block; color:#f8fafc; font-size:1rem; margin-top:3px; }
@@ -407,7 +408,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         .lw-crosshair-card strong { display:block; color:#f8fafc; font-size:.85rem; margin-bottom:6px; }
         .lw-crosshair-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 10px; color:#cbd5e1; font-size:.75rem; }
         .lw-crosshair-grid span { color:#94a3b8; }
-        .lw-volume-profile { position:absolute; top:0; right:56px; width:150px; height:1320px; z-index:3; pointer-events:none; opacity:.82; }
+        .lw-volume-profile { position:absolute; top:0; right:56px; width:150px; height:100%; z-index:3; pointer-events:none; opacity:.82; }
         .lw-vp-bar { position:absolute; right:0; height:3px; min-width:2px; border-radius:999px 0 0 999px; background:rgba(56,189,248,.32); }
         .lw-vp-bar.value-area { background:rgba(34,197,94,.38); }
         .lw-vp-bar.poc { height:5px; background:rgba(245,158,11,.9); box-shadow:0 0 8px rgba(245,158,11,.55); }
@@ -415,8 +416,22 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         .lw-skeleton { position:absolute; inset:0; z-index:4; display:none; background:linear-gradient(90deg,#0b1220 0%,#111827 50%,#0b1220 100%); background-size:220% 100%; animation:lwPulse 1.2s ease-in-out infinite; }
         .lw-skeleton.show { display:block; }
         @keyframes lwPulse { from{background-position:220% 0;} to{background-position:-220% 0;} }
-        .lw-status { color:#94a3b8; font-size:.75rem; padding:8px 12px 10px; border-top:1px solid #1f2937; background:#0d1420; }
-        @media (max-width:900px){ .lw-main{grid-template-columns:1fr;} .lw-side{border-left:0; border-top:1px solid #1f2937; grid-template-columns:repeat(2,minmax(0,1fr));} #lw-chart{height:860px;} }
+        .lw-status { color:#94a3b8; font-size:.75rem; padding:8px 12px 10px; border-top:1px solid #1f2937; background:#0d1420; flex:0 0 auto; }
+        @media (max-width:900px){
+          html, body { overflow:auto; }
+          #lw-root { height:auto; min-height:100vh; overflow:visible; }
+          .lw-toolbar { align-items:flex-start; justify-content:flex-start; }
+          .lw-main{grid-template-columns:1fr; min-height:auto;}
+          .lw-chart-wrap{height:72vh; min-height:560px;}
+          .lw-side{border-left:0; border-top:1px solid #1f2937; grid-template-columns:repeat(2,minmax(0,1fr)); max-height:none; overflow:visible;}
+          .lw-volume-profile{right:42px; width:118px;}
+        }
+        @media (max-width:520px){
+          .lw-btn{padding:6px 8px; font-size:.72rem;}
+          .lw-label{font-size:.66rem;}
+          .lw-chart-wrap{height:68vh; min-height:500px;}
+          .lw-side{grid-template-columns:1fr;}
+        }
       </style>
       <div class="lw-toolbar">
         <div class="lw-group"><span class="lw-label" id="lw-chart-title">Grafico operacional</span></div>
@@ -762,9 +777,18 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           </div>`;
         volumeProfileEl.innerHTML = "";
       }
+      function chartSize() {
+        const rect = chartEl.getBoundingClientRect();
+        return {
+          width: Math.max(320, Math.floor(rect.width || chartEl.clientWidth || 900)),
+          height: Math.max(420, Math.floor(rect.height || chartEl.clientHeight || 760)),
+        };
+      }
       function makeChart(container, height) {
+        const size = chartSize();
         return createChart(container, {
-          height,
+          width:size.width,
+          height:height || size.height,
           layout:{ background:{ type:"solid", color:"#080d14" }, textColor:"#cbd5e1" },
           grid:{ vertLines:{ color:"#111827" }, horzLines:{ color:"#111827" } },
           rightPriceScale:{ borderColor:"#1f2937" },
@@ -1691,7 +1715,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         volumeProfileEl.style.display = state.toggles.volumeProfile ? "block" : "none";
         const profile = state.indicators?.volumeProfile;
         if (!state.toggles.volumeProfile || !profile?.bins?.length || !state.series.candle) return;
-        const chartHeight = chartEl.clientHeight || 1320;
+        const chartHeight = chartSize().height;
         volumeProfileEl.style.height = `${chartHeight}px`;
         const label = document.createElement("div");
         label.className = "lw-vp-label";
@@ -1713,7 +1737,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
       function renderCharts(fit=true) {
         if (state.chart) state.chart.remove();
         chartEl.innerHTML = ""; state.series = {}; state.priceLines = []; state.markerApi = null;
-        state.chart = makeChart(chartEl, chartEl.clientHeight || 1320);
+        state.chart = makeChart(chartEl);
         state.indicators = computeIndicators(state.candles);
         const candleSeries = state.chart.addSeries(CandlestickSeries, { upColor:"#00a878", downColor:"#d63d3d", borderVisible:true, wickUpColor:"#00a878", wickDownColor:"#d63d3d" });
         candleSeries.setData(state.candles.map((c, i) => candleWithVolumeColor(c, i))); state.series.candle = candleSeries;
@@ -2023,10 +2047,13 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         }
         finally { setLoading(false); }
       }
-      window.addEventListener("resize", () => {
-        if (state.chart) state.chart.applyOptions({ width:chartEl.clientWidth });
+      function resizeChart() {
+        if (state.chart) state.chart.applyOptions(chartSize());
         requestAnimationFrame(renderVolumeProfile);
-      });
+      }
+      const chartObserver = new ResizeObserver(resizeChart);
+      chartObserver.observe(chartEl);
+      window.addEventListener("resize", resizeChart);
       renderControls(); loadSymbol(state.symbol, state.timeframe);
       if (providerNotes) setTimeout(() => { if (statusEl.textContent.includes("Inicializando")) setStatus(providerNotes); }, 400);
     })();

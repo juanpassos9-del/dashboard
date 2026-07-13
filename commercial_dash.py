@@ -7829,8 +7829,8 @@ def pagina_graficos():
     st.markdown("##### Motor de reversao")
     components.html(
         render_lightweight_chart_html(signal_mode="reversal", chart_title="Motor de reversao", instance_id="reversal_main"),
-        height=1680,
-        scrolling=False,
+        height=1120,
+        scrolling=True,
     )
     
     assets = {
