@@ -1785,7 +1785,7 @@ def _fetch_top_movers_brapi(limit: int = 6) -> dict:
                 params["token"] = token
 
             try:
-                response = requests.get("https://brapi.dev/api/v2/stocks/quote", params=params, timeout=10)
+                response = requests.get("https://brapi.dev/api/v2/stocks/quote", params=params, timeout=4)
                 response.raise_for_status()
                 payload = response.json()
                 results = payload.get("results") or []
@@ -1799,7 +1799,7 @@ def _fetch_top_movers_brapi(limit: int = 6) -> dict:
                     if token:
                         single_params["token"] = token
                     try:
-                        single_response = requests.get("https://brapi.dev/api/v2/stocks/quote", params=single_params, timeout=8)
+                        single_response = requests.get("https://brapi.dev/api/v2/stocks/quote", params=single_params, timeout=3)
                         single_response.raise_for_status()
                         results.extend(single_response.json().get("results") or [])
                     except Exception:
@@ -1814,7 +1814,7 @@ def _fetch_top_movers_brapi(limit: int = 6) -> dict:
                 if parsed:
                     rows.append(parsed)
 
-            time.sleep(0.15)
+            time.sleep(0.03)
 
         if rows:
             mark_source("Top Movers Brasil", "ok", rows=len(rows), message="Ranking B3 via Brapi.", source="Brapi")
@@ -1840,7 +1840,7 @@ def _fetch_top_movers_yfinance(limit: int = 6) -> dict:
             auto_adjust=False,
             prepost=False,
             threads=False,
-            timeout=12,
+            timeout=6,
         )
         if df is None or df.empty:
             mark_source("Top Movers Brasil", "error", message="Yahoo Finance retornou vazio.", source="yfinance")
@@ -1898,7 +1898,7 @@ def _fetch_top_movers_yfinance(limit: int = 6) -> dict:
         return {}
 
 
-@st.cache_data(ttl=180, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def get_top_movers_brasil(limit: int = 6) -> dict:
     """Ranking B3 do dia: Brapi primeiro, yfinance como fallback gratuito."""
     brapi_payload = _fetch_top_movers_brapi(limit)
@@ -1993,7 +1993,7 @@ GLOBAL_LINE_CHART_GROUPS = {
 }
 
 
-@st.cache_data(ttl=180, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def get_terminal_global_line_chart_data(tickers: tuple[tuple[str, str], ...], period: str = "1d", interval: str = "5m") -> pd.DataFrame:
     try:
         import yfinance as yf
@@ -2009,7 +2009,7 @@ def get_terminal_global_line_chart_data(tickers: tuple[tuple[str, str], ...], pe
             auto_adjust=False,
             prepost=True,
             threads=False,
-            timeout=12,
+            timeout=6,
         )
         if data is None or data.empty:
             mark_source("Grafico Linha Terminal", "error", message="Yahoo Finance retornou vazio.", source="yfinance")
@@ -2110,7 +2110,36 @@ def render_terminal_global_line_chart():
             {"EWZ": "#A78BFA", "USDBRL": "#22C55E"},
         )
 
-@st.fragment(run_every=2)
+
+def render_terminal_market_modules():
+    st.markdown(
+        """
+        <div style="margin:8px 0 10px; padding:10px 12px; border:1px solid #1E293B; border-radius:8px; background:#0B1220;">
+          <div style="display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap;">
+            <div>
+              <div style="font-size:.72rem; color:#93C5FD; font-weight:900; letter-spacing:.08em; text-transform:uppercase;">Módulos de mercado</div>
+              <div style="font-size:.72rem; color:#94A3B8;">Top movers e comparativos usam chamadas externas. Carregue sob demanda para abrir o terminal mais rápido.</div>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    cols = st.columns([1, 1, 6])
+    with cols[0]:
+        if st.button("Carregar módulos", key="load_terminal_market_modules", use_container_width=True):
+            st.session_state["terminal_market_modules_loaded"] = True
+    with cols[1]:
+        if st.button("Ocultar", key="hide_terminal_market_modules", use_container_width=True):
+            st.session_state["terminal_market_modules_loaded"] = False
+
+    if not st.session_state.get("terminal_market_modules_loaded", False):
+        return
+
+    render_terminal_market_modules()
+
+
+@st.fragment(run_every=5)
 def painel_topo_rtd():
     """Parte superior em tempo real (2s): Preços, Métricas e Semáforo."""
     dados = fetch_app_state_fast("dados_mercado")
@@ -2599,7 +2628,7 @@ def secao_market_report_fragment():
             st.markdown(latest.get("report", ""))
 
 
-@st.fragment(run_every=2)
+@st.fragment(run_every=5)
 def painel_inferior_rtd():
     """Parte inferior em tempo real (2s): Correlações e Escada."""
     dados = fetch_app_state_fast("dados_mercado")
