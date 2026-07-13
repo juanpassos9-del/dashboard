@@ -1706,15 +1706,22 @@ def _chunked(items: list, size: int):
         yield items[i:i + size]
 
 
+def _first_present(*values):
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
 def _parse_brapi_quote_item(item: dict) -> dict | None:
     quote = item.get("data") if isinstance(item.get("data"), dict) else item
     ticker = str(item.get("requestedSymbol") or item.get("symbol") or quote.get("symbol") or quote.get("stock") or "").replace(".SA", "").upper()
     if not ticker:
         return None
-    price = quote.get("regularMarketPrice") or quote.get("price") or quote.get("close")
-    change = quote.get("regularMarketChangePercent") or quote.get("change") or quote.get("changePercent")
+    price = _first_present(quote.get("regularMarketPrice"), quote.get("price"), quote.get("close"))
+    change = _first_present(quote.get("regularMarketChangePercent"), quote.get("change"), quote.get("changePercent"))
     change_abs = quote.get("regularMarketChange")
-    prev_close = quote.get("regularMarketPreviousClose") or quote.get("previousClose")
+    prev_close = _first_present(quote.get("regularMarketPreviousClose"), quote.get("previousClose"))
     if change_abs is None and price is not None and prev_close:
         try:
             change_abs = float(price) - float(prev_close)
@@ -2009,7 +2016,7 @@ def get_terminal_global_line_chart_data(tickers: tuple[tuple[str, str], ...], pe
             mark_source("Grafico Linha Terminal", "error", message="Nenhuma serie valida.", source="yfinance")
             return pd.DataFrame()
 
-        df = pd.DataFrame(series).dropna(how="all").tail(420)
+        df = pd.DataFrame(series).sort_index().ffill().dropna(how="all").tail(420)
         mark_source("Grafico Linha Terminal", "ok", rows=len(df), message=", ".join(tickers_map.keys()) + " carregados.", source="yfinance")
         return df
     except Exception as e:
@@ -2044,6 +2051,7 @@ def render_terminal_line_chart_pair(title: str, tickers_map: dict, colors: dict)
             mode="lines",
             name=col,
             line=dict(color=colors.get(col, "#E2E8F0"), width=2.2),
+            connectgaps=True,
             customdata=hover_labels,
             hovertemplate=f"{col}<br>%{{customdata}}<br>%{{y:+.2f}}%<extra></extra>",
         ))

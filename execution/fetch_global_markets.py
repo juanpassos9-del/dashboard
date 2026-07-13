@@ -39,6 +39,40 @@ def _download_market_batches(tickers, batch_size=5):
     return pd.concat(data_parts, axis=1)
 
 
+def _latest_session_frame(ticker_df):
+    """Retorna os candles da ultima data disponivel, evitando high/low de 5 dias."""
+    clean_df = ticker_df.dropna(subset=["Close"]).copy()
+    if clean_df.empty:
+        return clean_df
+    try:
+        latest_date = clean_df.index[-1].date()
+        session_df = clean_df[clean_df.index.date == latest_date]
+        return session_df if not session_df.empty else clean_df.tail(1)
+    except Exception:
+        return clean_df.tail(1)
+
+
+def _previous_session_close(ticker_df, latest_session_date):
+    """Fechamento da sessao anterior ao ultimo candle, usado para variacao diaria."""
+    clean_df = ticker_df.dropna(subset=["Close"]).copy()
+    if clean_df.empty:
+        return None
+    try:
+        previous_sessions = clean_df[clean_df.index.date < latest_session_date]
+        if not previous_sessions.empty:
+            return float(previous_sessions["Close"].iloc[-1])
+    except Exception:
+        pass
+
+    try:
+        daily_df = clean_df.resample("D").last().dropna(subset=["Close"])
+        if len(daily_df) >= 2:
+            return float(daily_df["Close"].iloc[-2])
+    except Exception:
+        pass
+    return None
+
+
 def fetch_global_data(save_file=True):
     # Estrutura de categorias e nomes amigáveis
     categories_config = {
@@ -152,17 +186,17 @@ def fetch_global_data(save_file=True):
                 if clean_df.empty:
                     continue
                 
-                last_price = clean_df['Close'].iloc[-1]
-                high_price = clean_df['High'].max() if 'High' in clean_df.columns else last_price
-                low_price = clean_df['Low'].min() if 'Low' in clean_df.columns else last_price
-                
-                daily_df = ticker_df.resample('D').last().dropna(subset=['Close'])
-                if len(daily_df) >= 2:
-                    prev_close = daily_df['Close'].iloc[-2]
-                else:
+                session_df = _latest_session_frame(ticker_df)
+                last_price = float(clean_df['Close'].iloc[-1])
+                high_price = float(session_df['High'].max()) if 'High' in session_df.columns and not session_df.empty else last_price
+                low_price = float(session_df['Low'].min()) if 'Low' in session_df.columns and not session_df.empty else last_price
+
+                latest_session_date = clean_df.index[-1].date()
+                prev_close = _previous_session_close(ticker_df, latest_session_date)
+                if not prev_close or prev_close <= 0:
                     prev_close = last_price
-                
-                change = ((last_price - prev_close) / prev_close) * 100
+
+                change = ((last_price - prev_close) / prev_close) * 100 if prev_close else 0.0
                 
                 cat_results.append({
                     "name": name,
@@ -170,7 +204,8 @@ def fetch_global_data(save_file=True):
                     "price": float(round(last_price, 2) if last_price > 10 else round(last_price, 4)),
                     "high": float(round(high_price, 2) if high_price > 10 else round(high_price, 4)),
                     "low": float(round(low_price, 2) if low_price > 10 else round(low_price, 4)),
-                    "change": float(round(change, 2))
+                    "change": float(round(change, 2)),
+                    "prev_close": float(round(prev_close, 2) if prev_close > 10 else round(prev_close, 4)),
                 })
                 valid_data_count += 1
             except Exception as e:
