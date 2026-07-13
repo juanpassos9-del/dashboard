@@ -3,7 +3,403 @@ import pandas as pd
 import json
 import os
 import time
-from datetime import datetime
+import math
+from datetime import datetime, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import requests
+
+try:
+    import tomllib
+except Exception:
+    tomllib = None
+
+
+BR_TZ = ZoneInfo("America/Sao_Paulo")
+NY_TZ = ZoneInfo("America/New_York")
+
+
+TWELVE_SYMBOL_MAP = {
+    "^GSPC": "SPY",
+    "^IXIC": "QQQ",
+    "^DJI": "DIA",
+    "^RUT": "IWM",
+    "^VIX": "VIX",
+    "DX-Y.NYB": "UUP",
+    "BRL=X": "USD/BRL",
+    "EURUSD=X": "EUR/USD",
+    "GBPUSD=X": "GBP/USD",
+    "JPY=X": "USD/JPY",
+    "AUDUSD=X": "AUD/USD",
+    "CAD=X": "USD/CAD",
+    "CHF=X": "USD/CHF",
+    "BZ=F": "BNO",
+    "CL=F": "USO",
+    "NG=F": "UNG",
+    "GC=F": "GLD",
+    "SI=F": "SLV",
+    "HG=F": "CPER",
+    "EEM": "EEM",
+    "EMB": "EMB",
+    "EWZ": "EWZ",
+    "ILF": "ILF",
+    "SPY": "SPY",
+    "XOP": "XOP",
+    "XLE": "XLE",
+    "XLK": "XLK",
+    "XLP": "XLP",
+    "XLB": "XLB",
+    "XLI": "XLI",
+    "XLV": "XLV",
+    "XLRE": "XLRE",
+    "XBI": "XBI",
+    "XLY": "XLY",
+    "XLC": "XLC",
+    "PBR": "PBR",
+    "VALE": "VALE",
+    "ITUB": "ITUB",
+    "BBD": "BBD",
+    "BTC-USD": "BTC/USD",
+    "ETH-USD": "ETH/USD",
+    "SOL-USD": "SOL/USD",
+}
+
+
+ALPHA_SYMBOL_MAP = {
+    "^GSPC": "SPY",
+    "^IXIC": "QQQ",
+    "^DJI": "DIA",
+    "^RUT": "IWM",
+    "DX-Y.NYB": "UUP",
+    "BZ=F": "BNO",
+    "CL=F": "USO",
+    "NG=F": "UNG",
+    "GC=F": "GLD",
+    "SI=F": "SLV",
+    "HG=F": "CPER",
+    "EEM": "EEM",
+    "EMB": "EMB",
+    "EWZ": "EWZ",
+    "ILF": "ILF",
+    "SPY": "SPY",
+    "XOP": "XOP",
+    "XLE": "XLE",
+    "XLK": "XLK",
+    "XLP": "XLP",
+    "XLB": "XLB",
+    "XLI": "XLI",
+    "XLV": "XLV",
+    "XLRE": "XLRE",
+    "XBI": "XBI",
+    "XLY": "XLY",
+    "XLC": "XLC",
+    "PBR": "PBR",
+    "VALE": "VALE",
+    "ITUB": "ITUB",
+    "BBD": "BBD",
+}
+
+
+BRAPI_SYMBOL_MAP = {
+    "^BVSP": "IBOV",
+}
+
+
+def _get_config_value(*names):
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return str(value)
+
+    try:
+        import streamlit as st
+
+        for name in names:
+            value = st.secrets.get(name, "")
+            if value:
+                return str(value)
+    except Exception:
+        pass
+
+    secrets_path = Path(".streamlit") / "secrets.toml"
+    if not secrets_path.exists():
+        return ""
+
+    try:
+        if tomllib is not None:
+            with secrets_path.open("rb") as fp:
+                secrets = tomllib.load(fp)
+        else:
+            secrets = {}
+            for raw_line in secrets_path.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                secrets[key.strip()] = value.strip().strip('"').strip("'")
+    except Exception:
+        return ""
+
+    for name in names:
+        value = secrets.get(name)
+        if value:
+            return str(value)
+    return ""
+
+
+def _to_utc_timestamp(value, assume_tz=timezone.utc):
+    if value is None or value == "":
+        return None
+    try:
+        ts = pd.Timestamp(value)
+        if pd.isna(ts):
+            return None
+        if ts.tzinfo is None:
+            ts = ts.tz_localize(assume_tz)
+        else:
+            ts = ts.tz_convert(timezone.utc)
+        return ts.to_pydatetime().astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _age_seconds(source_time):
+    if not source_time:
+        return None
+    try:
+        return max(0.0, (datetime.now(timezone.utc) - source_time.astimezone(timezone.utc)).total_seconds())
+    except Exception:
+        return None
+
+
+def _finite_float(value):
+    try:
+        num = float(value)
+        if math.isfinite(num):
+            return num
+    except Exception:
+        pass
+    return None
+
+
+def _round_price(value):
+    value = float(value)
+    return float(round(value, 2) if abs(value) > 10 else round(value, 4))
+
+
+def _candidate_from_frame(name, ticker_symbol, ticker_df, source="Yahoo Finance", source_symbol=None):
+    try:
+        clean_df = ticker_df.dropna(subset=["Close"]).copy()
+        if clean_df.empty:
+            return None
+
+        session_df = _latest_session_frame(ticker_df)
+        last_price = float(clean_df["Close"].iloc[-1])
+        high_price = float(session_df["High"].max()) if "High" in session_df.columns and not session_df.empty else last_price
+        low_price = float(session_df["Low"].min()) if "Low" in session_df.columns and not session_df.empty else last_price
+
+        latest_session_date = clean_df.index[-1].date()
+        prev_close = _previous_session_close(ticker_df, latest_session_date)
+        if not prev_close or prev_close <= 0:
+            prev_close = last_price
+
+        change = ((last_price - prev_close) / prev_close) * 100 if prev_close else 0.0
+        change_5m = _change_5m(ticker_df, last_price)
+        source_time = _to_utc_timestamp(clean_df.index[-1], assume_tz=timezone.utc)
+        age = _age_seconds(source_time)
+
+        return {
+            "name": name,
+            "symbol": ticker_symbol,
+            "source_symbol": source_symbol or ticker_symbol,
+            "source": source,
+            "source_timestamp": source_time.isoformat() if source_time else None,
+            "age_seconds": float(round(age, 1)) if age is not None else None,
+            "price": _round_price(last_price),
+            "high": _round_price(high_price),
+            "low": _round_price(low_price),
+            "change": float(round(change, 2)),
+            "change_5m": float(round(change_5m, 2)) if change_5m is not None else None,
+            "prev_close": _round_price(prev_close),
+        }
+    except Exception as e:
+        print(f"[!] Erro ao montar candidato {name} ({ticker_symbol}) via {source}: {e}")
+        return None
+
+
+def _parse_intraday_values(values, assume_tz=NY_TZ):
+    rows = []
+    if not isinstance(values, list):
+        return pd.DataFrame()
+    for row in values:
+        try:
+            ts = pd.Timestamp(row.get("datetime"))
+            if ts.tzinfo is None:
+                ts = ts.tz_localize(assume_tz)
+            rows.append({
+                "time": ts,
+                "Open": float(row["open"]),
+                "High": float(row["high"]),
+                "Low": float(row["low"]),
+                "Close": float(row["close"]),
+                "Volume": float(row.get("volume", 0) or 0),
+            })
+        except Exception:
+            continue
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).set_index("time").sort_index()
+
+
+def _fetch_twelve_candidate(name, ticker_symbol):
+    api_key = _get_config_value("TWELVE_DATA_API_KEY")
+    mapped_symbol = TWELVE_SYMBOL_MAP.get(ticker_symbol)
+    if not api_key or not mapped_symbol:
+        return None
+
+    params = {
+        "symbol": mapped_symbol,
+        "interval": "1min",
+        "outputsize": 390,
+        "apikey": api_key,
+        "timezone": "America/New_York",
+    }
+    try:
+        response = requests.get("https://api.twelvedata.com/time_series", params=params, timeout=6)
+        payload = response.json()
+        if payload.get("status") == "error":
+            return None
+        df = _parse_intraday_values(payload.get("values"), assume_tz=NY_TZ)
+        if df.empty:
+            return None
+        return _candidate_from_frame(name, ticker_symbol, df, source="Twelve Data", source_symbol=mapped_symbol)
+    except Exception as e:
+        print(f"[!] Twelve Data falhou para {ticker_symbol}: {e}")
+        return None
+
+
+def _fetch_alpha_candidate(name, ticker_symbol):
+    api_key = _get_config_value("ALPHA_VANTAGE_API_KEY")
+    mapped_symbol = ALPHA_SYMBOL_MAP.get(ticker_symbol)
+    if not api_key or not mapped_symbol:
+        return None
+
+    params = {
+        "function": "TIME_SERIES_INTRADAY",
+        "symbol": mapped_symbol,
+        "interval": "1min",
+        "outputsize": "compact",
+        "apikey": api_key,
+    }
+    try:
+        response = requests.get("https://www.alphavantage.co/query", params=params, timeout=6)
+        payload = response.json()
+        series = payload.get("Time Series (1min)")
+        if not isinstance(series, dict):
+            return None
+        values = []
+        for raw_ts, row in series.items():
+            values.append({
+                "datetime": raw_ts,
+                "open": row.get("1. open"),
+                "high": row.get("2. high"),
+                "low": row.get("3. low"),
+                "close": row.get("4. close"),
+                "volume": row.get("5. volume"),
+            })
+        df = _parse_intraday_values(values, assume_tz=NY_TZ)
+        if df.empty:
+            return None
+        return _candidate_from_frame(name, ticker_symbol, df, source="Alpha Vantage", source_symbol=mapped_symbol)
+    except Exception as e:
+        print(f"[!] Alpha Vantage falhou para {ticker_symbol}: {e}")
+        return None
+
+
+def _fetch_brapi_candidate(name, ticker_symbol):
+    token = _get_config_value("BRAPI_TOKEN", "BRAPI_API_KEY")
+    mapped_symbol = BRAPI_SYMBOL_MAP.get(ticker_symbol)
+    if not mapped_symbol:
+        return None
+    params = {"range": "1d", "interval": "1m", "fundamental": "false", "modules": ""}
+    if token:
+        params["token"] = token
+    try:
+        response = requests.get(f"https://brapi.dev/api/quote/{mapped_symbol}", params=params, timeout=5)
+        payload = response.json()
+        results = payload.get("results") if isinstance(payload, dict) else None
+        if not isinstance(results, list) or not results:
+            return None
+        quote = results[0]
+        price = _finite_float(quote.get("regularMarketPrice"))
+        prev_close = _finite_float(quote.get("regularMarketPreviousClose"))
+        change = _finite_float(quote.get("regularMarketChangePercent"))
+        timestamp = quote.get("regularMarketTime")
+        source_time = datetime.fromtimestamp(float(timestamp), timezone.utc) if timestamp else None
+        if price is None:
+            return None
+        if prev_close is None or prev_close <= 0:
+            prev_close = price
+        if change is None:
+            change = ((price - prev_close) / prev_close) * 100 if prev_close else 0.0
+        age = _age_seconds(source_time)
+        return {
+            "name": name,
+            "symbol": ticker_symbol,
+            "source_symbol": mapped_symbol,
+            "source": "Brapi",
+            "source_timestamp": source_time.isoformat() if source_time else None,
+            "age_seconds": float(round(age, 1)) if age is not None else None,
+            "price": _round_price(price),
+            "high": _round_price(_finite_float(quote.get("regularMarketDayHigh")) or price),
+            "low": _round_price(_finite_float(quote.get("regularMarketDayLow")) or price),
+            "change": float(round(change, 2)),
+            "change_5m": None,
+            "prev_close": _round_price(prev_close),
+        }
+    except Exception as e:
+        print(f"[!] Brapi falhou para {ticker_symbol}: {e}")
+        return None
+
+
+def _quote_candidates(name, ticker_symbol, yfinance_df=None):
+    candidates = []
+    if yfinance_df is not None and not yfinance_df.empty:
+        candidate = _candidate_from_frame(name, ticker_symbol, yfinance_df, source="Yahoo Finance")
+        if candidate:
+            candidates.append(candidate)
+
+    best_age = None
+    if candidates:
+        best_age = candidates[0].get("age_seconds")
+    if best_age is not None and best_age <= 120:
+        return candidates
+
+    # Brapi e Twelve tendem a ser os melhores fallbacks gratuitos para o painel.
+    # Alpha entra por ultimo porque o plano gratuito e mais limitado.
+    for fetcher in (_fetch_brapi_candidate, _fetch_twelve_candidate, _fetch_alpha_candidate):
+        candidate = fetcher(name, ticker_symbol)
+        if candidate:
+            candidates.append(candidate)
+            if candidate.get("age_seconds") is not None and candidate["age_seconds"] <= 120:
+                break
+    return candidates
+
+
+def _select_best_candidate(candidates):
+    valid = [item for item in candidates if _finite_float(item.get("price")) is not None]
+    if not valid:
+        return None
+
+    def score(item):
+        age = item.get("age_seconds")
+        if age is None:
+            age = 10**9
+        source_bonus = {"Brapi": -10, "Twelve Data": -5, "Yahoo Finance": 0, "Alpha Vantage": 20}.get(item.get("source"), 0)
+        return (float(age) + source_bonus, item.get("source") != "Yahoo Finance")
+
+    return sorted(valid, key=score)[0]
 
 
 def _download_market_batches(tickers, batch_size=5):
@@ -175,13 +571,15 @@ def fetch_global_data(save_file=True):
     data = _download_market_batches(all_tickers, batch_size=5)
 
     if data is None or data.empty:
-        print("[!] Erro crítico: Não foi possível baixar dados do Yahoo Finance.")
-        return None
+        print("[!] Yahoo Finance retornou vazio. Tentando fallbacks por ativo.")
+        data = None
 
     results = {
         "metadata": {
             "last_updated": datetime.now().strftime("%H:%M:%S"),
-            "full_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "full_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "quote_router": "freshest_source",
+            "sources": {},
         },
         "categories": {}
     }
@@ -192,42 +590,26 @@ def fetch_global_data(save_file=True):
         cat_results = []
         for name, ticker_symbol in symbols_map.items():
             try:
-                if isinstance(data.columns, pd.MultiIndex):
+                if data is None:
+                    ticker_df = None
+                elif isinstance(data.columns, pd.MultiIndex):
                     if ticker_symbol not in set(data.columns.get_level_values(0)):
-                        continue
-                    ticker_df = data[ticker_symbol]
+                        ticker_df = None
+                    else:
+                        ticker_df = data[ticker_symbol]
                 elif ticker_symbol in data.columns:
                     ticker_df = data
                 else:
+                    ticker_df = None
+
+                candidates = _quote_candidates(name, ticker_symbol, ticker_df)
+                selected = _select_best_candidate(candidates)
+                if not selected:
                     continue
 
-                clean_df = ticker_df.dropna(subset=['Close'])
-                if clean_df.empty:
-                    continue
-                
-                session_df = _latest_session_frame(ticker_df)
-                last_price = float(clean_df['Close'].iloc[-1])
-                high_price = float(session_df['High'].max()) if 'High' in session_df.columns and not session_df.empty else last_price
-                low_price = float(session_df['Low'].min()) if 'Low' in session_df.columns and not session_df.empty else last_price
-
-                latest_session_date = clean_df.index[-1].date()
-                prev_close = _previous_session_close(ticker_df, latest_session_date)
-                if not prev_close or prev_close <= 0:
-                    prev_close = last_price
-
-                change = ((last_price - prev_close) / prev_close) * 100 if prev_close else 0.0
-                change_5m = _change_5m(ticker_df, last_price)
-                
-                cat_results.append({
-                    "name": name,
-                    "symbol": ticker_symbol,
-                    "price": float(round(last_price, 2) if last_price > 10 else round(last_price, 4)),
-                    "high": float(round(high_price, 2) if high_price > 10 else round(high_price, 4)),
-                    "low": float(round(low_price, 2) if low_price > 10 else round(low_price, 4)),
-                    "change": float(round(change, 2)),
-                    "change_5m": float(round(change_5m, 2)) if change_5m is not None else None,
-                    "prev_close": float(round(prev_close, 2) if prev_close > 10 else round(prev_close, 4)),
-                })
+                source = str(selected.get("source") or "unknown")
+                results["metadata"]["sources"][source] = results["metadata"]["sources"].get(source, 0) + 1
+                cat_results.append(selected)
                 valid_data_count += 1
             except Exception as e:
                 print(f"[!] Erro ao processar {name} ({ticker_symbol}): {e}")
