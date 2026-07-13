@@ -7832,6 +7832,12 @@ def pagina_graficos():
         height=1120,
         scrolling=True,
     )
+    st.markdown("##### Motor de reversao - copia")
+    components.html(
+        render_lightweight_chart_html(signal_mode="reversal", chart_title="Motor de reversao - copia", instance_id="reversal_copy"),
+        height=1120,
+        scrolling=True,
+    )
     
     assets = {
         "MINI ÍNDICE (WIN)": "BRA50",
