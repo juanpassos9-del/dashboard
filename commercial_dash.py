@@ -1954,8 +1954,6 @@ def render_top_movers_brasil():
 GLOBAL_LINE_CHART_TICKERS = {
     "S&P 500": "^GSPC",
     "Brent": "BZ=F",
-    "6L1": "6L=F",
-    "EWZ": "EWZ",
 }
 
 
@@ -2005,7 +2003,7 @@ def get_terminal_global_line_chart_data(period: str = "5d", interval: str = "5m"
             return pd.DataFrame()
 
         df = pd.DataFrame(series).dropna(how="all").tail(420)
-        mark_source("Grafico Linha Terminal", "ok", rows=len(df), message="S&P, Brent, 6L e EWZ carregados.", source="yfinance")
+        mark_source("Grafico Linha Terminal", "ok", rows=len(df), message="S&P 500 e Brent carregados.", source="yfinance")
         return df
     except Exception as e:
         mark_source("Grafico Linha Terminal", "error", message=str(e), source="yfinance")
@@ -2023,8 +2021,6 @@ def render_terminal_global_line_chart():
     colors = {
         "S&P 500": "#38BDF8",
         "Brent": "#F97316",
-        "6L1": "#22C55E",
-        "EWZ": "#A78BFA",
     }
     fig = go.Figure()
     for col in df.columns:
@@ -2039,7 +2035,7 @@ def render_terminal_global_line_chart():
 
     fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="#475569")
     fig.update_layout(
-        title=dict(text="Comparativo Intraday | S&P 500, Brent, 6L1 e EWZ", x=0.01, font=dict(size=15, color="#F8FAFC")),
+        title=dict(text="Comparativo Intraday | S&P 500 x Brent", x=0.01, font=dict(size=15, color="#F8FAFC")),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#07111F",
         font=dict(family='"Roboto Mono", monospace', color="#CBD5E1"),
