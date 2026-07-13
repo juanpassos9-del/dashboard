@@ -15,12 +15,11 @@ O Supabase será responsável por:
 4. Salve essas informações no seu arquivo `.env` local:
 
 ```env
-SUPABASE_URL=sua_url_aqui
-SUPABASE_KEY=sua_anon_key_aqui
-SUPABASE_SERVICE_ROLE=sua_service_role_key_aqui
+SUPABASE=sua_url_aqui
+SUPABASE_SERVICE=sua_chave_server_service_aqui
 ```
 
-Use `SUPABASE_KEY` apenas como chave publica/anon para leitura e compatibilidade. Rotinas server-side que gravam em `app_state` devem usar `SUPABASE_SERVICE_ROLE` para respeitar o modelo de RLS seguro.
+Use `SUPABASE` e `SUPABASE_SERVICE` no Streamlit Secrets para simplificar a configuracao online. O codigo tambem aceita os aliases legados `SUPABASE_URL`, `SUPABASE_KEY` e `SUPABASE_SERVICE_ROLE`. Para escrita em `app_state`, use sempre chave server/service; nunca use chave anon/public para rotinas server-side.
 
 ## 2. Estrutura do Banco de Dados
 

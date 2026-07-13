@@ -32,10 +32,10 @@ def read_regime_juros_excel(path: str = DEFAULT_EXCEL_PATH) -> dict:
 
 
 def sync_to_supabase(payload: dict) -> None:
-    url = os.environ.get("SUPABASE_URL", "")
-    key = os.environ.get("SUPABASE_SERVICE_ROLE", "") or os.environ.get("SUPABASE_KEY", "")
+    url = os.environ.get("SUPABASE_URL", "") or os.environ.get("SUPABASE", "")
+    key = os.environ.get("SUPABASE_SERVICE_ROLE", "") or os.environ.get("SUPABASE_KEY", "") or os.environ.get("SUPABASE_SERVICE", "")
     if not url or not key:
-        raise RuntimeError("Configure SUPABASE_URL e SUPABASE_KEY no ambiente.")
+        raise RuntimeError("Configure SUPABASE e SUPABASE_SERVICE no ambiente.")
 
     client = create_client(url, key)
     client.table("app_state").upsert(

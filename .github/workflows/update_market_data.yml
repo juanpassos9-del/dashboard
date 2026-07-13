@@ -27,8 +27,8 @@ jobs:
 
     - name: Run Cloud Updates
       env:
-        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL || secrets.SUPABASE }}
+        SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE || secrets.SUPABASE_KEY || secrets.SUPABASE_SERVICE }}
         GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: |

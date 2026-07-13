@@ -28,13 +28,39 @@ except Exception:
 st.set_page_config(page_title="Terminal TTS | Inteligência", layout="wide")
 
 # ── Supabase ────────────────────────────────────────────────────────────────
+def get_supabase_url_value() -> str:
+    for name in ("SUPABASE_URL", "SUPABASE"):
+        try:
+            value = st.secrets.get(name, "")
+            if value:
+                return str(value)
+        except Exception:
+            pass
+        value = os.environ.get(name, "")
+        if value:
+            return str(value)
+    return ""
+
+
+def get_supabase_key_value() -> str:
+    for name in ("SUPABASE_SERVICE_ROLE", "SUPABASE_KEY", "SUPABASE_SERVICE"):
+        try:
+            value = st.secrets.get(name, "")
+            if value:
+                return str(value)
+        except Exception:
+            pass
+        value = os.environ.get(name, "")
+        if value:
+            return str(value)
+    return ""
+
+
 @st.cache_resource
 def init_supabase() -> Client:
     try:
-        url = st.secrets.get("SUPABASE_URL", os.environ.get("SUPABASE_URL", ""))
-        key = st.secrets.get("SUPABASE_SERVICE_ROLE", os.environ.get("SUPABASE_SERVICE_ROLE", ""))
-        if not key:
-            key = st.secrets.get("SUPABASE_KEY", os.environ.get("SUPABASE_KEY", ""))
+        url = get_supabase_url_value()
+        key = get_supabase_key_value()
         if not url or not key:
             st.error("🔑 Credenciais do Supabase não encontradas. Verifique os segredos.")
             return None
@@ -718,13 +744,7 @@ def fetch_app_state(key: str):
 
 
 def has_supabase_service_role() -> bool:
-    try:
-        return bool(
-            st.secrets.get("SUPABASE_SERVICE_ROLE", os.environ.get("SUPABASE_SERVICE_ROLE", ""))
-            or st.secrets.get("SUPABASE_KEY", os.environ.get("SUPABASE_KEY", ""))
-        )
-    except Exception:
-        return bool(os.environ.get("SUPABASE_SERVICE_ROLE", "") or os.environ.get("SUPABASE_KEY", ""))
+    return bool(get_supabase_key_value())
 
 
 def sync_app_state_value(key: str, value) -> tuple[bool, str]:
@@ -744,7 +764,7 @@ def sync_app_state_value(key: str, value) -> tuple[bool, str]:
         message = str(e)
         if "row-level security" in message.lower() or "42501" in message:
             if not has_supabase_service_role():
-                return False, "RLS bloqueou o salvamento online. Configure SUPABASE_KEY no Streamlit Secrets com uma chave server/service ou aplique a policy de app_state."
+                return False, "RLS bloqueou o salvamento online. Configure SUPABASE_SERVICE no Streamlit Secrets com uma chave server/service ou aplique a policy de app_state."
             return False, "RLS bloqueou o salvamento online mesmo com Supabase configurado. Verifique policies da tabela app_state."
         return False, message
 
@@ -8399,8 +8419,8 @@ def pagina_painel_controle():
         1. Acesse o seu repositório no **GitHub**.
         2. Vá em **Settings** (Configurações) > **Secrets and variables** > **Actions**.
         3. Clique em **New repository secret** (Novo segredo) e adicione as seguintes chaves:
-           - Nome: `SUPABASE_URL` | Valor: *Sua URL do Supabase*
-           - Nome: `SUPABASE_KEY` | Valor: *Sua chave server/service do Supabase*
+           - Nome: `SUPABASE` | Valor: *Sua URL do Supabase*
+           - Nome: `SUPABASE_SERVICE` | Valor: *Sua chave server/service do Supabase*
            - Nome: `GEMINI_API_KEY` | Valor: *Sua API Key do Google Gemini*
         
         Pronto! Com isso cadastrado, o GitHub atualizará o seu site automaticamente 24 horas por dia, 7 dias por semana, sem que você precise deixar nenhum código rodando no seu computador!

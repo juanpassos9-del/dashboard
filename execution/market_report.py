@@ -115,8 +115,8 @@ def _load_json_file(path, default):
 
 
 def _load_app_state_value(key, default):
-    supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE") or os.getenv("SUPABASE_KEY")
+    supabase_url = os.getenv("SUPABASE_URL") or os.getenv("SUPABASE")
+    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE") or os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_SERVICE")
     if not supabase_url or not supabase_key:
         return default
     try:

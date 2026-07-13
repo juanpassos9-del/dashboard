@@ -11,8 +11,8 @@ from app_state_sync import get_service_client, sync_app_state_value
 
 # Carrega chaves
 load_dotenv()
-supabase_url = os.getenv("SUPABASE_URL")
-supabase_key = os.getenv("SUPABASE_SERVICE_ROLE")
+supabase_url = os.getenv("SUPABASE_URL") or os.getenv("SUPABASE")
+supabase_key = os.getenv("SUPABASE_SERVICE_ROLE") or os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_SERVICE")
 
 if not supabase_url or not supabase_key:
     print("[!] Chaves do Supabase não encontradas no ambiente.")
