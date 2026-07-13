@@ -5031,47 +5031,16 @@ REGIME_JUROS_EXCEL_PATH = r"C:\Users\Mini PC\Documents\ANALISE JUROS\Curva_DI_RT
 REGIME_JUROS_SNAPSHOT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "regime_juros_snapshot.json")
 
 
-def read_regime_juros_open_excel():
-    """Tenta ler os valores vivos do RTD diretamente do Excel aberto no Windows."""
-    try:
-        import win32com.client
-    except Exception:
-        return None
-
-    try:
-        excel = win32com.client.GetActiveObject("Excel.Application")
-    except Exception:
-        return None
-
-    target_name = os.path.basename(REGIME_JUROS_EXCEL_PATH).lower()
-    for wb in excel.Workbooks:
-        try:
-            same_file = os.path.normcase(str(wb.FullName)) == os.path.normcase(REGIME_JUROS_EXCEL_PATH)
-        except Exception:
-            same_file = str(getattr(wb, "Name", "")).lower() == target_name
-        if not same_file:
-            continue
-
-        ws = wb.Worksheets("Indice Atual")
-        return {
-            "taxa_sintetica": ws.Range("E2").Value,
-            "variacao_bps": ws.Range("H2").Value,
-            "regime_estrutural": ws.Range("K2").Value,
-            "updated_at": datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%H:%M:%S"),
-            "source": "excel_rtd_live",
-        }
-    return None
-
-
 @st.cache_data(ttl=5, show_spinner=False)
 def get_regime_juros_indice_atual():
     """Le apenas os campos principais da aba Indice Atual do monitor RTD de DI."""
     try:
         from openpyxl import load_workbook
 
-        live_snapshot = read_regime_juros_open_excel()
-        if isinstance(live_snapshot, dict):
-            return live_snapshot
+        online_snapshot = fetch_app_state_fast("regime_juros")
+        if isinstance(online_snapshot, dict):
+            online_snapshot["source"] = online_snapshot.get("source") or "supabase"
+            return online_snapshot
 
         if os.path.exists(REGIME_JUROS_EXCEL_PATH):
             wb = load_workbook(REGIME_JUROS_EXCEL_PATH, data_only=True, read_only=True)
@@ -5086,11 +5055,6 @@ def get_regime_juros_indice_atual():
                 ).strftime("%H:%M:%S"),
                 "source": "excel_rtd_saved",
             }
-
-        online_snapshot = fetch_app_state_fast("regime_juros")
-        if isinstance(online_snapshot, dict):
-            online_snapshot["source"] = online_snapshot.get("source") or "supabase"
-            return online_snapshot
 
         if os.path.exists(REGIME_JUROS_SNAPSHOT_PATH):
             with open(REGIME_JUROS_SNAPSHOT_PATH, "r", encoding="utf-8") as fp:

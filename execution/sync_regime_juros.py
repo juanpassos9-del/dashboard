@@ -1,6 +1,9 @@
 import json
 import os
-import tomllib
+try:
+    import tomllib
+except Exception:
+    tomllib = None
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -24,8 +27,17 @@ def get_secret_value(*names: str) -> str:
         return ""
 
     try:
-        with secrets_path.open("rb") as fp:
-            secrets = tomllib.load(fp)
+        if tomllib is not None:
+            with secrets_path.open("rb") as fp:
+                secrets = tomllib.load(fp)
+        else:
+            secrets = {}
+            for raw_line in secrets_path.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                secrets[key.strip()] = value.strip().strip('"').strip("'")
     except Exception:
         return ""
 
