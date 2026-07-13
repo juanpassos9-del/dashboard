@@ -1964,7 +1964,7 @@ GLOBAL_LINE_CHART_GROUPS = {
 
 
 @st.cache_data(ttl=180, show_spinner=False)
-def get_terminal_global_line_chart_data(tickers: tuple[tuple[str, str], ...], period: str = "5d", interval: str = "5m") -> pd.DataFrame:
+def get_terminal_global_line_chart_data(tickers: tuple[tuple[str, str], ...], period: str = "1d", interval: str = "5m") -> pd.DataFrame:
     try:
         import yfinance as yf
 
