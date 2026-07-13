@@ -8,6 +8,7 @@ import json
 import time
 import pandas as pd
 import textwrap
+import requests
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -1657,6 +1658,20 @@ BR_TOP_MOVERS_TICKERS = {
 }
 
 
+def _get_secret_value(*names: str) -> str:
+    for name in names:
+        try:
+            value = st.secrets.get(name, "")
+            if value:
+                return str(value)
+        except Exception:
+            pass
+        value = os.environ.get(name, "")
+        if value:
+            return str(value)
+    return ""
+
+
 def _fmt_br_money(value) -> str:
     try:
         num = float(value)
@@ -1665,9 +1680,123 @@ def _fmt_br_money(value) -> str:
         return "---"
 
 
-@st.cache_data(ttl=180, show_spinner=False)
-def get_top_movers_brasil(limit: int = 6) -> dict:
-    """Ranking B3 do dia via yfinance, com mini-universo liquido para nao pesar o app."""
+def _build_top_movers_payload(rows: list[dict], limit: int, source: str) -> dict:
+    rows = [row for row in rows if isinstance(row.get("change"), (int, float))]
+    rows.sort(key=lambda item: item.get("change", 0), reverse=True)
+    gainers = [row for row in rows if row.get("change", 0) >= 0][:limit]
+    losers = sorted([row for row in rows if row.get("change", 0) < 0], key=lambda item: item.get("change", 0))[:limit]
+    updated_at = ""
+    for row in rows:
+        if row.get("updated_at"):
+            updated_at = str(row.get("updated_at"))
+            break
+    if not updated_at:
+        updated_at = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%H:%M:%S")
+    return {
+        "gainers": gainers,
+        "losers": losers,
+        "updated_at": updated_at,
+        "source": source,
+        "rows_count": len(rows),
+    }
+
+
+def _chunked(items: list, size: int):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+
+def _parse_brapi_quote_item(item: dict) -> dict | None:
+    quote = item.get("data") if isinstance(item.get("data"), dict) else item
+    ticker = str(item.get("requestedSymbol") or item.get("symbol") or quote.get("symbol") or quote.get("stock") or "").replace(".SA", "").upper()
+    if not ticker:
+        return None
+    price = quote.get("regularMarketPrice") or quote.get("price") or quote.get("close")
+    change = quote.get("regularMarketChangePercent") or quote.get("change") or quote.get("changePercent")
+    change_abs = quote.get("regularMarketChange")
+    prev_close = quote.get("regularMarketPreviousClose") or quote.get("previousClose")
+    if change_abs is None and price is not None and prev_close:
+        try:
+            change_abs = float(price) - float(prev_close)
+        except Exception:
+            change_abs = None
+    market_time = quote.get("regularMarketTime") or quote.get("updatedAt")
+    updated_at = ""
+    if market_time:
+        try:
+            updated_at = pd.to_datetime(market_time, utc=True).tz_convert("America/Sao_Paulo").strftime("%H:%M:%S")
+        except Exception:
+            updated_at = str(market_time)[11:19] if len(str(market_time)) >= 19 else str(market_time)
+
+    return {
+        "ticker": ticker,
+        "symbol": ticker,
+        "price": float(price) if price is not None else None,
+        "change": float(change) if change is not None else None,
+        "change_abs": float(change_abs) if change_abs is not None else 0.0,
+        "change_5m": None,
+        "volume": quote.get("regularMarketVolume") or quote.get("volume"),
+        "updated_at": updated_at,
+    }
+
+
+def _fetch_top_movers_brapi(limit: int = 6) -> dict:
+    token = _get_secret_value("BRAPI_TOKEN", "BRAPI_API_KEY")
+    try:
+        rows = []
+        for batch in _chunked(list(BR_TOP_MOVERS_TICKERS.keys()), 20):
+            params = {
+                "symbols": ",".join(batch),
+                "range": "5d",
+                "interval": "5m",
+                "fundamental": "false",
+            }
+            if token:
+                params["token"] = token
+
+            try:
+                response = requests.get("https://brapi.dev/api/v2/stocks/quote", params=params, timeout=10)
+                response.raise_for_status()
+                payload = response.json()
+                results = payload.get("results") or []
+            except Exception:
+                results = []
+                for single_symbol in batch:
+                    single_params = {
+                        "symbols": single_symbol,
+                        "fundamental": "false",
+                    }
+                    if token:
+                        single_params["token"] = token
+                    try:
+                        single_response = requests.get("https://brapi.dev/api/v2/stocks/quote", params=single_params, timeout=8)
+                        single_response.raise_for_status()
+                        results.extend(single_response.json().get("results") or [])
+                    except Exception:
+                        continue
+                    time.sleep(0.05)
+
+            if not isinstance(results, list):
+                continue
+
+            for item in results:
+                parsed = _parse_brapi_quote_item(item)
+                if parsed:
+                    rows.append(parsed)
+
+            time.sleep(0.15)
+
+        if rows:
+            mark_source("Top Movers Brasil", "ok", rows=len(rows), message="Ranking B3 via Brapi.", source="Brapi")
+            return _build_top_movers_payload(rows, limit, "Brapi")
+        mark_source("Top Movers Brasil", "error", message="Brapi retornou vazio.", source="Brapi")
+        return {}
+    except Exception as e:
+        mark_source("Top Movers Brasil", "error", message=str(e), source="Brapi")
+        return {}
+
+
+def _fetch_top_movers_yfinance(limit: int = 6) -> dict:
     try:
         import yfinance as yf
 
@@ -1685,10 +1814,9 @@ def get_top_movers_brasil(limit: int = 6) -> dict:
         )
         if df is None or df.empty:
             mark_source("Top Movers Brasil", "error", message="Yahoo Finance retornou vazio.", source="yfinance")
-            return {"gainers": [], "losers": [], "updated_at": "", "source": "yfinance"}
+            return {}
 
         rows = []
-        now_label = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%H:%M:%S")
         for ticker, yf_symbol in BR_TOP_MOVERS_TICKERS.items():
             try:
                 ticker_df = df[yf_symbol] if isinstance(df.columns, pd.MultiIndex) else df
@@ -1733,14 +1861,23 @@ def get_top_movers_brasil(limit: int = 6) -> dict:
             except Exception:
                 continue
 
-        rows.sort(key=lambda item: item.get("change", 0), reverse=True)
-        gainers = [row for row in rows if row.get("change", 0) >= 0][:limit]
-        losers = sorted([row for row in rows if row.get("change", 0) < 0], key=lambda item: item.get("change", 0))[:limit]
         mark_source("Top Movers Brasil", "ok" if rows else "error", rows=len(rows), message="Ranking B3 via yfinance.", source="yfinance")
-        return {"gainers": gainers, "losers": losers, "updated_at": now_label, "source": "yfinance"}
+        return _build_top_movers_payload(rows, limit, "yfinance") if rows else {}
     except Exception as e:
         mark_source("Top Movers Brasil", "error", message=str(e), source="yfinance")
-        return {"gainers": [], "losers": [], "updated_at": "", "source": "yfinance"}
+        return {}
+
+
+@st.cache_data(ttl=180, show_spinner=False)
+def get_top_movers_brasil(limit: int = 6) -> dict:
+    """Ranking B3 do dia: Brapi primeiro, yfinance como fallback gratuito."""
+    brapi_payload = _fetch_top_movers_brapi(limit)
+    if brapi_payload and int(brapi_payload.get("rows_count") or 0) >= max(limit * 2, 10):
+        return brapi_payload
+    yf_payload = _fetch_top_movers_yfinance(limit)
+    if yf_payload and (yf_payload.get("gainers") or yf_payload.get("losers")):
+        return yf_payload
+    return {"gainers": [], "losers": [], "updated_at": "", "source": "Brapi/yfinance"}
 
 
 def render_top_movers_brasil():
@@ -1796,7 +1933,7 @@ def render_top_movers_brasil():
           <div class="tm-head">
             <div>
               <div class="tm-title">Top Movers Brasil</div>
-              <div class="tm-sub">Altas e baixas do dia | Fonte: dados do dashboard + yfinance | Atualizado {html.escape(str(movers.get('updated_at') or '---'))}</div>
+              <div class="tm-sub">Altas e baixas do dia | Fonte: {html.escape(str(movers.get('source') or 'Brapi/yfinance'))} | Atualizado {html.escape(str(movers.get('updated_at') or '---'))}</div>
             </div>
           </div>
           <div class="tm-grid">
