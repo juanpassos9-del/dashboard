@@ -1950,6 +1950,108 @@ def render_top_movers_brasil():
     """).strip()
     components.html(html_block, height=520, scrolling=False)
 
+
+GLOBAL_LINE_CHART_TICKERS = {
+    "S&P 500": "^GSPC",
+    "Brent": "BZ=F",
+    "6L1": "6L=F",
+    "EWZ": "EWZ",
+}
+
+
+@st.cache_data(ttl=180, show_spinner=False)
+def get_terminal_global_line_chart_data(period: str = "5d", interval: str = "5m") -> pd.DataFrame:
+    try:
+        import yfinance as yf
+
+        symbols = list(GLOBAL_LINE_CHART_TICKERS.values())
+        data = yf.download(
+            symbols,
+            period=period,
+            interval=interval,
+            group_by="ticker",
+            progress=False,
+            auto_adjust=False,
+            prepost=True,
+            threads=False,
+            timeout=12,
+        )
+        if data is None or data.empty:
+            mark_source("Grafico Linha Terminal", "error", message="Yahoo Finance retornou vazio.", source="yfinance")
+            return pd.DataFrame()
+
+        series = {}
+        for label, symbol in GLOBAL_LINE_CHART_TICKERS.items():
+            try:
+                if isinstance(data.columns, pd.MultiIndex):
+                    if symbol in set(data.columns.get_level_values(0)):
+                        close = data[symbol]["Close"].dropna()
+                    elif "Close" in set(data.columns.get_level_values(0)) and symbol in data["Close"].columns:
+                        close = data["Close"][symbol].dropna()
+                    else:
+                        continue
+                else:
+                    close = data["Close"].dropna() if "Close" in data.columns else pd.Series(dtype=float)
+                if close.empty:
+                    continue
+                first = float(close.iloc[0])
+                if first:
+                    series[label] = ((close.astype(float) / first) - 1.0) * 100.0
+            except Exception:
+                continue
+
+        if not series:
+            mark_source("Grafico Linha Terminal", "error", message="Nenhuma serie valida.", source="yfinance")
+            return pd.DataFrame()
+
+        df = pd.DataFrame(series).dropna(how="all").tail(420)
+        mark_source("Grafico Linha Terminal", "ok", rows=len(df), message="S&P, Brent, 6L e EWZ carregados.", source="yfinance")
+        return df
+    except Exception as e:
+        mark_source("Grafico Linha Terminal", "error", message=str(e), source="yfinance")
+        return pd.DataFrame()
+
+
+def render_terminal_global_line_chart():
+    df = get_terminal_global_line_chart_data()
+    if df.empty:
+        st.info("Grafico comparativo S&P 500, Brent, 6L1 e EWZ indisponivel agora.")
+        return
+
+    import plotly.graph_objects as go
+
+    colors = {
+        "S&P 500": "#38BDF8",
+        "Brent": "#F97316",
+        "6L1": "#22C55E",
+        "EWZ": "#A78BFA",
+    }
+    fig = go.Figure()
+    for col in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df.index,
+            y=df[col],
+            mode="lines",
+            name=col,
+            line=dict(color=colors.get(col, "#E2E8F0"), width=2.2),
+            hovertemplate=f"{col}<br>%{{x|%d/%m %H:%M}}<br>%{{y:+.2f}}%<extra></extra>",
+        ))
+
+    fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="#475569")
+    fig.update_layout(
+        title=dict(text="Comparativo Intraday | S&P 500, Brent, 6L1 e EWZ", x=0.01, font=dict(size=15, color="#F8FAFC")),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#07111F",
+        font=dict(family='"Roboto Mono", monospace', color="#CBD5E1"),
+        margin=dict(l=38, r=18, t=48, b=28),
+        height=360,
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=11)),
+        xaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, title=None),
+        yaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, ticksuffix="%", title="Var. normalizada"),
+    )
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
 @st.fragment(run_every=2)
 def painel_topo_rtd():
     """Parte superior em tempo real (2s): Preços, Métricas e Semáforo."""
@@ -4970,6 +5072,7 @@ def pagina_terminal():
     painel_tickers_topo()   # Indicadores Globais no Topo
     render_regime_juros_section()
     render_top_movers_brasil()
+    render_terminal_global_line_chart()
     painel_topo_rtd()       # Tempo Real (1s)
     secao_ia_fragment()     # Estático/Lento (60s)
     painel_inferior_rtd()   # Tempo Real (1s) - Escada de Níveis
