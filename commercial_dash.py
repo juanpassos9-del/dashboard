@@ -4290,13 +4290,17 @@ def _momentum_score_color(score: float) -> str:
     return "#94A3B8"
 
 
-def _render_momentum_rank(items: list[dict[str, Any]], title: str, side: str) -> str:
+def _render_momentum_rank(items: list[dict[str, Any]], title: str, side: str, mode: str = "daily") -> str:
     esc = html.escape
     rows = []
     for item in items[:8]:
         score = float(item.get("adjusted_score") or 0)
         color = _momentum_score_color(score)
         sign = "+" if score > 0 else ""
+        if mode == "intraday":
+            metrics = f"15m {float(item.get('mom15') or 0):+.2f}% | 30m {float(item.get('mom30') or 0):+.2f}% | Dia {float(item.get('day_mom') or 0):+.2f}%"
+        else:
+            metrics = f"M21 {float(item.get('mom21') or 0):+.1f}% | M63 {float(item.get('mom63') or 0):+.1f}%"
         rows.append(textwrap.dedent(f"""
         <div class="gm-row">
             <div>
@@ -4305,7 +4309,7 @@ def _render_momentum_rank(items: list[dict[str, Any]], title: str, side: str) ->
             </div>
             <div class="gm-metrics">
                 <b style="color:{color};">{sign}{score:.1f}</b>
-                <small>M21 {float(item.get('mom21') or 0):+.1f}% | M63 {float(item.get('mom63') or 0):+.1f}%</small>
+                <small>{esc(metrics)}</small>
             </div>
         </div>
         """).strip())
@@ -4325,8 +4329,11 @@ def render_global_momentum_screener():
     try:
         from execution.global_momentum_screener import (
             CACHE_TTL_SECONDS,
+            INTRADAY_CACHE_TTL_SECONDS,
             build_global_momentum_screener,
+            build_intraday_momentum_screener,
             load_cached_global_momentum,
+            load_cached_intraday_momentum,
         )
     except Exception as exc:
         st.info(f"Momentum Screener indisponivel: {exc}")
@@ -4361,28 +4368,39 @@ def render_global_momentum_screener():
     </style>
     """, unsafe_allow_html=True)
 
-    col_title, col_button = st.columns([0.78, 0.22])
+    col_title, col_mode, col_button = st.columns([0.58, 0.20, 0.22])
     with col_title:
         st.markdown("#### TTS Global Momentum Screener")
-        st.caption("Snapshot quantitativo leve: momentum, volatilidade, forca relativa, aceleracao e tendencia por classe.")
+        st.caption("Snapshot quantitativo leve: momentum estrutural e fluxo intradiario por classe.")
+    with col_mode:
+        mode = st.radio(
+            "Modo",
+            ["Intraday", "Diario"],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="global_momentum_mode",
+        )
     with col_button:
-        refresh = st.button("Atualizar Momentum", use_container_width=True, key="global_momentum_refresh")
+        refresh_label = "Atualizar Intraday" if mode == "Intraday" else "Atualizar Diario"
+        refresh = st.button(refresh_label, use_container_width=True, key=f"global_momentum_refresh_{mode.lower()}")
 
     payload = None
+    is_intraday = mode == "Intraday"
     if refresh:
-        with st.spinner("Calculando momentum global..."):
+        spinner_label = "Calculando fluxo intradiario..." if is_intraday else "Calculando momentum global..."
+        with st.spinner(spinner_label):
             try:
-                payload = build_global_momentum_screener(force_refresh=True)
+                payload = build_intraday_momentum_screener(force_refresh=True) if is_intraday else build_global_momentum_screener(force_refresh=True)
             except Exception as exc:
                 st.warning(f"Falha ao atualizar Momentum Screener: {exc}")
-                payload = load_cached_global_momentum(max_age_seconds=7 * 24 * 3600)
+                payload = (load_cached_intraday_momentum if is_intraday else load_cached_global_momentum)(max_age_seconds=7 * 24 * 3600)
     else:
-        payload = load_cached_global_momentum(max_age_seconds=CACHE_TTL_SECONDS)
+        payload = load_cached_intraday_momentum(max_age_seconds=INTRADAY_CACHE_TTL_SECONDS) if is_intraday else load_cached_global_momentum(max_age_seconds=CACHE_TTL_SECONDS)
         if payload is None:
-            payload = load_cached_global_momentum(max_age_seconds=7 * 24 * 3600)
+            payload = (load_cached_intraday_momentum if is_intraday else load_cached_global_momentum)(max_age_seconds=7 * 24 * 3600)
 
     if not payload:
-        st.info("Momentum Screener aguardando primeiro ciclo. Clique em Atualizar Momentum para gerar o snapshot.")
+        st.info(f"Momentum Screener {mode} aguardando primeiro ciclo. Clique em {refresh_label} para gerar o snapshot.")
         return
 
     esc = html.escape
@@ -4391,7 +4409,7 @@ def render_global_momentum_screener():
     top_class = classes[0].get("asset_class", "---") if classes else "---"
     weak_class = classes[-1].get("asset_class", "---") if classes else "---"
     regime = str(payload.get("global_regime", "---"))
-    regime_color = "#00FFA3" if "Risk-on" in regime else "#FF4B4B" if "Risk-off" in regime else "#F59E0B"
+    regime_color = "#00FFA3" if ("Risk-on" in regime or "comprador" in regime.lower()) else "#FF4B4B" if ("Risk-off" in regime or "vendedor" in regime.lower()) else "#F59E0B"
 
     class_cards = []
     for item in classes[:10]:
@@ -4408,8 +4426,8 @@ def render_global_momentum_screener():
     <div class="gm-wrap">
         <div class="gm-head">
             <div>
-                <div class="gm-title">Regime de Momentum Global</div>
-                <div class="gm-sub">Atualizado: {esc(str(payload.get('generated_at', '---')))} | cache {age_min} min | {int(payload.get('assets_loaded') or 0)} ativos</div>
+                    <div class="gm-title">{"Fluxo Intradiario Global" if is_intraday else "Regime de Momentum Global"}</div>
+                    <div class="gm-sub">Atualizado: {esc(str(payload.get('generated_at', '---')))} | cache {age_min} min | {int(payload.get('assets_loaded') or 0)} ativos</div>
             </div>
             <div style="color:{regime_color}; font-size:1.15rem; font-weight:950;">{esc(regime)}</div>
         </div>
@@ -4419,10 +4437,10 @@ def render_global_momentum_screener():
             <div class="gm-kpi"><span>Score mediano</span><strong>{float(payload.get('median_score') or 0):+.1f}</strong></div>
             <div class="gm-kpi"><span>Comprador / Vendedor</span><strong>{float(payload.get('pct_positive') or 0):.0f}% / {float(payload.get('pct_negative') or 0):.0f}%</strong></div>
         </div>
-        <div class="gm-grid">
-            {_render_momentum_rank(payload.get('top_buy', []), 'Top Momentum Comprador', 'buy')}
-            {_render_momentum_rank(payload.get('top_sell', []), 'Top Momentum Vendedor', 'sell')}
-        </div>
+            <div class="gm-grid">
+                {_render_momentum_rank(payload.get('top_buy', []), 'Top Fluxo Comprador' if is_intraday else 'Top Momentum Comprador', 'buy', 'intraday' if is_intraday else 'daily')}
+                {_render_momentum_rank(payload.get('top_sell', []), 'Top Fluxo Vendedor' if is_intraday else 'Top Momentum Vendedor', 'sell', 'intraday' if is_intraday else 'daily')}
+            </div>
         <div class="gm-class-grid">{''.join(class_cards)}</div>
     </div>
     """).strip()

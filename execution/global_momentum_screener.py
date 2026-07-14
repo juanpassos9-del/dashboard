@@ -20,7 +20,9 @@ import yfinance as yf
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 CACHE_PATH = ROOT_DIR / ".tmp" / "global_momentum_screener.json"
+INTRADAY_CACHE_PATH = ROOT_DIR / ".tmp" / "global_intraday_momentum_screener.json"
 CACHE_TTL_SECONDS = 30 * 60
+INTRADAY_CACHE_TTL_SECONDS = 5 * 60
 
 
 ASSET_UNIVERSE: list[dict[str, str]] = [
@@ -68,6 +70,14 @@ ASSET_UNIVERSE: list[dict[str, str]] = [
 ]
 
 
+INTRADAY_SYMBOLS = {
+    "SPY", "QQQ", "IWM", "DIA", "XLK", "XLE", "XLF", "SMH", "XLP", "XLU",
+    "EWZ", "EEM", "PBR", "VALE", "ITUB", "BBD", "UUP", "EURUSD", "USDJPY",
+    "USDBRL", "AUDUSD", "BRENT", "WTI", "GOLD", "COPPER", "TLT", "HYG",
+    "BTC", "ETH", "SOL", "BNB", "LINK",
+}
+
+
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         number = float(value)
@@ -78,11 +88,11 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
     return default
 
 
-def _read_cache(max_age_seconds: int = CACHE_TTL_SECONDS) -> dict[str, Any] | None:
+def _read_json_cache(path: Path, max_age_seconds: int) -> dict[str, Any] | None:
     try:
-        if not CACHE_PATH.exists():
+        if not path.exists():
             return None
-        payload = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
         generated_ts = float(payload.get("generated_ts", 0))
         if max_age_seconds > 0 and time.time() - generated_ts > max_age_seconds:
             return None
@@ -91,13 +101,25 @@ def _read_cache(max_age_seconds: int = CACHE_TTL_SECONDS) -> dict[str, Any] | No
         return None
 
 
+def _write_json_cache(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _read_cache(max_age_seconds: int = CACHE_TTL_SECONDS) -> dict[str, Any] | None:
+    return _read_json_cache(CACHE_PATH, max_age_seconds=max_age_seconds)
+
+
 def _write_cache(payload: dict[str, Any]) -> None:
-    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CACHE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_json_cache(CACHE_PATH, payload)
 
 
 def load_cached_global_momentum(max_age_seconds: int = CACHE_TTL_SECONDS) -> dict[str, Any] | None:
     return _read_cache(max_age_seconds=max_age_seconds)
+
+
+def load_cached_intraday_momentum(max_age_seconds: int = INTRADAY_CACHE_TTL_SECONDS) -> dict[str, Any] | None:
+    return _read_json_cache(INTRADAY_CACHE_PATH, max_age_seconds=max_age_seconds)
 
 
 def _download_history(tickers: list[str], period: str = "18mo") -> dict[str, pd.DataFrame]:
@@ -122,6 +144,47 @@ def _download_history(tickers: list[str], period: str = "18mo") -> dict[str, pd.
                     break
             except Exception:
                 time.sleep(0.6 + attempt * 0.5)
+        if data is None or data.empty:
+            continue
+        for ticker in chunk:
+            try:
+                if isinstance(data.columns, pd.MultiIndex):
+                    if ticker not in set(data.columns.get_level_values(0)):
+                        continue
+                    df = data[ticker].dropna(subset=["Close"]).copy()
+                else:
+                    df = data.dropna(subset=["Close"]).copy()
+                if not df.empty:
+                    frames[ticker] = df
+            except Exception:
+                continue
+        time.sleep(0.15)
+    return frames
+
+
+def _download_intraday_history(tickers: list[str], period: str = "5d", interval: str = "5m") -> dict[str, pd.DataFrame]:
+    frames: dict[str, pd.DataFrame] = {}
+    unique = sorted(set(tickers))
+    for start in range(0, len(unique), 8):
+        chunk = unique[start:start + 8]
+        data = pd.DataFrame()
+        for attempt in range(2):
+            try:
+                data = yf.download(
+                    chunk,
+                    period=period,
+                    interval=interval,
+                    group_by="ticker",
+                    auto_adjust=True,
+                    progress=False,
+                    threads=False,
+                    timeout=15,
+                    prepost=True,
+                )
+                if data is not None and not data.empty:
+                    break
+            except Exception:
+                time.sleep(0.5 + attempt * 0.5)
         if data is None or data.empty:
             continue
         for ticker in chunk:
@@ -198,6 +261,123 @@ def _relative_strength(asset_close: pd.Series, bench_close: pd.Series, periods: 
     asset_ret = ((joined.iloc[-1, 0] / joined.iloc[-periods - 1, 0]) - 1.0) * 100.0
     bench_ret = ((joined.iloc[-1, 1] / joined.iloc[-periods - 1, 1]) - 1.0) * 100.0
     return _safe_float(asset_ret - bench_ret)
+
+
+def _last_session_frame(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    local_index = pd.to_datetime(df.index)
+    try:
+        if local_index.tz is None:
+            local_index = local_index.tz_localize("UTC")
+        local_index = local_index.tz_convert("America/Sao_Paulo")
+    except Exception:
+        pass
+    tmp = df.copy()
+    tmp["_session_date"] = [str(item.date()) for item in local_index]
+    last_date = tmp["_session_date"].dropna().iloc[-1]
+    out = tmp[tmp["_session_date"] == last_date].drop(columns=["_session_date"], errors="ignore")
+    return out if not out.empty else df.tail(78)
+
+
+def _intraday_return(close: pd.Series, bars: int) -> float:
+    if len(close) <= bars:
+        return 0.0
+    current = _safe_float(close.iloc[-1])
+    previous = _safe_float(close.iloc[-bars - 1])
+    return ((current / previous) - 1.0) * 100.0 if previous > 0 else 0.0
+
+
+def _intraday_relative_strength(asset_close: pd.Series, bench_close: pd.Series, bars: int = 6) -> float:
+    joined = pd.concat([asset_close.astype(float), bench_close.astype(float)], axis=1, join="inner").dropna()
+    if len(joined) <= bars:
+        return 0.0
+    asset_ret = ((joined.iloc[-1, 0] / joined.iloc[-bars - 1, 0]) - 1.0) * 100.0
+    bench_ret = ((joined.iloc[-1, 1] / joined.iloc[-bars - 1, 1]) - 1.0) * 100.0
+    return _safe_float(asset_ret - bench_ret)
+
+
+def _score_intraday_row(asset: dict[str, str], df: pd.DataFrame, frames: dict[str, pd.DataFrame]) -> dict[str, Any] | None:
+    if df.empty or len(df) < 12:
+        return None
+    session = _last_session_frame(df)
+    if len(session) < 6:
+        return None
+    close = session["Close"].astype(float).dropna()
+    if close.empty:
+        return None
+    price = _safe_float(close.iloc[-1])
+    open_price = _safe_float(session["Open"].astype(float).iloc[0], price)
+    mom5 = _intraday_return(close, 1)
+    mom15 = _intraday_return(close, 3)
+    mom30 = _intraday_return(close, 6)
+    mom60 = _intraday_return(close, 12)
+    day_mom = ((price / open_price) - 1.0) * 100.0 if open_price > 0 else 0.0
+    previous_mom15 = _intraday_return(close.iloc[:-3], 3) if len(close) > 8 else 0.0
+    acceleration = mom15 - previous_mom15
+    high = _safe_float(session["High"].astype(float).max(), price)
+    low = _safe_float(session["Low"].astype(float).min(), price)
+    range_position = ((price - low) / (high - low)) if high > low else 0.5
+
+    rvol = None
+    volume_score = 0.0
+    if "Volume" in session.columns:
+        vol = session["Volume"].astype(float)
+        current_vol = _safe_float(vol.iloc[-1])
+        avg_vol = _safe_float(vol.tail(min(20, len(vol))).mean())
+        if avg_vol > 0 and current_vol > 0:
+            rvol = current_vol / avg_vol
+            volume_score = max(-20.0, min(20.0, (rvol - 1.0) * 22.0))
+
+    benchmark_ticker = asset.get("benchmark", "")
+    bench_df = _last_session_frame(frames.get(benchmark_ticker, pd.DataFrame()))
+    relative_strength = _intraday_relative_strength(close, bench_df.get("Close", pd.Series(dtype=float)), 6)
+
+    raw_score = (
+        0.30 * max(-100, min(100, (0.55 * mom15 + 0.45 * mom30) * 18.0))
+        + 0.25 * max(-100, min(100, day_mom * 14.0))
+        + 0.20 * max(-100, min(100, acceleration * 24.0))
+        + 0.15 * max(-100, min(100, relative_strength * 20.0))
+        + 0.10 * volume_score
+    )
+    if raw_score >= 70:
+        regime = "Fluxo comprador extremo"
+    elif raw_score >= 40:
+        regime = "Fluxo comprador forte"
+    elif raw_score >= 15:
+        regime = "Fluxo comprador"
+    elif raw_score <= -70:
+        regime = "Fluxo vendedor extremo"
+    elif raw_score <= -40:
+        regime = "Fluxo vendedor forte"
+    elif raw_score <= -15:
+        regime = "Fluxo vendedor"
+    else:
+        regime = "Fluxo neutro"
+    if raw_score > 35 and range_position > 0.92:
+        regime = "Comprador no topo do range"
+    elif raw_score < -35 and range_position < 0.08:
+        regime = "Vendedor no fundo do range"
+
+    return {
+        "symbol": asset["symbol"],
+        "ticker": asset["ticker"],
+        "name": asset["name"],
+        "asset_class": asset["asset_class"],
+        "price": round(price, 4),
+        "mom5": round(mom5, 2),
+        "mom15": round(mom15, 2),
+        "mom30": round(mom30, 2),
+        "mom60": round(mom60, 2),
+        "day_mom": round(day_mom, 2),
+        "relative_strength": round(relative_strength, 2),
+        "acceleration": round(acceleration, 2),
+        "range_position": round(range_position, 2),
+        "rvol": round(rvol, 2) if rvol is not None else None,
+        "adjusted_score": round(max(-100.0, min(100.0, raw_score)), 1),
+        "regime": regime,
+        "updated_at": str(close.index[-1])[:19],
+    }
 
 
 def _score_row(asset: dict[str, str], df: pd.DataFrame, frames: dict[str, pd.DataFrame]) -> dict[str, Any] | None:
@@ -381,12 +561,77 @@ def build_global_momentum_screener(force_refresh: bool = False, max_age_seconds:
     return payload
 
 
+def build_intraday_momentum_screener(
+    force_refresh: bool = False,
+    max_age_seconds: int = INTRADAY_CACHE_TTL_SECONDS,
+) -> dict[str, Any]:
+    if not force_refresh:
+        cached = load_cached_intraday_momentum(max_age_seconds=max_age_seconds)
+        if cached:
+            return cached
+
+    universe = [asset for asset in ASSET_UNIVERSE if asset["symbol"] in INTRADAY_SYMBOLS]
+    tickers = [asset["ticker"] for asset in universe]
+    tickers.extend(asset["benchmark"] for asset in universe if asset.get("benchmark"))
+    frames = _download_intraday_history(tickers)
+    rows = []
+    failures = []
+    for asset in universe:
+        row = _score_intraday_row(asset, frames.get(asset["ticker"], pd.DataFrame()), frames)
+        if row:
+            rows.append(row)
+        else:
+            failures.append(asset["symbol"])
+
+    top_buy = sorted(rows, key=lambda item: item["adjusted_score"], reverse=True)[:10]
+    top_sell = sorted(rows, key=lambda item: item["adjusted_score"])[:10]
+    classes = _class_summary(rows)
+    median_score = 0.0
+    if rows:
+        scores = sorted(_safe_float(row["adjusted_score"]) for row in rows)
+        median_score = scores[len(scores) // 2]
+    pct_positive = (sum(1 for row in rows if row["adjusted_score"] > 15) / len(rows) * 100.0) if rows else 0.0
+    pct_negative = (sum(1 for row in rows if row["adjusted_score"] < -15) / len(rows) * 100.0) if rows else 0.0
+    if median_score >= 20 and pct_positive >= 55:
+        global_regime = "Fluxo Risk-on"
+    elif median_score > 5 and pct_positive > pct_negative:
+        global_regime = "Fluxo seletivo comprador"
+    elif median_score <= -20 and pct_negative >= 55:
+        global_regime = "Fluxo Risk-off"
+    elif median_score < -5 and pct_negative > pct_positive:
+        global_regime = "Fluxo seletivo vendedor"
+    else:
+        global_regime = "Fluxo neutro"
+
+    payload = {
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "generated_ts": time.time(),
+        "assets_loaded": len(rows),
+        "failures": failures,
+        "global_regime": global_regime,
+        "median_score": round(median_score, 1),
+        "pct_positive": round(pct_positive, 1),
+        "pct_negative": round(pct_negative, 1),
+        "class_summary": classes,
+        "top_buy": top_buy,
+        "top_sell": top_sell,
+        "rows": sorted(rows, key=lambda item: item["adjusted_score"], reverse=True),
+    }
+    _write_json_cache(INTRADAY_CACHE_PATH, payload)
+    return payload
+
+
 if __name__ == "__main__":
     result = build_global_momentum_screener(force_refresh=True)
+    intraday = build_intraday_momentum_screener(force_refresh=True)
     print(json.dumps({
         "generated_at": result["generated_at"],
         "assets_loaded": result["assets_loaded"],
         "global_regime": result["global_regime"],
         "top_buy": [item["symbol"] for item in result["top_buy"][:5]],
         "top_sell": [item["symbol"] for item in result["top_sell"][:5]],
+        "intraday_regime": intraday["global_regime"],
+        "intraday_loaded": intraday["assets_loaded"],
+        "intraday_top_buy": [item["symbol"] for item in intraday["top_buy"][:5]],
+        "intraday_top_sell": [item["symbol"] for item in intraday["top_sell"][:5]],
     }, ensure_ascii=False, indent=2))
