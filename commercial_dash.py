@@ -5704,9 +5704,9 @@ def pagina_terminal():
     """Renderiza o terminal principal de trading."""
     painel_tickers_topo()   # Indicadores Globais no Topo
     render_regime_juros_section()
-    render_terminal_lightweight_copy()
     render_top_movers_brasil()
     render_terminal_global_line_chart()
+    render_terminal_lightweight_copy()
     secao_boletim_focus_fragment() # Estático/Lento (300s)
     secao_fluxo_estrangeiro_fragment() # Fluxo B3 (300s)
     painel_topo_rtd()       # Tempo Real (1s)
