@@ -5679,10 +5679,32 @@ def render_regime_juros_section():
     )
 
 
+def render_terminal_lightweight_copy():
+    """Renderiza uma copia do grafico proprietario no Terminal de Trading."""
+    try:
+        from lightweight_chart_component import render_lightweight_chart_html
+    except Exception as exc:
+        st.info(f"Grafico proprietario indisponivel: {exc}")
+        return
+
+    st.markdown("#### Motor de reversao - copia")
+    st.caption("Grafico proprietario Lightweight Charts com motor de reversao, bandas, VWAP, ATR e configuracoes operacionais.")
+    components.html(
+        render_lightweight_chart_html(
+            signal_mode="reversal",
+            chart_title="Motor de reversao - copia",
+            instance_id="terminal_reversal_copy",
+        ),
+        height=1120,
+        scrolling=True,
+    )
+
+
 def pagina_terminal():
     """Renderiza o terminal principal de trading."""
     painel_tickers_topo()   # Indicadores Globais no Topo
     render_regime_juros_section()
+    render_terminal_lightweight_copy()
     render_top_movers_brasil()
     render_terminal_global_line_chart()
     secao_boletim_focus_fragment() # Estático/Lento (300s)
