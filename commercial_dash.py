@@ -4297,27 +4297,27 @@ def _render_momentum_rank(items: list[dict[str, Any]], title: str, side: str) ->
         score = float(item.get("adjusted_score") or 0)
         color = _momentum_score_color(score)
         sign = "+" if score > 0 else ""
-        rows.append(f"""
-            <div class="gm-row">
-                <div>
-                    <strong>{esc(str(item.get('symbol', '---')))}</strong>
-                    <span>{esc(str(item.get('asset_class', '---')))} | {esc(str(item.get('regime', '---')))}</span>
-                </div>
-                <div class="gm-metrics">
-                    <b style="color:{color};">{sign}{score:.1f}</b>
-                    <small>M21 {float(item.get('mom21') or 0):+.1f}% | M63 {float(item.get('mom63') or 0):+.1f}%</small>
-                </div>
+        rows.append(textwrap.dedent(f"""
+        <div class="gm-row">
+            <div>
+                <strong>{esc(str(item.get('symbol', '---')))}</strong>
+                <span>{esc(str(item.get('asset_class', '---')))} | {esc(str(item.get('regime', '---')))}</span>
             </div>
-        """)
+            <div class="gm-metrics">
+                <b style="color:{color};">{sign}{score:.1f}</b>
+                <small>M21 {float(item.get('mom21') or 0):+.1f}% | M63 {float(item.get('mom63') or 0):+.1f}%</small>
+            </div>
+        </div>
+        """).strip())
     if not rows:
         rows.append("<div class='gm-empty'>Sem ativos suficientes agora.</div>")
     accent = "#00FFA3" if side == "buy" else "#FF4B4B"
-    return f"""
-        <section class="gm-panel" style="border-top-color:{accent};">
-            <div class="gm-panel-title">{esc(title)}</div>
-            {''.join(rows)}
-        </section>
-    """
+    return textwrap.dedent(f"""
+    <section class="gm-panel" style="border-top-color:{accent};">
+        <div class="gm-panel-title">{esc(title)}</div>
+        {''.join(rows)}
+    </section>
+    """).strip()
 
 
 def render_global_momentum_screener():
@@ -4396,36 +4396,36 @@ def render_global_momentum_screener():
     class_cards = []
     for item in classes[:10]:
         score = float(item.get("median_score") or 0)
-        class_cards.append(f"""
-            <div class="gm-class">
-                <b>{esc(str(item.get('asset_class', '---')))}</b>
-                <span style="color:{_momentum_score_color(score)};">Score mediano {score:+.1f}</span>
-                <span>{esc(str(item.get('regime', '---')))} | {int(item.get('count') or 0)} ativos</span>
-            </div>
-        """)
-
-    html_block = f"""
-        <div class="gm-wrap">
-            <div class="gm-head">
-                <div>
-                    <div class="gm-title">Regime de Momentum Global</div>
-                    <div class="gm-sub">Atualizado: {esc(str(payload.get('generated_at', '---')))} | cache {age_min} min | {int(payload.get('assets_loaded') or 0)} ativos</div>
-                </div>
-                <div style="color:{regime_color}; font-size:1.15rem; font-weight:950;">{esc(regime)}</div>
-            </div>
-            <div class="gm-kpis">
-                <div class="gm-kpi"><span>Classe lider</span><strong>{esc(str(top_class))}</strong></div>
-                <div class="gm-kpi"><span>Classe fraca</span><strong>{esc(str(weak_class))}</strong></div>
-                <div class="gm-kpi"><span>Score mediano</span><strong>{float(payload.get('median_score') or 0):+.1f}</strong></div>
-                <div class="gm-kpi"><span>Comprador / Vendedor</span><strong>{float(payload.get('pct_positive') or 0):.0f}% / {float(payload.get('pct_negative') or 0):.0f}%</strong></div>
-            </div>
-            <div class="gm-grid">
-                {_render_momentum_rank(payload.get('top_buy', []), 'Top Momentum Comprador', 'buy')}
-                {_render_momentum_rank(payload.get('top_sell', []), 'Top Momentum Vendedor', 'sell')}
-            </div>
-            <div class="gm-class-grid">{''.join(class_cards)}</div>
+        class_cards.append(textwrap.dedent(f"""
+        <div class="gm-class">
+            <b>{esc(str(item.get('asset_class', '---')))}</b>
+            <span style="color:{_momentum_score_color(score)};">Score mediano {score:+.1f}</span>
+            <span>{esc(str(item.get('regime', '---')))} | {int(item.get('count') or 0)} ativos</span>
         </div>
-    """
+        """).strip())
+
+    html_block = textwrap.dedent(f"""
+    <div class="gm-wrap">
+        <div class="gm-head">
+            <div>
+                <div class="gm-title">Regime de Momentum Global</div>
+                <div class="gm-sub">Atualizado: {esc(str(payload.get('generated_at', '---')))} | cache {age_min} min | {int(payload.get('assets_loaded') or 0)} ativos</div>
+            </div>
+            <div style="color:{regime_color}; font-size:1.15rem; font-weight:950;">{esc(regime)}</div>
+        </div>
+        <div class="gm-kpis">
+            <div class="gm-kpi"><span>Classe lider</span><strong>{esc(str(top_class))}</strong></div>
+            <div class="gm-kpi"><span>Classe fraca</span><strong>{esc(str(weak_class))}</strong></div>
+            <div class="gm-kpi"><span>Score mediano</span><strong>{float(payload.get('median_score') or 0):+.1f}</strong></div>
+            <div class="gm-kpi"><span>Comprador / Vendedor</span><strong>{float(payload.get('pct_positive') or 0):.0f}% / {float(payload.get('pct_negative') or 0):.0f}%</strong></div>
+        </div>
+        <div class="gm-grid">
+            {_render_momentum_rank(payload.get('top_buy', []), 'Top Momentum Comprador', 'buy')}
+            {_render_momentum_rank(payload.get('top_sell', []), 'Top Momentum Vendedor', 'sell')}
+        </div>
+        <div class="gm-class-grid">{''.join(class_cards)}</div>
+    </div>
+    """).strip()
     st.markdown(html_block, unsafe_allow_html=True)
 
 
