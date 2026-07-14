@@ -4447,6 +4447,186 @@ def render_global_momentum_screener():
     st.markdown(html_block, unsafe_allow_html=True)
 
 
+def _macro_block_color(score: float) -> str:
+    try:
+        value = float(score)
+    except Exception:
+        value = 0.0
+    if value >= 0.45:
+        return "#FF4B4B"
+    if value <= -0.45:
+        return "#00FFA3"
+    return "#FFB020"
+
+
+def pagina_monitor_macro():
+    """Monitor macro quantitativo baseado em FRED e calendario economico."""
+    st.title("MONITOR MACRO")
+    st.caption("Motor deterministico: FRED estrutural + surpresa dos eventos USD/BRL da semana.")
+
+    try:
+        from execution.macro_fred_monitor import build_macro_fred_monitor, load_cached_macro_fred_monitor
+    except Exception as e:
+        st.error(f"Monitor Macro indisponivel: {e}")
+        return
+
+    refresh = st.button("Atualizar Monitor Macro", type="primary", use_container_width=True, key="macro_monitor_refresh")
+    calendar_events = get_calendar_data() or []
+
+    try:
+        if refresh:
+            with st.spinner("Atualizando FRED e interpretando eventos da semana..."):
+                payload = build_macro_fred_monitor(calendar_events=calendar_events, force_refresh=True)
+        else:
+            payload = load_cached_macro_fred_monitor()
+            if not payload:
+                payload = build_macro_fred_monitor(calendar_events=calendar_events, force_refresh=False)
+    except Exception as e:
+        st.error(f"Erro ao atualizar Monitor Macro: {e}")
+        return
+
+    if not payload:
+        st.info("Sem dados suficientes para o Monitor Macro agora.")
+        return
+
+    regime = payload.get("regime", {}) if isinstance(payload, dict) else {}
+    blocks = payload.get("blocks", {}) if isinstance(payload, dict) else {}
+    series = payload.get("series", []) if isinstance(payload, dict) else []
+    events = payload.get("events", []) if isinstance(payload, dict) else []
+    top_events = payload.get("top_events", []) if isinstance(payload, dict) else []
+
+    regime_name = html.escape(str(regime.get("regime", "---")))
+    fed_bias = html.escape(str(regime.get("fed_bias", "---")))
+    risk_bias = html.escape(str(regime.get("risk_bias", "---")))
+    confidence = html.escape(str(regime.get("confidence", "---")))
+    macro_score = float(regime.get("macro_score") or 0)
+    score_color = _macro_block_color(macro_score)
+    updated_at = html.escape(str(payload.get("updated_at", "---")).replace("T", " "))
+    summary = html.escape(str(regime.get("summary", "Sem resumo macro.")))
+
+    st.markdown(
+        f"""
+        <style>
+        .macro-monitor-hero {{
+            border:1px solid #23324A; background:linear-gradient(135deg,#08111F,#0D1B2E);
+            border-radius:10px; padding:18px 20px; margin:10px 0 14px;
+            box-shadow:0 0 0 1px rgba(56,189,248,.08) inset;
+        }}
+        .macro-monitor-grid {{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px;}}
+        .macro-monitor-kpi {{
+            border:1px solid #263244; background:#0B1220; border-radius:8px; padding:12px;
+            min-height:82px;
+        }}
+        .macro-monitor-kpi span, .macro-block span {{display:block; color:#8AA0BF; font-size:.70rem; font-weight:900; text-transform:uppercase; letter-spacing:.05em;}}
+        .macro-monitor-kpi strong {{display:block; color:#F8FAFC; font-size:1.35rem; margin-top:5px;}}
+        .macro-monitor-blocks {{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; margin:12px 0;}}
+        .macro-block {{border:1px solid #263244; background:#0B1220; border-radius:8px; padding:12px; min-height:132px;}}
+        .macro-block strong {{display:block; color:#F8FAFC; font-size:1rem; margin:5px 0;}}
+        .macro-driver {{color:#B7C4D7; font-size:.78rem; line-height:1.35; margin-top:4px;}}
+        .macro-events {{border:1px solid #263244; border-radius:8px; overflow:hidden; margin-top:12px;}}
+        .macro-event-row {{display:grid; grid-template-columns:90px 70px 1.4fr 110px 1.5fr; gap:10px; padding:10px 12px; border-bottom:1px solid #1E293B; align-items:center; background:#0B1220;}}
+        .macro-event-row:nth-child(even) {{background:#08111F;}}
+        .macro-badge {{display:inline-block; border-radius:999px; padding:3px 8px; font-size:.68rem; font-weight:900; border:1px solid #334155; color:#CBD5E1;}}
+        @media (max-width: 1100px) {{
+            .macro-monitor-grid, .macro-monitor-blocks {{grid-template-columns:1fr 1fr;}}
+            .macro-event-row {{grid-template-columns:80px 60px 1fr;}}
+            .macro-event-row div:nth-child(4), .macro-event-row div:nth-child(5) {{grid-column:1 / -1;}}
+        }}
+        </style>
+        <div class="macro-monitor-hero">
+            <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+                <div>
+                    <div style="color:#8AA0BF; font-size:.72rem; font-weight:900; letter-spacing:.06em; text-transform:uppercase;">Regime macro semanal</div>
+                    <div style="color:#F8FAFC; font-size:2.0rem; font-weight:950; margin-top:4px;">{regime_name}</div>
+                    <div style="color:#CBD5E1; font-size:.92rem; margin-top:8px; max-width:860px;">{summary}</div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="color:{score_color}; font-size:2.1rem; font-weight:950;">{macro_score:+.2f}</div>
+                    <div style="color:#8AA0BF; font-size:.72rem; font-weight:900;">Score macro</div>
+                    <div style="color:#64748B; font-size:.68rem; margin-top:8px;">Atualizado {updated_at}</div>
+                </div>
+            </div>
+        </div>
+        <div class="macro-monitor-grid">
+            <div class="macro-monitor-kpi"><span>Viés Fed</span><strong>{fed_bias}</strong></div>
+            <div class="macro-monitor-kpi"><span>Leitura de risco</span><strong>{risk_bias}</strong></div>
+            <div class="macro-monitor-kpi"><span>Confiança</span><strong>{confidence}</strong></div>
+            <div class="macro-monitor-kpi"><span>Eventos USD/BRL semana</span><strong>{len(events)}</strong></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    block_labels = {
+        "inflation": "Inflação",
+        "labor": "Trabalho",
+        "growth": "Atividade",
+        "financial_conditions": "Condições financeiras",
+        "recession": "Recessão",
+    }
+    block_html = []
+    for key, title in block_labels.items():
+        item = blocks.get(key, {}) if isinstance(blocks, dict) else {}
+        score = float(item.get("score") or 0)
+        color = _macro_block_color(score)
+        drivers = item.get("drivers") or []
+        driver_html = "".join(f"<div class='macro-driver'>• {html.escape(str(driver))}</div>" for driver in drivers[:3])
+        block_html.append(
+            f"""
+            <div class="macro-block" style="border-top:3px solid {color};">
+                <span>{html.escape(title)}</span>
+                <strong>{html.escape(str(item.get('label', 'Neutro')))}</strong>
+                <div style="color:{color}; font-size:1.2rem; font-weight:950;">{score:+.2f}</div>
+                {driver_html or "<div class='macro-driver'>Sem driver suficiente.</div>"}
+            </div>
+            """
+        )
+    st.markdown(f"<div class='macro-monitor-blocks'>{''.join(block_html)}</div>", unsafe_allow_html=True)
+
+    st.markdown("### Eventos da Semana")
+    if top_events:
+        rows = []
+        for event in top_events:
+            score = float(event.get("weighted_score") or 0)
+            color = _macro_block_color(score)
+            date_time = html.escape(f"{event.get('date', '')} {event.get('time', '')}".strip())
+            currency = html.escape(str(event.get("currency", "---")))
+            title = html.escape(str(event.get("event", "Evento")))
+            status = html.escape(str(event.get("status", "---")))
+            actual = html.escape(str(event.get("actual", "---")))
+            forecast = html.escape(str(event.get("forecast", "---")))
+            previous = html.escape(str(event.get("previous", "---")))
+            interp = html.escape(str(event.get("interpretation", "---")))
+            rows.append(
+                f"""
+                <div class="macro-event-row">
+                    <div style="color:#94A3B8; font-size:.76rem; font-weight:800;">{date_time}</div>
+                    <div style="color:#F8FAFC; font-weight:900;">{currency}</div>
+                    <div><b>{title}</b><br><span class="macro-badge">{status}</span></div>
+                    <div style="color:{color}; font-weight:950;">{score:+.2f}</div>
+                    <div style="color:#CBD5E1; font-size:.8rem;">Atual {actual} | Proj. {forecast} | Ant. {previous}<br>{interp}</div>
+                </div>
+                """
+            )
+        st.markdown(f"<div class='macro-events'>{''.join(rows)}</div>", unsafe_allow_html=True)
+    else:
+        st.info("Sem eventos USD/BRL relevantes carregados para esta semana.")
+
+    with st.expander("Séries FRED usadas no cálculo"):
+        if series:
+            df = pd.DataFrame(series)
+            cols = ["block", "series_id", "name", "date", "value", "previous", "delta", "z_score", "percentile", "score", "reading"]
+            existing = [col for col in cols if col in df.columns]
+            st.dataframe(df[existing], use_container_width=True, hide_index=True)
+        else:
+            st.warning("Nenhuma série FRED carregada. Verifique `FRED_API_KEY` nos secrets.")
+    errors = payload.get("errors") or []
+    if errors:
+        with st.expander("Avisos de dados"):
+            for err in errors:
+                st.caption(str(err))
+
+
 def pagina_terminal_global():
     """Página de Terminal Global."""
     render_terminal_global_layout_css()
@@ -9328,7 +9508,7 @@ with st.sidebar:
         st.session_state.pop("auth_loading_until", None)
         _auth_rerun()
     st.markdown("### 🧭 Navegação")
-    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "Crypto Terminal", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
+    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "MONITOR MACRO", "Crypto Terminal", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
     sidebar_clock()
     
     st.markdown("---")
@@ -9345,6 +9525,8 @@ if page == "📉 Terminal de Trading":
     pagina_terminal()
 elif page == "🌎 Terminal Global":
     pagina_terminal_global()
+elif page == "MONITOR MACRO":
+    pagina_monitor_macro()
 elif page == "Crypto Terminal":
     pagina_crypto_terminal()
 elif page == "📺 Terminal Bloomberg":
