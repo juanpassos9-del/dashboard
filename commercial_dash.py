@@ -4505,7 +4505,7 @@ def pagina_monitor_macro():
     summary = html.escape(str(regime.get("summary", "Sem resumo macro.")))
 
     st.markdown(
-        f"""
+        textwrap.dedent(f"""
         <style>
         .macro-monitor-hero {{
             border:1px solid #23324A; background:linear-gradient(135deg,#08111F,#0D1B2E);
@@ -4553,7 +4553,7 @@ def pagina_monitor_macro():
             <div class="macro-monitor-kpi"><span>Confiança</span><strong>{confidence}</strong></div>
             <div class="macro-monitor-kpi"><span>Eventos USD/BRL semana</span><strong>{len(events)}</strong></div>
         </div>
-        """,
+        """).strip(),
         unsafe_allow_html=True,
     )
 
@@ -4572,14 +4572,14 @@ def pagina_monitor_macro():
         drivers = item.get("drivers") or []
         driver_html = "".join(f"<div class='macro-driver'>• {html.escape(str(driver))}</div>" for driver in drivers[:3])
         block_html.append(
-            f"""
+            textwrap.dedent(f"""
             <div class="macro-block" style="border-top:3px solid {color};">
                 <span>{html.escape(title)}</span>
                 <strong>{html.escape(str(item.get('label', 'Neutro')))}</strong>
                 <div style="color:{color}; font-size:1.2rem; font-weight:950;">{score:+.2f}</div>
                 {driver_html or "<div class='macro-driver'>Sem driver suficiente.</div>"}
             </div>
-            """
+            """).strip()
         )
     st.markdown(f"<div class='macro-monitor-blocks'>{''.join(block_html)}</div>", unsafe_allow_html=True)
 
@@ -4598,7 +4598,7 @@ def pagina_monitor_macro():
             previous = html.escape(str(event.get("previous", "---")))
             interp = html.escape(str(event.get("interpretation", "---")))
             rows.append(
-                f"""
+                textwrap.dedent(f"""
                 <div class="macro-event-row">
                     <div style="color:#94A3B8; font-size:.76rem; font-weight:800;">{date_time}</div>
                     <div style="color:#F8FAFC; font-weight:900;">{currency}</div>
@@ -4606,7 +4606,7 @@ def pagina_monitor_macro():
                     <div style="color:{color}; font-weight:950;">{score:+.2f}</div>
                     <div style="color:#CBD5E1; font-size:.8rem;">Atual {actual} | Proj. {forecast} | Ant. {previous}<br>{interp}</div>
                 </div>
-                """
+                """).strip()
             )
         st.markdown(f"<div class='macro-events'>{''.join(rows)}</div>", unsafe_allow_html=True)
     else:
