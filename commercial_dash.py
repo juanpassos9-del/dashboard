@@ -4494,6 +4494,8 @@ def pagina_monitor_macro():
     series = payload.get("series", []) if isinstance(payload, dict) else []
     events = payload.get("events", []) if isinstance(payload, dict) else []
     top_events = payload.get("top_events", []) if isinstance(payload, dict) else []
+    top_series = payload.get("top_series", []) if isinstance(payload, dict) else []
+    weekly_narrative = payload.get("weekly_narrative", {}) if isinstance(payload, dict) else {}
 
     regime_name = html.escape(str(regime.get("regime", "---")))
     fed_bias = html.escape(str(regime.get("fed_bias", "---")))
@@ -4520,15 +4522,23 @@ def pagina_monitor_macro():
         .macro-monitor-kpi span, .macro-block span {{display:block; color:#8AA0BF; font-size:.70rem; font-weight:900; text-transform:uppercase; letter-spacing:.05em;}}
         .macro-monitor-kpi strong {{display:block; color:#F8FAFC; font-size:1.35rem; margin-top:5px;}}
         .macro-monitor-blocks {{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; margin:12px 0;}}
-        .macro-block {{border:1px solid #263244; background:#0B1220; border-radius:8px; padding:12px; min-height:132px;}}
+        .macro-block {{border:1px solid #263244; background:#0B1220; border-radius:8px; padding:12px; min-height:174px;}}
         .macro-block strong {{display:block; color:#F8FAFC; font-size:1rem; margin:5px 0;}}
+        .macro-split {{display:grid; grid-template-columns:1fr 1fr; gap:6px; margin:8px 0;}}
+        .macro-mini {{border:1px solid #1E293B; background:#08111F; border-radius:6px; padding:7px;}}
+        .macro-mini b {{display:block; color:#F8FAFC; font-size:.86rem; margin-top:2px;}}
         .macro-driver {{color:#B7C4D7; font-size:.78rem; line-height:1.35; margin-top:4px;}}
+        .macro-narrative {{border:1px solid #263244; background:#08111F; border-radius:8px; padding:12px 14px; margin:12px 0;}}
+        .macro-narrative-title {{color:#BBD7FF; font-size:.72rem; font-weight:950; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;}}
+        .macro-narrative-grid {{display:grid; grid-template-columns:1.2fr .8fr; gap:14px;}}
+        .macro-narrative li {{color:#CBD5E1; font-size:.84rem; margin:4px 0;}}
         .macro-events {{border:1px solid #263244; border-radius:8px; overflow:hidden; margin-top:12px;}}
         .macro-event-row {{display:grid; grid-template-columns:90px 70px 1.4fr 110px 1.5fr; gap:10px; padding:10px 12px; border-bottom:1px solid #1E293B; align-items:center; background:#0B1220;}}
         .macro-event-row:nth-child(even) {{background:#08111F;}}
         .macro-badge {{display:inline-block; border-radius:999px; padding:3px 8px; font-size:.68rem; font-weight:900; border:1px solid #334155; color:#CBD5E1;}}
         @media (max-width: 1100px) {{
             .macro-monitor-grid, .macro-monitor-blocks {{grid-template-columns:1fr 1fr;}}
+            .macro-narrative-grid {{grid-template-columns:1fr;}}
             .macro-event-row {{grid-template-columns:80px 60px 1fr;}}
             .macro-event-row div:nth-child(4), .macro-event-row div:nth-child(5) {{grid-column:1 / -1;}}
         }}
@@ -4557,6 +4567,33 @@ def pagina_monitor_macro():
         unsafe_allow_html=True,
     )
 
+    bullets = weekly_narrative.get("bullets") or []
+    conclusion = html.escape(str(weekly_narrative.get("conclusion", "Aguardando leitura semanal.")))
+    bullet_html = "".join(f"<li>{html.escape(str(item))}</li>" for item in bullets[:6])
+    top_series_html = "".join(
+        f"<div class='macro-driver'><b>{html.escape(str(item.get('name', '---')))}</b>: "
+        f"{html.escape(str(item.get('reading', '---')))} | score {float(item.get('score') or 0):+.2f}</div>"
+        for item in top_series[:5]
+    )
+    st.markdown(
+        textwrap.dedent(f"""
+        <div class="macro-narrative">
+            <div class="macro-narrative-title">Resumo semanal quantitativo</div>
+            <div class="macro-narrative-grid">
+                <div>
+                    <ul style="margin:0; padding-left:18px;">{bullet_html}</ul>
+                    <div style="color:#F8FAFC; font-weight:900; margin-top:10px;">{conclusion}</div>
+                </div>
+                <div>
+                    <div style="color:#8AA0BF; font-size:.70rem; font-weight:900; text-transform:uppercase;">Principais drivers FRED</div>
+                    {top_series_html or "<div class='macro-driver'>Sem drivers FRED carregados.</div>"}
+                </div>
+            </div>
+        </div>
+        """).strip(),
+        unsafe_allow_html=True,
+    )
+
     block_labels = {
         "inflation": "Inflação",
         "labor": "Trabalho",
@@ -4568,15 +4605,32 @@ def pagina_monitor_macro():
     for key, title in block_labels.items():
         item = blocks.get(key, {}) if isinstance(blocks, dict) else {}
         score = float(item.get("score") or 0)
+        structural_score = float(item.get("structural_score") or 0)
+        surprise_score = float(item.get("surprise_score") or 0)
         color = _macro_block_color(score)
+        structural_color = _macro_block_color(structural_score)
+        surprise_color = _macro_block_color(surprise_score)
         drivers = item.get("drivers") or []
-        driver_html = "".join(f"<div class='macro-driver'>• {html.escape(str(driver))}</div>" for driver in drivers[:3])
+        driver_html = "".join(f"<div class='macro-driver'>• {html.escape(str(driver))}</div>" for driver in drivers[:2])
         block_html.append(
             textwrap.dedent(f"""
             <div class="macro-block" style="border-top:3px solid {color};">
                 <span>{html.escape(title)}</span>
                 <strong>{html.escape(str(item.get('label', 'Neutro')))}</strong>
                 <div style="color:{color}; font-size:1.2rem; font-weight:950;">{score:+.2f}</div>
+                <div class="macro-split">
+                    <div class="macro-mini">
+                        <span>FRED</span>
+                        <b style="color:{structural_color};">{structural_score:+.2f}</b>
+                        <div class="macro-driver">{html.escape(str(item.get('structural_label', 'Estrutural neutro')))}</div>
+                    </div>
+                    <div class="macro-mini">
+                        <span>Semana</span>
+                        <b style="color:{surprise_color};">{surprise_score:+.2f}</b>
+                        <div class="macro-driver">{html.escape(str(item.get('surprise_label', 'Surpresa neutra')))}</div>
+                    </div>
+                </div>
+                <div class="macro-driver" style="color:#94A3B8;">{html.escape(str(item.get('delta_label', 'sem conflito relevante')))}</div>
                 {driver_html or "<div class='macro-driver'>Sem driver suficiente.</div>"}
             </div>
             """).strip()

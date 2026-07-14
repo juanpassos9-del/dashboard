@@ -90,6 +90,15 @@ EVENT_RULES = [
 ]
 
 
+BLOCK_LABELS = {
+    "inflation": "Inflação",
+    "labor": "Mercado de trabalho",
+    "growth": "Atividade",
+    "financial_conditions": "Condições financeiras",
+    "recession": "Risco de recessão",
+}
+
+
 def _read_secret_file(name: str) -> str:
     secrets_path = ROOT_DIR / ".streamlit" / "secrets.toml"
     if not secrets_path.exists():
@@ -140,6 +149,12 @@ def _fmt(value: Any, digits: int = 2, suffix: str = "") -> str:
     if number is None or not math.isfinite(number):
         return "---"
     return f"{number:.{digits}f}{suffix}"
+
+
+def _clip_score(value: float, lower: float = -3.0, upper: float = 3.0) -> float:
+    if not math.isfinite(value):
+        return 0.0
+    return max(min(value, upper), lower)
 
 
 def _fetch_fred_observations(series_id: str, api_key: str, years: int = 15, limit: int = 240) -> list[dict[str, Any]]:
@@ -209,19 +224,19 @@ def _series_score(values: list[float], kind: str) -> tuple[float, str]:
             score += max(min((yoy - 2.0) / 2.0, 2), -2)
         if mom_3 is not None:
             score += max(min(mom_3 / max(abs(latest), 1) * 100, 2), -2)
-        return score, "Índice acelerando" if score > 0.4 else "Índice desacelerando" if score < -0.4 else "Índice estável"
+        return _clip_score(score), "Índice acelerando" if score > 0.4 else "Índice desacelerando" if score < -0.4 else "Índice estável"
     if kind == "level_diff":
         score = (values[-1] - values[-4]) / max(abs(values[-4]), 1) * 100 if len(values) > 4 else mom_1
-        return score, "Ganho de tração" if score > 0 else "Perdendo tração"
+        return _clip_score(score), "Ganho de tração" if score > 0 else "Perdendo tração"
     if kind in {"rate", "level"}:
         score = z if z is not None else mom_1
-        return score, "Acima da média histórica" if score > 0.4 else "Abaixo da média histórica" if score < -0.4 else "Perto da média"
+        return _clip_score(score), "Acima da média histórica" if score > 0.4 else "Abaixo da média histórica" if score < -0.4 else "Perto da média"
     if kind in {"rate_inverted", "level_inverted"}:
         score = -(z if z is not None else mom_1)
-        return score, "Melhora no trabalho/risco" if score > 0.4 else "Piora no trabalho/risco" if score < -0.4 else "Neutro"
+        return _clip_score(score), "Melhora no trabalho/risco" if score > 0.4 else "Piora no trabalho/risco" if score < -0.4 else "Neutro"
     if kind in {"rate_tightening", "level_tightening", "price_tightening"}:
         score = z if z is not None else mom_1
-        return score, "Aperto financeiro" if score > 0.4 else "Alívio financeiro" if score < -0.4 else "Neutro"
+        return _clip_score(score), "Aperto financeiro" if score > 0.4 else "Alívio financeiro" if score < -0.4 else "Neutro"
     if kind == "curve":
         score = -1 if latest < -0.5 else 1 if latest > 0.5 else 0
         return score, "Curva normal" if score > 0 else "Curva invertida" if score < 0 else "Curva pouco inclinada"
@@ -234,6 +249,14 @@ def _classify_event(event: dict[str, Any]) -> tuple[str, str, int]:
         if keyword in text:
             return block, keyword, direction
     return "other", "other", 1
+
+
+def _canonical_block(block: str) -> str:
+    if block == "brl_inflation":
+        return "inflation"
+    if block == "brl":
+        return "financial_conditions"
+    return block
 
 
 def _event_surprise(event: dict[str, Any]) -> dict[str, Any]:
@@ -311,6 +334,7 @@ def _event_surprise(event: dict[str, Any]) -> dict[str, Any]:
         "previous": event.get("previous") or event.get("Anterior") or "---",
         "status": status,
         "block": block,
+        "canonical_block": _canonical_block(block),
         "keyword": keyword,
         "base": base,
         "surprise": surprise,
@@ -341,36 +365,57 @@ def _filter_week_events(calendar_events: list[dict[str, Any]]) -> list[dict[str,
 
 
 def _block_summary(block: str, series_results: list[dict[str, Any]], event_results: list[dict[str, Any]]) -> dict[str, Any]:
-    scores = []
+    structural_scores = []
+    surprise_scores = []
     drivers = []
     for item in series_results:
         if item.get("block") == block and item.get("score") is not None:
-            scores.append(float(item["score"]) * float(item.get("weight") or 1))
+            structural_scores.append(float(item["score"]) * float(item.get("weight") or 1))
             drivers.append(f"{item['name']}: {item['reading']}")
-    event_scores = [float(item.get("weighted_score") or 0) for item in event_results if item.get("block") == block]
-    scores.extend(event_scores)
-    if event_scores:
-        drivers.extend([f"{item['event']}: {item['interpretation']}" for item in event_results if item.get("block") == block][:3])
-    score = statistics.fmean(scores) if scores else 0.0
+    surprise_scores = [float(item.get("weighted_score") or 0) for item in event_results if item.get("canonical_block", item.get("block")) == block]
+    if surprise_scores:
+        drivers.extend([f"{item['event']}: {item['interpretation']}" for item in event_results if item.get("canonical_block", item.get("block")) == block][:3])
+
+    structural_score = statistics.fmean(structural_scores) if structural_scores else 0.0
+    surprise_score = statistics.fmean(surprise_scores) if surprise_scores else 0.0
+    score = (0.68 * structural_score) + (0.32 * surprise_score)
     if block == "inflation":
         label = "Inflação subindo" if score > 0.35 else "Inflação cedendo" if score < -0.35 else "Inflação lateral"
+        structural_label = "FRED pressionado" if structural_score > 0.35 else "FRED desinflacionário" if structural_score < -0.35 else "FRED lateral"
+        surprise_label = "Surpresa inflacionária" if surprise_score > 0.35 else "Surpresa desinflacionária" if surprise_score < -0.35 else "Surpresa neutra"
     elif block == "labor":
         label = "Trabalho apertado" if score > 0.35 else "Trabalho enfraquecendo" if score < -0.35 else "Trabalho neutro"
+        structural_label = "FRED apertado" if structural_score > 0.35 else "FRED afrouxando" if structural_score < -0.35 else "FRED lateral"
+        surprise_label = "Surpresa hawkish" if surprise_score > 0.35 else "Surpresa dovish" if surprise_score < -0.35 else "Surpresa neutra"
     elif block == "growth":
         label = "Atividade aquecida" if score > 0.35 else "Atividade desacelerando" if score < -0.35 else "Atividade neutra"
+        structural_label = "FRED resiliente" if structural_score > 0.35 else "FRED fraco" if structural_score < -0.35 else "FRED lateral"
+        surprise_label = "Surpresa positiva" if surprise_score > 0.35 else "Surpresa negativa" if surprise_score < -0.35 else "Surpresa neutra"
     elif block == "financial_conditions":
         label = "Condições apertando" if score > 0.35 else "Condições afrouxando" if score < -0.35 else "Condições neutras"
+        structural_label = "FRED apertado" if structural_score > 0.35 else "FRED frouxo" if structural_score < -0.35 else "FRED lateral"
+        surprise_label = "Choque hawkish" if surprise_score > 0.35 else "Choque dovish" if surprise_score < -0.35 else "Choque neutro"
     elif block == "recession":
         label = "Risco de recessão maior" if score > 0.35 else "Risco de recessão menor" if score < -0.35 else "Risco estável"
+        structural_label = "Risco estrutural maior" if structural_score > 0.35 else "Risco estrutural menor" if structural_score < -0.35 else "Risco estrutural estável"
+        surprise_label = "Surpresa aumenta risco" if surprise_score > 0.35 else "Surpresa reduz risco" if surprise_score < -0.35 else "Surpresa neutra"
     else:
         label = "Neutro"
+        structural_label = "Estrutural neutro"
+        surprise_label = "Surpresa neutra"
+    delta_label = "surpresa reforça FRED" if structural_score * surprise_score > 0.1 else "surpresa contraria FRED" if structural_score * surprise_score < -0.1 else "surpresa sem conflito relevante"
     return {
         "block": block,
         "score": round(score, 2),
+        "structural_score": round(structural_score, 2),
+        "surprise_score": round(surprise_score, 2),
         "label": label,
+        "structural_label": structural_label,
+        "surprise_label": surprise_label,
+        "delta_label": delta_label,
         "drivers": drivers[:5],
         "series_count": sum(1 for item in series_results if item.get("block") == block),
-        "event_count": sum(1 for item in event_results if item.get("block") == block),
+        "event_count": sum(1 for item in event_results if item.get("canonical_block", item.get("block")) == block),
     }
 
 
@@ -410,6 +455,30 @@ def _macro_regime(blocks: dict[str, dict[str, Any]]) -> dict[str, Any]:
         "macro_score": round(statistics.fmean([inflation, activity, -financial, -recession]), 2),
         "confidence": confidence,
     }
+
+
+def _weekly_narrative(blocks: dict[str, dict[str, Any]], regime: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, Any]:
+    inflation = blocks.get("inflation", {})
+    labor = blocks.get("labor", {})
+    growth = blocks.get("growth", {})
+    financial = blocks.get("financial_conditions", {})
+    recession = blocks.get("recession", {})
+    event_count = len(events)
+    released_count = sum(1 for item in events if item.get("status") == "divulgado")
+    pre_count = sum(1 for item in events if item.get("status") == "pre-evento")
+    bullets = [
+        f"Inflação: {inflation.get('label', 'neutra')} ({inflation.get('structural_label', 'FRED neutro')}; {inflation.get('surprise_label', 'surpresa neutra')}).",
+        f"Atividade: {growth.get('label', 'neutra')} ({growth.get('structural_label', 'FRED neutro')}; {growth.get('surprise_label', 'surpresa neutra')}).",
+        f"Trabalho: {labor.get('label', 'neutro')} ({labor.get('structural_label', 'FRED neutro')}; {labor.get('surprise_label', 'surpresa neutra')}).",
+        f"Condições financeiras: {financial.get('label', 'neutras')} e {recession.get('label', 'risco estável')}.",
+        f"Eventos: {event_count} eventos USD/BRL na semana, {released_count} divulgados e {pre_count} em modo pré-evento.",
+    ]
+    conclusion = (
+        f"Regime {regime.get('regime', 'Transição')}; Fed {regime.get('fed_bias', 'neutro')}; "
+        f"risco {regime.get('risk_bias', 'neutro/seletivo')}. "
+        "A leitura combina tendência estrutural do FRED com a surpresa marginal dos dados da semana."
+    )
+    return {"bullets": bullets, "conclusion": conclusion}
 
 
 def build_macro_fred_monitor(calendar_events: list[dict[str, Any]] | None = None, force_refresh: bool = False) -> dict[str, Any]:
@@ -459,14 +528,18 @@ def build_macro_fred_monitor(calendar_events: list[dict[str, Any]] | None = None
         for block in ["inflation", "labor", "growth", "financial_conditions", "recession"]
     }
     regime = _macro_regime(blocks)
+    narrative = _weekly_narrative(blocks, regime, event_results)
     top_events = sorted(event_results, key=lambda item: (abs(float(item.get("weighted_score") or 0)), item.get("bull_count", 1)), reverse=True)[:8]
+    top_series = sorted(series_results, key=lambda item: abs(float(item.get("score") or 0)), reverse=True)[:10]
     payload = {
         "updated_at": datetime.now(BR_TZ).isoformat(timespec="seconds"),
         "source": "FRED + Calendario Economico",
         "fred_enabled": bool(api_key),
         "regime": regime,
+        "weekly_narrative": narrative,
         "blocks": blocks,
         "series": series_results,
+        "top_series": top_series,
         "events": event_results,
         "top_events": top_events,
         "errors": errors[:10],
