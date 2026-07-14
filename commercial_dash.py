@@ -4274,6 +4274,161 @@ def render_terminal_global_macro_class_comparatives():
         )
 
 
+def _momentum_score_color(score: float) -> str:
+    if score >= 70:
+        return "#00FFA3"
+    if score >= 40:
+        return "#22C55E"
+    if score >= 15:
+        return "#84CC16"
+    if score <= -70:
+        return "#FF2D2D"
+    if score <= -40:
+        return "#EF4444"
+    if score <= -15:
+        return "#FB7185"
+    return "#94A3B8"
+
+
+def _render_momentum_rank(items: list[dict[str, Any]], title: str, side: str) -> str:
+    esc = html.escape
+    rows = []
+    for item in items[:8]:
+        score = float(item.get("adjusted_score") or 0)
+        color = _momentum_score_color(score)
+        sign = "+" if score > 0 else ""
+        rows.append(f"""
+            <div class="gm-row">
+                <div>
+                    <strong>{esc(str(item.get('symbol', '---')))}</strong>
+                    <span>{esc(str(item.get('asset_class', '---')))} | {esc(str(item.get('regime', '---')))}</span>
+                </div>
+                <div class="gm-metrics">
+                    <b style="color:{color};">{sign}{score:.1f}</b>
+                    <small>M21 {float(item.get('mom21') or 0):+.1f}% | M63 {float(item.get('mom63') or 0):+.1f}%</small>
+                </div>
+            </div>
+        """)
+    if not rows:
+        rows.append("<div class='gm-empty'>Sem ativos suficientes agora.</div>")
+    accent = "#00FFA3" if side == "buy" else "#FF4B4B"
+    return f"""
+        <section class="gm-panel" style="border-top-color:{accent};">
+            <div class="gm-panel-title">{esc(title)}</div>
+            {''.join(rows)}
+        </section>
+    """
+
+
+def render_global_momentum_screener():
+    """Compact cross-asset momentum monitor for Terminal Global."""
+    try:
+        from execution.global_momentum_screener import (
+            CACHE_TTL_SECONDS,
+            build_global_momentum_screener,
+            load_cached_global_momentum,
+        )
+    except Exception as exc:
+        st.info(f"Momentum Screener indisponivel: {exc}")
+        return
+
+    st.markdown("""
+    <style>
+        .gm-wrap { background:#07111f; border:1px solid #1f334a; border-radius:8px; padding:14px; margin:14px 0 18px; }
+        .gm-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+        .gm-title { color:#E5F0FF; font-size:1.05rem; font-weight:950; margin:0; }
+        .gm-sub { color:#8BA4C2; font-size:.76rem; margin-top:3px; font-family:"Roboto Mono", Consolas, monospace; }
+        .gm-kpis { display:grid; grid-template-columns:repeat(4, minmax(120px, 1fr)); gap:8px; margin:10px 0 12px; }
+        .gm-kpi { background:#0B1627; border:1px solid #203650; border-radius:7px; padding:9px 10px; }
+        .gm-kpi span { display:block; color:#8BA4C2; font-size:.66rem; font-weight:900; text-transform:uppercase; letter-spacing:.05em; }
+        .gm-kpi strong { display:block; color:#F8FAFC; font-size:1rem; margin-top:3px; }
+        .gm-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+        .gm-panel { background:#08111D; border:1px solid #1F2F46; border-top:3px solid #334155; border-radius:8px; padding:10px; }
+        .gm-panel-title { color:#BBD7FF; font-size:.72rem; font-weight:950; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px; }
+        .gm-row { display:flex; justify-content:space-between; gap:10px; border-top:1px solid rgba(148,163,184,.14); padding:8px 0; }
+        .gm-row:first-of-type { border-top:0; }
+        .gm-row strong { color:#F8FAFC; font-size:.86rem; }
+        .gm-row span { display:block; color:#8BA4C2; font-size:.68rem; margin-top:2px; }
+        .gm-metrics { text-align:right; min-width:128px; }
+        .gm-metrics b { display:block; font-size:.9rem; }
+        .gm-metrics small { display:block; color:#9CA3AF; font-size:.66rem; margin-top:2px; }
+        .gm-class-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(135px, 1fr)); gap:7px; margin-top:10px; }
+        .gm-class { background:#0B1627; border:1px solid #203650; border-radius:7px; padding:8px; }
+        .gm-class b { color:#F8FAFC; font-size:.78rem; }
+        .gm-class span { display:block; color:#8BA4C2; font-size:.66rem; margin-top:3px; }
+        .gm-empty { color:#38BDF8; background:#0B223A; border-radius:7px; padding:10px; font-size:.8rem; }
+        @media (max-width: 900px) { .gm-kpis, .gm-grid { grid-template-columns:1fr; } }
+    </style>
+    """, unsafe_allow_html=True)
+
+    col_title, col_button = st.columns([0.78, 0.22])
+    with col_title:
+        st.markdown("#### TTS Global Momentum Screener")
+        st.caption("Snapshot quantitativo leve: momentum, volatilidade, forca relativa, aceleracao e tendencia por classe.")
+    with col_button:
+        refresh = st.button("Atualizar Momentum", use_container_width=True, key="global_momentum_refresh")
+
+    payload = None
+    if refresh:
+        with st.spinner("Calculando momentum global..."):
+            try:
+                payload = build_global_momentum_screener(force_refresh=True)
+            except Exception as exc:
+                st.warning(f"Falha ao atualizar Momentum Screener: {exc}")
+                payload = load_cached_global_momentum(max_age_seconds=7 * 24 * 3600)
+    else:
+        payload = load_cached_global_momentum(max_age_seconds=CACHE_TTL_SECONDS)
+        if payload is None:
+            payload = load_cached_global_momentum(max_age_seconds=7 * 24 * 3600)
+
+    if not payload:
+        st.info("Momentum Screener aguardando primeiro ciclo. Clique em Atualizar Momentum para gerar o snapshot.")
+        return
+
+    esc = html.escape
+    age_min = max(0, int((time.time() - float(payload.get("generated_ts", time.time()))) / 60))
+    classes = payload.get("class_summary", [])
+    top_class = classes[0].get("asset_class", "---") if classes else "---"
+    weak_class = classes[-1].get("asset_class", "---") if classes else "---"
+    regime = str(payload.get("global_regime", "---"))
+    regime_color = "#00FFA3" if "Risk-on" in regime else "#FF4B4B" if "Risk-off" in regime else "#F59E0B"
+
+    class_cards = []
+    for item in classes[:10]:
+        score = float(item.get("median_score") or 0)
+        class_cards.append(f"""
+            <div class="gm-class">
+                <b>{esc(str(item.get('asset_class', '---')))}</b>
+                <span style="color:{_momentum_score_color(score)};">Score mediano {score:+.1f}</span>
+                <span>{esc(str(item.get('regime', '---')))} | {int(item.get('count') or 0)} ativos</span>
+            </div>
+        """)
+
+    html_block = f"""
+        <div class="gm-wrap">
+            <div class="gm-head">
+                <div>
+                    <div class="gm-title">Regime de Momentum Global</div>
+                    <div class="gm-sub">Atualizado: {esc(str(payload.get('generated_at', '---')))} | cache {age_min} min | {int(payload.get('assets_loaded') or 0)} ativos</div>
+                </div>
+                <div style="color:{regime_color}; font-size:1.15rem; font-weight:950;">{esc(regime)}</div>
+            </div>
+            <div class="gm-kpis">
+                <div class="gm-kpi"><span>Classe lider</span><strong>{esc(str(top_class))}</strong></div>
+                <div class="gm-kpi"><span>Classe fraca</span><strong>{esc(str(weak_class))}</strong></div>
+                <div class="gm-kpi"><span>Score mediano</span><strong>{float(payload.get('median_score') or 0):+.1f}</strong></div>
+                <div class="gm-kpi"><span>Comprador / Vendedor</span><strong>{float(payload.get('pct_positive') or 0):.0f}% / {float(payload.get('pct_negative') or 0):.0f}%</strong></div>
+            </div>
+            <div class="gm-grid">
+                {_render_momentum_rank(payload.get('top_buy', []), 'Top Momentum Comprador', 'buy')}
+                {_render_momentum_rank(payload.get('top_sell', []), 'Top Momentum Vendedor', 'sell')}
+            </div>
+            <div class="gm-class-grid">{''.join(class_cards)}</div>
+        </div>
+    """
+    st.markdown(html_block, unsafe_allow_html=True)
+
+
 def pagina_terminal_global():
     """Página de Terminal Global."""
     render_terminal_global_layout_css()
@@ -4470,6 +4625,7 @@ def pagina_terminal_global():
             components.html(tv_html_4, height=500)
 
         render_terminal_global_macro_class_comparatives()
+        render_global_momentum_screener()
 
         with st.container():
             st.markdown("#### 🤖 Analista Técnico IA")
