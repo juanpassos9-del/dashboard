@@ -4465,7 +4465,7 @@ def pagina_monitor_macro():
     st.caption("Motor deterministico: FRED estrutural + surpresa dos eventos USD/BRL da semana.")
 
     try:
-        from execution.macro_fred_monitor import build_macro_fred_monitor, load_cached_macro_fred_monitor
+        from execution.macro_fred_monitor import build_macro_fred_monitor, load_cached_macro_fred_monitor, load_macro_history
     except Exception as e:
         st.error(f"Monitor Macro indisponivel: {e}")
         return
@@ -4532,6 +4532,11 @@ def pagina_monitor_macro():
         .macro-narrative-title {{color:#BBD7FF; font-size:.72rem; font-weight:950; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;}}
         .macro-narrative-grid {{display:grid; grid-template-columns:1.2fr .8fr; gap:14px;}}
         .macro-narrative li {{color:#CBD5E1; font-size:.84rem; margin:4px 0;}}
+        .macro-history {{display:flex; gap:8px; overflow-x:auto; padding:4px 0 10px; margin:8px 0 12px;}}
+        .macro-history-card {{min-width:170px; border:1px solid #263244; background:#08111F; border-radius:8px; padding:9px 10px;}}
+        .macro-history-card span {{display:block; color:#8AA0BF; font-size:.66rem; font-weight:900; text-transform:uppercase; letter-spacing:.04em;}}
+        .macro-history-card strong {{display:block; color:#F8FAFC; font-size:.92rem; margin-top:4px;}}
+        .macro-history-card small {{display:block; color:#94A3B8; font-size:.68rem; margin-top:4px;}}
         .macro-events {{border:1px solid #263244; border-radius:8px; overflow:hidden; margin-top:12px;}}
         .macro-event-row {{display:grid; grid-template-columns:90px 70px 1.4fr 110px 1.5fr; gap:10px; padding:10px 12px; border-bottom:1px solid #1E293B; align-items:center; background:#0B1220;}}
         .macro-event-row:nth-child(even) {{background:#08111F;}}
@@ -4593,6 +4598,36 @@ def pagina_monitor_macro():
         """).strip(),
         unsafe_allow_html=True,
     )
+
+    history = load_macro_history(limit=8)
+    if history:
+        history_cards = []
+        for item in reversed(history):
+            h_score = float(item.get("macro_score") or 0)
+            h_color = _macro_block_color(h_score)
+            h_time = html.escape(str(item.get("updated_at", "---")).replace("T", " ")[:19])
+            h_regime = html.escape(str(item.get("regime", "---")))
+            h_fed = html.escape(str(item.get("fed_bias", "---")))
+            h_risk = html.escape(str(item.get("risk_bias", "---")))
+            h_infl = float(item.get("inflation") or 0)
+            h_growth = float(item.get("growth") or 0)
+            history_cards.append(
+                textwrap.dedent(f"""
+                <div class="macro-history-card" style="border-top:3px solid {h_color};">
+                    <span>{h_time}</span>
+                    <strong>{h_regime}</strong>
+                    <small>Fed {h_fed} | {h_risk}</small>
+                    <small>Score {h_score:+.2f} | Inf {h_infl:+.2f} | Ativ {h_growth:+.2f}</small>
+                </div>
+                """).strip()
+            )
+        st.markdown(
+            f"""
+            <div style="color:#BBD7FF; font-size:.72rem; font-weight:950; text-transform:uppercase; letter-spacing:.05em; margin-top:10px;">Histórico das últimas leituras</div>
+            <div class="macro-history">{''.join(history_cards)}</div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     block_labels = {
         "inflation": "Inflação",

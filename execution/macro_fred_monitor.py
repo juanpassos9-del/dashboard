@@ -13,6 +13,7 @@ import requests
 ROOT_DIR = Path(__file__).resolve().parents[1]
 TMP_DIR = ROOT_DIR / ".tmp"
 CACHE_PATH = TMP_DIR / "macro_fred_monitor.json"
+HISTORY_PATH = TMP_DIR / "macro_fred_history.json"
 CACHE_TTL_SECONDS = 6 * 60 * 60
 BR_TZ = ZoneInfo("America/Sao_Paulo")
 
@@ -481,6 +482,63 @@ def _weekly_narrative(blocks: dict[str, dict[str, Any]], regime: dict[str, Any],
     return {"bullets": bullets, "conclusion": conclusion}
 
 
+def _history_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
+    blocks = payload.get("blocks", {}) if isinstance(payload, dict) else {}
+    regime = payload.get("regime", {}) if isinstance(payload, dict) else {}
+    return {
+        "updated_at": payload.get("updated_at"),
+        "regime": regime.get("regime"),
+        "fed_bias": regime.get("fed_bias"),
+        "risk_bias": regime.get("risk_bias"),
+        "macro_score": regime.get("macro_score"),
+        "confidence": regime.get("confidence"),
+        "inflation": blocks.get("inflation", {}).get("score"),
+        "growth": blocks.get("growth", {}).get("score"),
+        "labor": blocks.get("labor", {}).get("score"),
+        "financial_conditions": blocks.get("financial_conditions", {}).get("score"),
+        "recession": blocks.get("recession", {}).get("score"),
+        "events_count": len(payload.get("events", []) or []),
+    }
+
+
+def load_macro_history(limit: int = 12) -> list[dict[str, Any]]:
+    try:
+        if not HISTORY_PATH.exists():
+            return []
+        data = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            return []
+        return data[-limit:]
+    except Exception:
+        return []
+
+
+def _append_macro_history(payload: dict[str, Any], limit: int = 40) -> None:
+    try:
+        history = load_macro_history(limit=limit)
+        snapshot = _history_snapshot(payload)
+        if not snapshot.get("updated_at"):
+            return
+        if history and history[-1].get("updated_at") == snapshot.get("updated_at"):
+            return
+        if history:
+            try:
+                last_dt = datetime.fromisoformat(str(history[-1].get("updated_at")))
+                new_dt = datetime.fromisoformat(str(snapshot.get("updated_at")))
+                same_state = all(
+                    history[-1].get(key) == snapshot.get(key)
+                    for key in ("regime", "fed_bias", "risk_bias", "macro_score", "inflation", "growth", "labor")
+                )
+                if same_state and abs((new_dt - last_dt).total_seconds()) < 300:
+                    return
+            except Exception:
+                pass
+        history.append(snapshot)
+        HISTORY_PATH.write_text(json.dumps(history[-limit:], ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        return
+
+
 def build_macro_fred_monitor(calendar_events: list[dict[str, Any]] | None = None, force_refresh: bool = False) -> dict[str, Any]:
     if not force_refresh:
         cached = load_cached_macro_fred_monitor()
@@ -548,6 +606,7 @@ def build_macro_fred_monitor(calendar_events: list[dict[str, Any]] | None = None
         CACHE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
+    _append_macro_history(payload)
     return payload
 
 
