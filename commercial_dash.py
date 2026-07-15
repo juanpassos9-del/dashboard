@@ -2501,10 +2501,106 @@ def get_ewz_vwap_plotly_data():
         return pd.DataFrame()
 
 
+def build_ewz_plot_from_dashboard_snapshot() -> pd.DataFrame:
+    """Fallback final: usa o snapshot de cotações do próprio dashboard para não deixar o gráfico vazio."""
+    def to_float(value):
+        try:
+            if value is None or value is pd.NA:
+                return None
+            numeric = float(value)
+            if math.isnan(numeric) or math.isinf(numeric):
+                return None
+            return numeric
+        except Exception:
+            return None
+
+    def load_market_payload():
+        payloads = []
+        try:
+            payloads.append(get_global_markets_data())
+        except Exception:
+            pass
+        for path in ("mercados_globais.json", os.path.join(LOCAL_TMP_DIR, "mercados_globais.json")):
+            try:
+                if os.path.exists(path):
+                    with open(path, "r", encoding="utf-8") as f:
+                        payloads.append(json.load(f))
+            except Exception:
+                continue
+        for payload in payloads:
+            if isinstance(payload, dict):
+                return payload
+        return {}
+
+    payload = load_market_payload()
+    categories = payload.get("categories", {}) if isinstance(payload, dict) else {}
+    ewz_item = None
+    for items in categories.values():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if str(item.get("symbol", "")).upper() == "EWZ" or "EWZ" in str(item.get("name", "")).upper():
+                ewz_item = item
+                break
+        if ewz_item:
+            break
+    if not ewz_item:
+        return pd.DataFrame()
+
+    br_tz = ZoneInfo("America/Sao_Paulo")
+    now_br = datetime.now(br_tz)
+    source_ts = pd.to_datetime(ewz_item.get("source_timestamp"), utc=True, errors="coerce")
+    if pd.isna(source_ts):
+        source_ts = pd.Timestamp(now_br.astimezone(timezone.utc))
+    source_ts = source_ts.tz_convert(br_tz)
+    session_day = source_ts.date()
+
+    price = to_float(ewz_item.get("price"))
+    prev_close = to_float(ewz_item.get("prev_close")) or price
+    high = to_float(ewz_item.get("high")) or price or prev_close
+    low = to_float(ewz_item.get("low")) or price or prev_close
+    if price is None or prev_close is None:
+        return pd.DataFrame()
+
+    open_time = datetime.combine(session_day, datetime.strptime("10:30", "%H:%M").time(), br_tz)
+    mid_time = datetime.combine(session_day, datetime.strptime("12:30", "%H:%M").time(), br_tz)
+    late_time = datetime.combine(session_day, datetime.strptime("15:00", "%H:%M").time(), br_tz)
+    end_time = source_ts.to_pydatetime()
+    points = [
+        (open_time, prev_close),
+        (mid_time, low),
+        (late_time, high),
+        (end_time, price),
+    ]
+    rows = []
+    for ts, value in sorted(points, key=lambda item: item[0]):
+        rows.append(
+            {
+                "time": ts,
+                "price": value,
+                "market_phase": "Dashboard",
+                "vwap_d": value,
+                "vwap_w": value,
+                "vwap_m": value,
+                "bv_ref": prev_close,
+                "bv_up_1": prev_close * 1.018,
+                "bv_dn_1": prev_close * 0.982,
+                "bv_up_2": prev_close * 1.036,
+                "bv_dn_2": prev_close * 0.964,
+                "hv252_daily_pct": pd.NA,
+            }
+        )
+    df = pd.DataFrame(rows).set_index("time").sort_index()
+    mark_source("EWZ VWAP Plotly", "stale", rows=len(df), message="Grafico EWZ renderizado pelo snapshot mercados_globais.", source="dashboard")
+    return df
+
+
 def render_ewz_vwap_vol_plotly_chart():
     df = get_ewz_vwap_plotly_data()
     if df.empty:
-        st.info("Grafico EWZ VWAP/Bandas Vol indisponivel agora. Coleta v3 tentou cache interno do dashboard, mercados_globais, Yahoo Chart e yfinance.")
+        df = build_ewz_plot_from_dashboard_snapshot()
+    if df.empty:
+        st.info("Grafico EWZ indisponivel: o snapshot mercados_globais nao trouxe EWZ nesta atualizacao.")
         return
 
     import plotly.graph_objects as go
