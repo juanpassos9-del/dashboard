@@ -2164,6 +2164,7 @@ def get_ewz_vwap_plotly_data():
             "EWZ",
             period="7d",
             interval="5m",
+            prepost=True,
             progress=False,
             auto_adjust=False,
             threads=False,
@@ -2231,6 +2232,12 @@ def get_ewz_vwap_plotly_data():
             return (cum_pv / cum_vol).ffill()
 
         df["price"] = df["Close"].astype(float)
+        df["market_phase"] = [
+            "Pre-market" if idx.time() < datetime.strptime("10:30", "%H:%M").time()
+            else "After-market" if idx.time() > datetime.strptime("17:00", "%H:%M").time()
+            else "Regular"
+            for idx in df.index
+        ]
         df["vwap_d"] = grouped_vwap(df["session_date"])
         df["vwap_w"] = grouped_vwap(df["week_key"])
         df["vwap_m"] = grouped_vwap(df["month_key"])
@@ -2252,8 +2259,8 @@ def get_ewz_vwap_plotly_data():
             df["hv252_daily_pct"] = pd.NA
             hv_message = "Historico diario insuficiente para HV252."
 
-        mark_source("EWZ VWAP Plotly", "ok", rows=len(df), message=f"EWZ 5m dia anterior + atual carregado. {hv_message}", source="yfinance")
-        return df[["price", "vwap_d", "vwap_w", "vwap_m", "bv_ref", "bv_up_1", "bv_dn_1", "bv_up_2", "bv_dn_2", "hv252_daily_pct"]]
+        mark_source("EWZ VWAP Plotly", "ok", rows=len(df), message=f"EWZ 5m dia anterior + atual com pre-market carregado. {hv_message}", source="yfinance")
+        return df[["price", "market_phase", "vwap_d", "vwap_w", "vwap_m", "bv_ref", "bv_up_1", "bv_dn_1", "bv_up_2", "bv_dn_2", "hv252_daily_pct"]]
     except Exception as exc:
         mark_source("EWZ VWAP Plotly", "error", message=str(exc), source="yfinance")
         return pd.DataFrame()
@@ -2268,7 +2275,10 @@ def render_ewz_vwap_vol_plotly_chart():
     import plotly.graph_objects as go
 
     plot_df = df.reset_index(drop=False).copy()
-    hover_labels = [idx.strftime("%d/%m %H:%M") if hasattr(idx, "strftime") else str(idx) for idx in df.index]
+    hover_labels = [
+        f"{idx.strftime('%d/%m %H:%M') if hasattr(idx, 'strftime') else str(idx)} | {phase}"
+        for idx, phase in zip(df.index, df["market_phase"].fillna(""))
+    ]
     x_values = list(range(len(plot_df)))
     tick_step = max(1, len(plot_df) // 8)
     tickvals = list(range(0, len(plot_df), tick_step))
@@ -2291,7 +2301,7 @@ def render_ewz_vwap_vol_plotly_chart():
         fig.add_trace(go.Scatter(x=x_values, y=plot_df[col], mode="lines", name=name, line=dict(color=color, width=1.1, dash=dash), customdata=hover_labels, hovertemplate=f"{name}<br>%{{customdata}}<br>%{{y:.2f}}<extra></extra>"))
 
     fig.update_layout(
-        title=dict(text="EWZ 5m | VWAPs + Bandas Vol HV252 | Dia anterior e atual", x=0.01, font=dict(size=16, color="#F8FAFC")),
+        title=dict(text="EWZ 5m | Pre-market + Regular | VWAPs + Bandas Vol HV252", x=0.01, font=dict(size=16, color="#F8FAFC")),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#07111F",
         font=dict(family='"Roboto Mono", monospace', color="#CBD5E1"),
