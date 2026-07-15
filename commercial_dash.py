@@ -2160,16 +2160,24 @@ def get_ewz_vwap_plotly_data():
     try:
         import yfinance as yf
 
-        intraday_df = yf.download(
-            "EWZ",
-            period="7d",
-            interval="5m",
-            prepost=True,
-            progress=False,
-            auto_adjust=False,
-            threads=False,
-            timeout=10,
-        )
+        def download_intraday(prepost: bool):
+            return yf.download(
+                "EWZ",
+                period="7d",
+                interval="5m",
+                prepost=prepost,
+                progress=False,
+                auto_adjust=False,
+                threads=False,
+                timeout=15,
+            )
+
+        intraday_df = download_intraday(prepost=True)
+        used_prepost = True
+        if intraday_df is None or intraday_df.empty:
+            intraday_df = download_intraday(prepost=False)
+            used_prepost = False
+
         daily_df = yf.download(
             "EWZ",
             period="420d",
@@ -2229,12 +2237,14 @@ def get_ewz_vwap_plotly_data():
             pv = typical * volume.fillna(0)
             cum_pv = pv.groupby(group_key).cumsum()
             cum_vol = volume.fillna(0).groupby(group_key).cumsum().replace(0, pd.NA)
-            return (cum_pv / cum_vol).ffill()
+            return (cum_pv / cum_vol).groupby(group_key).ffill()
 
         df["price"] = df["Close"].astype(float)
+        regular_open = datetime.strptime("10:30", "%H:%M").time()
+        regular_close = datetime.strptime("17:00", "%H:%M").time()
         df["market_phase"] = [
-            "Pre-market" if idx.time() < datetime.strptime("10:30", "%H:%M").time()
-            else "After-market" if idx.time() > datetime.strptime("17:00", "%H:%M").time()
+            "Pre-market" if idx.time() < regular_open
+            else "After-market" if idx.time() > regular_close
             else "Regular"
             for idx in df.index
         ]
@@ -2259,7 +2269,8 @@ def get_ewz_vwap_plotly_data():
             df["hv252_daily_pct"] = pd.NA
             hv_message = "Historico diario insuficiente para HV252."
 
-        mark_source("EWZ VWAP Plotly", "ok", rows=len(df), message=f"EWZ 5m dia anterior + atual com pre-market carregado. {hv_message}", source="yfinance")
+        session_msg = "com pre-market" if used_prepost else "regular fallback sem pre-market"
+        mark_source("EWZ VWAP Plotly", "ok", rows=len(df), message=f"EWZ 5m dia anterior + atual {session_msg} carregado. {hv_message}", source="yfinance")
         return df[["price", "market_phase", "vwap_d", "vwap_w", "vwap_m", "bv_ref", "bv_up_1", "bv_dn_1", "bv_up_2", "bv_dn_2", "hv252_daily_pct"]]
     except Exception as exc:
         mark_source("EWZ VWAP Plotly", "error", message=str(exc), source="yfinance")
@@ -2269,7 +2280,7 @@ def get_ewz_vwap_plotly_data():
 def render_ewz_vwap_vol_plotly_chart():
     df = get_ewz_vwap_plotly_data()
     if df.empty:
-        st.info("Grafico EWZ VWAP/Bandas Vol indisponivel agora.")
+        st.info("Grafico EWZ VWAP/Bandas Vol indisponivel agora. Tente novamente em instantes; a coleta usa Yahoo Finance com fallback para sessao regular quando o pre-market nao responde.")
         return
 
     import plotly.graph_objects as go
