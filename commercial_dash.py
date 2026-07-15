@@ -2351,6 +2351,98 @@ def get_ewz_vwap_plotly_data():
             except Exception:
                 return pd.DataFrame()
 
+        def parse_vendor_values(values, assume_tz: str = "America/New_York") -> pd.DataFrame:
+            if not values:
+                return pd.DataFrame()
+            rows = []
+            tzinfo = ZoneInfo(assume_tz)
+            for item in values:
+                try:
+                    raw_time = item.get("datetime") or item.get("time")
+                    ts = pd.to_datetime(raw_time, errors="coerce")
+                    if pd.isna(ts):
+                        continue
+                    if ts.tzinfo is None:
+                        ts = ts.tz_localize(tzinfo)
+                    else:
+                        ts = ts.tz_convert(tzinfo)
+                    rows.append(
+                        {
+                            "time": ts,
+                            "Open": to_float(item.get("open")),
+                            "High": to_float(item.get("high")),
+                            "Low": to_float(item.get("low")),
+                            "Close": to_float(item.get("close")),
+                            "Volume": to_float(item.get("volume")) or 0.0,
+                        }
+                    )
+                except Exception:
+                    continue
+            if not rows:
+                return pd.DataFrame()
+            out = pd.DataFrame(rows).dropna(subset=["time", "High", "Low", "Close"])
+            if out.empty:
+                return pd.DataFrame()
+            return out.set_index("time").sort_index()
+
+        def twelve_data_intraday() -> pd.DataFrame:
+            api_key = _get_secret_value("TWELVE_DATA_API_KEY")
+            if not api_key:
+                return pd.DataFrame()
+            try:
+                resp = requests.get(
+                    "https://api.twelvedata.com/time_series",
+                    params={
+                        "symbol": "EWZ",
+                        "interval": "5min",
+                        "outputsize": 500,
+                        "timezone": "America/New_York",
+                        "apikey": api_key,
+                    },
+                    timeout=10,
+                )
+                payload = resp.json()
+                if payload.get("status") == "error":
+                    return pd.DataFrame()
+                return parse_vendor_values(payload.get("values"), assume_tz="America/New_York")
+            except Exception:
+                return pd.DataFrame()
+
+        def alpha_vantage_intraday() -> pd.DataFrame:
+            api_key = _get_secret_value("ALPHA_VANTAGE_API_KEY")
+            if not api_key:
+                return pd.DataFrame()
+            try:
+                resp = requests.get(
+                    "https://www.alphavantage.co/query",
+                    params={
+                        "function": "TIME_SERIES_INTRADAY",
+                        "symbol": "EWZ",
+                        "interval": "5min",
+                        "outputsize": "full",
+                        "apikey": api_key,
+                    },
+                    timeout=10,
+                )
+                payload = resp.json()
+                series = payload.get("Time Series (5min)")
+                if not isinstance(series, dict):
+                    return pd.DataFrame()
+                values = [
+                    {
+                        "datetime": raw_ts,
+                        "open": row.get("1. open"),
+                        "high": row.get("2. high"),
+                        "low": row.get("3. low"),
+                        "close": row.get("4. close"),
+                        "volume": row.get("5. volume"),
+                    }
+                    for raw_ts, row in series.items()
+                ]
+                return parse_vendor_values(values, assume_tz="America/New_York")
+            except Exception:
+                return pd.DataFrame()
+
         def download_intraday(prepost: bool):
             try:
                 import yfinance as yf
@@ -2385,23 +2477,37 @@ def get_ewz_vwap_plotly_data():
                 return pd.DataFrame()
 
         intraday_df = yahoo_chart_dataframe("EWZ", "5m", "10d", include_prepost=True)
+        source_label = "Yahoo Chart prepost"
         used_prepost = True
         if intraday_df is None or intraday_df.empty:
             intraday_df = yahoo_chart_dataframe("EWZ", "5m", "10d", include_prepost=False)
+            source_label = "Yahoo Chart regular"
             used_prepost = False
         if intraday_df is None or intraday_df.empty:
             intraday_df = download_intraday(prepost=True)
+            source_label = "yfinance prepost"
             used_prepost = True
         if intraday_df is None or intraday_df.empty:
             intraday_df = download_intraday(prepost=False)
+            source_label = "yfinance regular"
+            used_prepost = False
+        if intraday_df is None or intraday_df.empty:
+            intraday_df = twelve_data_intraday()
+            source_label = "Twelve Data"
+            used_prepost = False
+        if intraday_df is None or intraday_df.empty:
+            intraday_df = alpha_vantage_intraday()
+            source_label = "Alpha Vantage"
             used_prepost = False
         if intraday_df is not None and not intraday_df.empty:
-            write_dashboard_ohlcv_cache(intraday_df, "Yahoo/yfinance")
+            write_dashboard_ohlcv_cache(intraday_df, source_label)
         if intraday_df is None or intraday_df.empty:
             intraday_df = read_dashboard_ohlcv_cache()
+            source_label = "Dashboard cache"
             used_prepost = False
         if intraday_df is None or intraday_df.empty:
             intraday_df = ewz_snapshot_from_dashboard()
+            source_label = "Dashboard snapshot"
             used_prepost = False
 
         daily_df = yahoo_chart_dataframe("EWZ", "1d", "420d", include_prepost=False)
@@ -2493,8 +2599,8 @@ def get_ewz_vwap_plotly_data():
             df["hv252_daily_pct"] = pd.NA
             hv_message = "Historico diario insuficiente para HV252."
 
-        session_msg = "com pre-market" if used_prepost else "regular fallback sem pre-market"
-        mark_source("EWZ VWAP Plotly", "ok", rows=len(df), message=f"EWZ 5m dia anterior + atual {session_msg} carregado. {hv_message}", source="yfinance")
+        session_msg = "com pre-market" if used_prepost else "sem pre-market"
+        mark_source("EWZ VWAP Plotly", "ok", rows=len(df), message=f"EWZ 5m {source_label} {session_msg} carregado. {hv_message}", source=source_label)
         return df[["price", "market_phase", "vwap_d", "vwap_w", "vwap_m", "bv_ref", "bv_up_1", "bv_dn_1", "bv_up_2", "bv_dn_2", "hv252_daily_pct"]]
     except Exception as exc:
         mark_source("EWZ VWAP Plotly", "error", message=str(exc), source="yfinance")
