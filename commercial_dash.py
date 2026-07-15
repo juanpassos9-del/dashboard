@@ -2757,8 +2757,99 @@ def build_ewz_plot_from_dashboard_snapshot() -> pd.DataFrame:
     return df
 
 
+def get_ewz_quote_from_dashboard() -> dict:
+    def to_float(value):
+        try:
+            if value is None or value is pd.NA:
+                return None
+            numeric = float(value)
+            if math.isnan(numeric) or math.isinf(numeric):
+                return None
+            return numeric
+        except Exception:
+            return None
+
+    payloads = []
+    try:
+        payloads.append(get_global_markets_data())
+    except Exception:
+        pass
+    for path in ("mercados_globais.json", os.path.join(LOCAL_TMP_DIR, "mercados_globais.json")):
+        try:
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    payloads.append(json.load(f))
+        except Exception:
+            continue
+
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        categories = payload.get("categories", {})
+        for items in categories.values():
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if str(item.get("symbol", "")).upper() == "EWZ" or "EWZ" in str(item.get("name", "")).upper():
+                    return {
+                        "price": to_float(item.get("price")),
+                        "prev_close": to_float(item.get("prev_close")),
+                        "high": to_float(item.get("high")),
+                        "low": to_float(item.get("low")),
+                        "source_timestamp": item.get("source_timestamp"),
+                    }
+    return {}
+
+
+def build_ewz_plot_from_comparative_series() -> pd.DataFrame:
+    quote = get_ewz_quote_from_dashboard()
+    current_price = quote.get("price")
+    if current_price is None:
+        return pd.DataFrame()
+
+    comp_df = get_terminal_global_line_chart_data(tuple({"EWZ": "EWZ"}.items()))
+    if comp_df.empty or "EWZ" not in comp_df.columns:
+        return pd.DataFrame()
+
+    ewz_norm = pd.to_numeric(comp_df["EWZ"], errors="coerce").dropna()
+    if ewz_norm.empty:
+        return pd.DataFrame()
+
+    last_norm = float(ewz_norm.iloc[-1])
+    base_price = current_price / (1.0 + (last_norm / 100.0)) if abs(last_norm) < 95 else current_price
+    prices = base_price * (1.0 + (ewz_norm / 100.0))
+    prev_close = quote.get("prev_close") or float(prices.iloc[0])
+
+    session_values = {}
+    rows = []
+    for ts, value in prices.items():
+        session_values.setdefault(ts.date(), []).append(float(value))
+        vwap_proxy = float(pd.Series(session_values[ts.date()]).expanding().mean().iloc[-1])
+        rows.append(
+            {
+                "time": ts,
+                "price": float(value),
+                "market_phase": "Comparativo EWZ",
+                "vwap_d": vwap_proxy,
+                "vwap_w": vwap_proxy,
+                "vwap_m": vwap_proxy,
+                "bv_ref": prev_close,
+                "bv_up_1": prev_close * 1.018,
+                "bv_dn_1": prev_close * 0.982,
+                "bv_up_2": prev_close * 1.036,
+                "bv_dn_2": prev_close * 0.964,
+                "hv252_daily_pct": pd.NA,
+            }
+        )
+    out = pd.DataFrame(rows).set_index("time").sort_index()
+    mark_source("EWZ VWAP Plotly", "stale", rows=len(out), message="Grafico EWZ alinhado ao comparativo intraday.", source="dashboard comparative")
+    return out
+
+
 def render_ewz_vwap_vol_plotly_chart():
     df = get_ewz_vwap_plotly_data()
+    if df.empty:
+        df = build_ewz_plot_from_comparative_series()
     if df.empty:
         df = build_ewz_plot_from_dashboard_snapshot()
     if df.empty:
@@ -2780,7 +2871,9 @@ def render_ewz_vwap_vol_plotly_chart():
     ticktext = [hover_labels[i] for i in tickvals]
 
     fig = go.Figure()
-    snapshot_mode = bool(df["market_phase"].astype(str).str.contains("Dashboard snapshot", na=False).any())
+    phase_text = df["market_phase"].astype(str)
+    snapshot_mode = bool(phase_text.str.contains("Dashboard snapshot", na=False).any())
+    comparative_mode = bool(phase_text.str.contains("Comparativo EWZ", na=False).any())
     fig.add_trace(go.Scatter(x=x_values, y=plot_df["price"], mode="lines", name="EWZ", line=dict(color="#F8FAFC", width=2.4), customdata=hover_labels, hovertemplate="EWZ<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
     fig.add_trace(go.Scatter(x=x_values, y=plot_df["vwap_d"], mode="lines", name="VWAP D", line=dict(color="#FACC15", width=1.8), customdata=hover_labels, hovertemplate="VWAP D<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
     fig.add_trace(go.Scatter(x=x_values, y=plot_df["vwap_w"], mode="lines", name="VWAP W", line=dict(color="#38BDF8", width=1.5), customdata=hover_labels, hovertemplate="VWAP W<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
@@ -2795,7 +2888,7 @@ def render_ewz_vwap_vol_plotly_chart():
         fig.add_trace(go.Scatter(x=x_values, y=plot_df[col], mode="lines", name=name, line=dict(color=color, width=1.1, dash=dash), customdata=hover_labels, hovertemplate=f"{name}<br>%{{customdata}}<br>%{{y:.2f}}<extra></extra>"))
 
     fig.update_layout(
-        title=dict(text=("EWZ | Snapshot do dashboard + Bandas Vol" if snapshot_mode else "EWZ 5m | Pre-market + Regular | VWAPs + Bandas Vol HV252"), x=0.01, font=dict(size=16, color="#F8FAFC")),
+        title=dict(text=("EWZ | Comparativo intraday alinhado a cotacao + Bandas Vol" if comparative_mode else "EWZ | Snapshot do dashboard + Bandas Vol" if snapshot_mode else "EWZ 5m | Pre-market + Regular | VWAPs + Bandas Vol HV252"), x=0.01, font=dict(size=16, color="#F8FAFC")),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#07111F",
         font=dict(family='"Roboto Mono", monospace', color="#CBD5E1"),
@@ -2806,9 +2899,9 @@ def render_ewz_vwap_vol_plotly_chart():
         xaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, title=None, tickmode="array", tickvals=tickvals, ticktext=ticktext),
         yaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, title="Preco EWZ"),
     )
-    if snapshot_mode:
+    if snapshot_mode or comparative_mode:
         fig.add_annotation(
-            text="Fallback visual baseado em mercados_globais: preço, máxima, mínima e fechamento anterior.",
+            text=("Fallback baseado no grafico comparativo EWZ, convertido para preco pela cotacao atual do dashboard." if comparative_mode else "Fallback visual baseado em mercados_globais: preço, máxima, mínima e fechamento anterior."),
             xref="paper",
             yref="paper",
             x=0.01,
