@@ -2160,10 +2160,46 @@ def get_ewz_vwap_plotly_data():
     try:
         import yfinance as yf
 
+        def yahoo_chart_dataframe(symbol: str, interval: str, range_value: str, include_prepost: bool = False) -> pd.DataFrame:
+            try:
+                resp = requests.get(
+                    f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+                    params={
+                        "interval": interval,
+                        "range": range_value,
+                        "includePrePost": "true" if include_prepost else "false",
+                        "events": "history",
+                    },
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    timeout=12,
+                )
+                resp.raise_for_status()
+                payload = resp.json()
+                result = (payload.get("chart", {}).get("result") or [None])[0]
+                if not result:
+                    return pd.DataFrame()
+                timestamps = result.get("timestamp") or []
+                quote = ((result.get("indicators", {}) or {}).get("quote") or [{}])[0]
+                if not timestamps or not quote:
+                    return pd.DataFrame()
+                out = pd.DataFrame(
+                    {
+                        "Open": quote.get("open", []),
+                        "High": quote.get("high", []),
+                        "Low": quote.get("low", []),
+                        "Close": quote.get("close", []),
+                        "Volume": quote.get("volume", []),
+                    },
+                    index=pd.to_datetime(timestamps, unit="s", utc=True),
+                )
+                return out.dropna(subset=["High", "Low", "Close"])
+            except Exception:
+                return pd.DataFrame()
+
         def download_intraday(prepost: bool):
             return yf.download(
                 "EWZ",
-                period="7d",
+                period="10d",
                 interval="5m",
                 prepost=prepost,
                 progress=False,
@@ -2177,6 +2213,12 @@ def get_ewz_vwap_plotly_data():
         if intraday_df is None or intraday_df.empty:
             intraday_df = download_intraday(prepost=False)
             used_prepost = False
+        if intraday_df is None or intraday_df.empty:
+            intraday_df = yahoo_chart_dataframe("EWZ", "5m", "10d", include_prepost=True)
+            used_prepost = True
+        if intraday_df is None or intraday_df.empty:
+            intraday_df = yahoo_chart_dataframe("EWZ", "5m", "10d", include_prepost=False)
+            used_prepost = False
 
         daily_df = yf.download(
             "EWZ",
@@ -2187,8 +2229,10 @@ def get_ewz_vwap_plotly_data():
             threads=False,
             timeout=10,
         )
+        if daily_df is None or daily_df.empty:
+            daily_df = yahoo_chart_dataframe("EWZ", "1d", "420d", include_prepost=False)
         if intraday_df is None or intraday_df.empty:
-            mark_source("EWZ VWAP Plotly", "error", message="Yahoo Finance retornou vazio.", source="yfinance")
+            mark_source("EWZ VWAP Plotly", "error", message="Yahoo Finance/yahoo chart retornaram vazio.", source="yfinance")
             return pd.DataFrame()
         if isinstance(intraday_df.columns, pd.MultiIndex):
             intraday_df.columns = intraday_df.columns.get_level_values(0)
