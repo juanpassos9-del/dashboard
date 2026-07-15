@@ -2874,12 +2874,23 @@ def render_ewz_vwap_vol_plotly_chart():
     phase_text = df["market_phase"].astype(str)
     snapshot_mode = bool(phase_text.str.contains("Dashboard snapshot", na=False).any())
     comparative_mode = bool(phase_text.str.contains("Comparativo EWZ", na=False).any())
-    focus_cols = ["price", "vwap_d", "vwap_w", "vwap_m", "bv_ref"]
+    if snapshot_mode or comparative_mode:
+        price_ref = pd.to_numeric(plot_df["bv_ref"], errors="coerce").dropna()
+        price_std = pd.to_numeric(plot_df["price"], errors="coerce").dropna().std()
+        ref_value = float(price_ref.iloc[-1]) if not price_ref.empty else None
+        if ref_value and pd.notna(price_std):
+            band_step = max(float(price_std) * 1.15, ref_value * 0.0045, 0.12)
+            plot_df["bv_up_1"] = ref_value + band_step
+            plot_df["bv_dn_1"] = ref_value - band_step
+            plot_df["bv_up_2"] = ref_value + band_step * 2
+            plot_df["bv_dn_2"] = ref_value - band_step * 2
+
+    focus_cols = ["price", "vwap_d", "vwap_w", "vwap_m", "bv_ref", "bv_up_1", "bv_dn_1"]
     focus_values = pd.to_numeric(plot_df[focus_cols].stack(), errors="coerce").dropna()
     if not focus_values.empty:
         y_min = float(focus_values.min())
         y_max = float(focus_values.max())
-        pad = max((y_max - y_min) * 0.65, y_max * 0.003, 0.08)
+        pad = max((y_max - y_min) * 0.18, y_max * 0.002, 0.05)
         y_range = [y_min - pad, y_max + pad]
     else:
         y_range = None
@@ -2895,7 +2906,8 @@ def render_ewz_vwap_vol_plotly_chart():
         ("bv_dn_1", "HV252 -1", "#34D399", "dot"),
         ("bv_dn_2", "HV252 -2", "#10B981", "dash"),
     ]:
-        fig.add_trace(go.Scatter(x=x_values, y=plot_df[col], mode="lines", name=name, line=dict(color=color, width=0.9, dash=dash), opacity=0.42 if (snapshot_mode or comparative_mode) else 0.75, customdata=hover_labels, hovertemplate=f"{name}<br>%{{customdata}}<br>%{{y:.2f}}<extra></extra>"))
+        is_second_band = name.endswith("2")
+        fig.add_trace(go.Scatter(x=x_values, y=plot_df[col], mode="lines", name=name, line=dict(color=color, width=1.35 if not is_second_band else 1.0, dash=dash), opacity=0.72 if not is_second_band else 0.35, customdata=hover_labels, hovertemplate=f"{name}<br>%{{customdata}}<br>%{{y:.2f}}<extra></extra>"))
 
     fig.update_layout(
         title=dict(text=("EWZ | Comparativo intraday alinhado a cotacao + Bandas Vol" if comparative_mode else "EWZ | Snapshot do dashboard + Bandas Vol" if snapshot_mode else "EWZ 5m | Pre-market + Regular | VWAPs + Bandas Vol HV252"), x=0.01, font=dict(size=16, color="#F8FAFC")),
