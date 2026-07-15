@@ -2158,8 +2158,6 @@ def render_terminal_global_line_chart():
 @st.cache_data(ttl=120, show_spinner=False)
 def get_ewz_vwap_plotly_data():
     try:
-        import yfinance as yf
-
         def yahoo_chart_dataframe(symbol: str, interval: str, range_value: str, include_prepost: bool = False) -> pd.DataFrame:
             try:
                 resp = requests.get(
@@ -2197,42 +2195,55 @@ def get_ewz_vwap_plotly_data():
                 return pd.DataFrame()
 
         def download_intraday(prepost: bool):
-            return yf.download(
-                "EWZ",
-                period="10d",
-                interval="5m",
-                prepost=prepost,
-                progress=False,
-                auto_adjust=False,
-                threads=False,
-                timeout=15,
-            )
+            try:
+                import yfinance as yf
 
-        intraday_df = download_intraday(prepost=True)
+                return yf.download(
+                    "EWZ",
+                    period="10d",
+                    interval="5m",
+                    prepost=prepost,
+                    progress=False,
+                    auto_adjust=False,
+                    threads=False,
+                    timeout=15,
+                )
+            except Exception:
+                return pd.DataFrame()
+
+        def download_daily():
+            try:
+                import yfinance as yf
+
+                return yf.download(
+                    "EWZ",
+                    period="420d",
+                    interval="1d",
+                    progress=False,
+                    auto_adjust=False,
+                    threads=False,
+                    timeout=10,
+                )
+            except Exception:
+                return pd.DataFrame()
+
+        intraday_df = yahoo_chart_dataframe("EWZ", "5m", "10d", include_prepost=True)
         used_prepost = True
-        if intraday_df is None or intraday_df.empty:
-            intraday_df = download_intraday(prepost=False)
-            used_prepost = False
-        if intraday_df is None or intraday_df.empty:
-            intraday_df = yahoo_chart_dataframe("EWZ", "5m", "10d", include_prepost=True)
-            used_prepost = True
         if intraday_df is None or intraday_df.empty:
             intraday_df = yahoo_chart_dataframe("EWZ", "5m", "10d", include_prepost=False)
             used_prepost = False
-
-        daily_df = yf.download(
-            "EWZ",
-            period="420d",
-            interval="1d",
-            progress=False,
-            auto_adjust=False,
-            threads=False,
-            timeout=10,
-        )
-        if daily_df is None or daily_df.empty:
-            daily_df = yahoo_chart_dataframe("EWZ", "1d", "420d", include_prepost=False)
         if intraday_df is None or intraday_df.empty:
-            mark_source("EWZ VWAP Plotly", "error", message="Yahoo Finance/yahoo chart retornaram vazio.", source="yfinance")
+            intraday_df = download_intraday(prepost=True)
+            used_prepost = True
+        if intraday_df is None or intraday_df.empty:
+            intraday_df = download_intraday(prepost=False)
+            used_prepost = False
+
+        daily_df = yahoo_chart_dataframe("EWZ", "1d", "420d", include_prepost=False)
+        if daily_df is None or daily_df.empty:
+            daily_df = download_daily()
+        if intraday_df is None or intraday_df.empty:
+            mark_source("EWZ VWAP Plotly", "error", message="Yahoo Chart/yfinance retornaram vazio.", source="yahoo")
             return pd.DataFrame()
         if isinstance(intraday_df.columns, pd.MultiIndex):
             intraday_df.columns = intraday_df.columns.get_level_values(0)
@@ -2324,7 +2335,7 @@ def get_ewz_vwap_plotly_data():
 def render_ewz_vwap_vol_plotly_chart():
     df = get_ewz_vwap_plotly_data()
     if df.empty:
-        st.info("Grafico EWZ VWAP/Bandas Vol indisponivel agora. Tente novamente em instantes; a coleta usa Yahoo Finance com fallback para sessao regular quando o pre-market nao responde.")
+        st.info("Grafico EWZ VWAP/Bandas Vol indisponivel agora. Coleta v2 tentou Yahoo Chart direto e yfinance; se persistir, reinicie o app para limpar cache antigo.")
         return
 
     import plotly.graph_objects as go
