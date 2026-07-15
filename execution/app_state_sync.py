@@ -25,6 +25,7 @@ APP_STATE_ALLOWED_KEYS = {
     "market_report",
     "market_report_daily",
     "mercados_globais",
+    "ewz_plotly_ohlcv",
     "risk_manual_trades",
 }
 

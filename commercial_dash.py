@@ -90,6 +90,7 @@ APP_STATE_ALLOWED_KEYS = {
     "market_report",
     "market_report_daily",
     "mercados_globais",
+    "ewz_plotly_ohlcv",
     "regime_juros",
     "risk_manual_trades",
 }
@@ -2158,6 +2159,151 @@ def render_terminal_global_line_chart():
 @st.cache_data(ttl=120, show_spinner=False)
 def get_ewz_vwap_plotly_data():
     try:
+        cache_key = "ewz_plotly_ohlcv"
+        local_cache_path = os.path.join(LOCAL_TMP_DIR, "ewz_plotly_ohlcv.json")
+
+        def normalize_ohlcv_columns(source: pd.DataFrame) -> pd.DataFrame:
+            if source is None or source.empty:
+                return pd.DataFrame()
+            df_norm = source.copy()
+            if isinstance(df_norm.columns, pd.MultiIndex):
+                df_norm.columns = df_norm.columns.get_level_values(0)
+            required_cols = ["High", "Low", "Close"]
+            if any(col not in df_norm.columns for col in required_cols):
+                return pd.DataFrame()
+            if "Volume" not in df_norm.columns:
+                df_norm["Volume"] = 0
+            return df_norm.dropna(subset=["High", "Low", "Close"]).copy()
+
+        def ohlcv_to_payload(source: pd.DataFrame, source_label: str) -> dict:
+            df_payload = normalize_ohlcv_columns(source)
+            if df_payload.empty:
+                return {}
+            idx = pd.to_datetime(df_payload.index)
+            if getattr(idx, "tz", None) is None:
+                idx = idx.tz_localize("UTC")
+            else:
+                idx = idx.tz_convert("UTC")
+            df_payload.index = idx
+            records = []
+            for ts, row in df_payload.tail(700).iterrows():
+                records.append(
+                    {
+                        "time": ts.isoformat(),
+                        "open": _safe_float(row.get("Open")),
+                        "high": _safe_float(row.get("High")),
+                        "low": _safe_float(row.get("Low")),
+                        "close": _safe_float(row.get("Close")),
+                        "volume": _safe_float(row.get("Volume")) or 0.0,
+                    }
+                )
+            return {
+                "symbol": "EWZ",
+                "interval": "5m",
+                "source": source_label,
+                "updated_at": datetime.now(ZoneInfo("America/Sao_Paulo")).isoformat(),
+                "records": records,
+            }
+
+        def payload_to_ohlcv(payload: Any) -> pd.DataFrame:
+            if not isinstance(payload, dict):
+                return pd.DataFrame()
+            records = payload.get("records") or []
+            if not records:
+                return pd.DataFrame()
+            rows = []
+            for item in records:
+                try:
+                    rows.append(
+                        {
+                            "time": pd.to_datetime(item.get("time"), utc=True),
+                            "Open": _safe_float(item.get("open")),
+                            "High": _safe_float(item.get("high")),
+                            "Low": _safe_float(item.get("low")),
+                            "Close": _safe_float(item.get("close")),
+                            "Volume": _safe_float(item.get("volume")) or 0.0,
+                        }
+                    )
+                except Exception:
+                    continue
+            if not rows:
+                return pd.DataFrame()
+            out = pd.DataFrame(rows).dropna(subset=["time", "High", "Low", "Close"])
+            if out.empty:
+                return pd.DataFrame()
+            return out.set_index("time").sort_index()
+
+        def read_dashboard_ohlcv_cache() -> pd.DataFrame:
+            for loader in (
+                lambda: fetch_app_state_cached(cache_key),
+                lambda: json.load(open(local_cache_path, "r", encoding="utf-8")) if os.path.exists(local_cache_path) else None,
+            ):
+                try:
+                    cached = payload_to_ohlcv(loader())
+                    if not cached.empty:
+                        return cached
+                except Exception:
+                    continue
+            return pd.DataFrame()
+
+        def write_dashboard_ohlcv_cache(source: pd.DataFrame, source_label: str) -> None:
+            payload = ohlcv_to_payload(source, source_label)
+            if not payload:
+                return
+            try:
+                os.makedirs(LOCAL_TMP_DIR, exist_ok=True)
+                with open(local_cache_path, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False)
+            except Exception:
+                pass
+            try:
+                sync_app_state_value(cache_key, payload)
+            except Exception:
+                pass
+
+        def ewz_snapshot_from_dashboard() -> pd.DataFrame:
+            try:
+                payload = fetch_app_state_cached("mercados_globais") or get_global_markets_data()
+                categories = payload.get("categories", {}) if isinstance(payload, dict) else {}
+                ewz_item = None
+                for items in categories.values():
+                    if not isinstance(items, list):
+                        continue
+                    for item in items:
+                        if str(item.get("symbol", "")).upper() == "EWZ" or "EWZ" in str(item.get("name", "")).upper():
+                            ewz_item = item
+                            break
+                    if ewz_item:
+                        break
+                if not ewz_item:
+                    return pd.DataFrame()
+                br_tz = ZoneInfo("America/Sao_Paulo")
+                source_ts = pd.to_datetime(ewz_item.get("source_timestamp"), utc=True, errors="coerce")
+                if pd.isna(source_ts):
+                    source_ts = pd.Timestamp(datetime.now(timezone.utc))
+                source_ts = source_ts.tz_convert(br_tz)
+                session_day = source_ts.date()
+                prev_close = _safe_float(ewz_item.get("prev_close")) or _safe_float(ewz_item.get("price"))
+                low = _safe_float(ewz_item.get("low")) or prev_close
+                high = _safe_float(ewz_item.get("high")) or prev_close
+                price = _safe_float(ewz_item.get("price")) or prev_close
+                points = [
+                    (datetime.combine(session_day, datetime.strptime("10:30", "%H:%M").time(), br_tz), prev_close),
+                    (datetime.combine(session_day, datetime.strptime("12:30", "%H:%M").time(), br_tz), low),
+                    (datetime.combine(session_day, datetime.strptime("15:00", "%H:%M").time(), br_tz), high),
+                    (source_ts.to_pydatetime(), price),
+                ]
+                rows = [
+                    {"time": ts, "Open": value, "High": value, "Low": value, "Close": value, "Volume": 0.0}
+                    for ts, value in points
+                    if value is not None
+                ]
+                if not rows:
+                    return pd.DataFrame()
+                return pd.DataFrame(rows).set_index("time").sort_index()
+            except Exception:
+                return pd.DataFrame()
+
         def yahoo_chart_dataframe(symbol: str, interval: str, range_value: str, include_prepost: bool = False) -> pd.DataFrame:
             try:
                 resp = requests.get(
@@ -2238,15 +2384,25 @@ def get_ewz_vwap_plotly_data():
         if intraday_df is None or intraday_df.empty:
             intraday_df = download_intraday(prepost=False)
             used_prepost = False
+        if intraday_df is not None and not intraday_df.empty:
+            write_dashboard_ohlcv_cache(intraday_df, "Yahoo/yfinance")
+        if intraday_df is None or intraday_df.empty:
+            intraday_df = read_dashboard_ohlcv_cache()
+            used_prepost = False
+        if intraday_df is None or intraday_df.empty:
+            intraday_df = ewz_snapshot_from_dashboard()
+            used_prepost = False
 
         daily_df = yahoo_chart_dataframe("EWZ", "1d", "420d", include_prepost=False)
         if daily_df is None or daily_df.empty:
             daily_df = download_daily()
         if intraday_df is None or intraday_df.empty:
-            mark_source("EWZ VWAP Plotly", "error", message="Yahoo Chart/yfinance retornaram vazio.", source="yahoo")
+            mark_source("EWZ VWAP Plotly", "error", message="Sem EWZ em Yahoo, cache interno ou mercados_globais.", source="dashboard")
             return pd.DataFrame()
-        if isinstance(intraday_df.columns, pd.MultiIndex):
-            intraday_df.columns = intraday_df.columns.get_level_values(0)
+        intraday_df = normalize_ohlcv_columns(intraday_df)
+        if intraday_df.empty:
+            mark_source("EWZ VWAP Plotly", "error", message="EWZ retornou sem colunas OHLC validas.", source="dashboard")
+            return pd.DataFrame()
         if daily_df is None or daily_df.empty:
             daily_df = pd.DataFrame()
         elif isinstance(daily_df.columns, pd.MultiIndex):
@@ -2292,7 +2448,9 @@ def get_ewz_vwap_plotly_data():
             pv = typical * volume.fillna(0)
             cum_pv = pv.groupby(group_key).cumsum()
             cum_vol = volume.fillna(0).groupby(group_key).cumsum().replace(0, pd.NA)
-            return (cum_pv / cum_vol).groupby(group_key).ffill()
+            volume_vwap = (cum_pv / cum_vol).groupby(group_key).ffill()
+            typical_mean = typical.groupby(group_key).expanding().mean().reset_index(level=0, drop=True)
+            return volume_vwap.fillna(typical_mean)
 
         df["price"] = df["Close"].astype(float)
         regular_open = datetime.strptime("10:30", "%H:%M").time()
@@ -2335,7 +2493,7 @@ def get_ewz_vwap_plotly_data():
 def render_ewz_vwap_vol_plotly_chart():
     df = get_ewz_vwap_plotly_data()
     if df.empty:
-        st.info("Grafico EWZ VWAP/Bandas Vol indisponivel agora. Coleta v2 tentou Yahoo Chart direto e yfinance; se persistir, reinicie o app para limpar cache antigo.")
+        st.info("Grafico EWZ VWAP/Bandas Vol indisponivel agora. Coleta v3 tentou cache interno do dashboard, mercados_globais, Yahoo Chart e yfinance.")
         return
 
     import plotly.graph_objects as go
