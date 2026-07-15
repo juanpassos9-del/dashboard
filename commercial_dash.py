@@ -2559,29 +2559,58 @@ def build_ewz_plot_from_dashboard_snapshot() -> pd.DataFrame:
     prev_close = to_float(ewz_item.get("prev_close")) or price
     high = to_float(ewz_item.get("high")) or price or prev_close
     low = to_float(ewz_item.get("low")) or price or prev_close
+    change_5m = to_float(ewz_item.get("change_5m")) or 0.0
     if price is None or prev_close is None:
         return pd.DataFrame()
 
     open_time = datetime.combine(session_day, datetime.strptime("10:30", "%H:%M").time(), br_tz)
-    mid_time = datetime.combine(session_day, datetime.strptime("12:30", "%H:%M").time(), br_tz)
-    late_time = datetime.combine(session_day, datetime.strptime("15:00", "%H:%M").time(), br_tz)
     end_time = source_ts.to_pydatetime()
-    points = [
-        (open_time, prev_close),
-        (mid_time, low),
-        (late_time, high),
-        (end_time, price),
-    ]
+    if end_time <= open_time:
+        open_time = end_time - timedelta(hours=2)
+
+    span_minutes = max(30, int((end_time - open_time).total_seconds() // 60))
+    low_position = 0.35 if price >= prev_close else 0.65
+    high_position = 0.72 if price >= prev_close else 0.28
+    anchor_minutes = sorted(
+        {
+            0: prev_close,
+            max(5, int(span_minutes * low_position)): low,
+            max(10, int(span_minutes * high_position)): high,
+            max(15, span_minutes - 5): price / (1 + (change_5m / 100.0)) if abs(change_5m) < 20 else price,
+            span_minutes: price,
+        }.items()
+    )
+
+    points = []
+    for minute in range(0, span_minutes + 1, 5):
+        left = anchor_minutes[0]
+        right = anchor_minutes[-1]
+        for pos in range(len(anchor_minutes) - 1):
+            if anchor_minutes[pos][0] <= minute <= anchor_minutes[pos + 1][0]:
+                left = anchor_minutes[pos]
+                right = anchor_minutes[pos + 1]
+                break
+        if right[0] == left[0]:
+            value = right[1]
+        else:
+            weight = (minute - left[0]) / (right[0] - left[0])
+            value = left[1] + (right[1] - left[1]) * weight
+        points.append((open_time + timedelta(minutes=minute), value))
+
     rows = []
+    values = [value for _, value in points]
+    cumulative = pd.Series(values).expanding().mean().tolist()
     for ts, value in sorted(points, key=lambda item: item[0]):
+        idx_pos = len(rows)
+        vwap_proxy = cumulative[idx_pos] if idx_pos < len(cumulative) else value
         rows.append(
             {
                 "time": ts,
                 "price": value,
-                "market_phase": "Dashboard",
-                "vwap_d": value,
-                "vwap_w": value,
-                "vwap_m": value,
+                "market_phase": "Dashboard snapshot",
+                "vwap_d": vwap_proxy,
+                "vwap_w": vwap_proxy,
+                "vwap_m": vwap_proxy,
                 "bv_ref": prev_close,
                 "bv_up_1": prev_close * 1.018,
                 "bv_dn_1": prev_close * 0.982,
@@ -2618,6 +2647,7 @@ def render_ewz_vwap_vol_plotly_chart():
     ticktext = [hover_labels[i] for i in tickvals]
 
     fig = go.Figure()
+    snapshot_mode = bool(df["market_phase"].astype(str).str.contains("Dashboard snapshot", na=False).any())
     fig.add_trace(go.Scatter(x=x_values, y=plot_df["price"], mode="lines", name="EWZ", line=dict(color="#F8FAFC", width=2.4), customdata=hover_labels, hovertemplate="EWZ<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
     fig.add_trace(go.Scatter(x=x_values, y=plot_df["vwap_d"], mode="lines", name="VWAP D", line=dict(color="#FACC15", width=1.8), customdata=hover_labels, hovertemplate="VWAP D<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
     fig.add_trace(go.Scatter(x=x_values, y=plot_df["vwap_w"], mode="lines", name="VWAP W", line=dict(color="#38BDF8", width=1.5), customdata=hover_labels, hovertemplate="VWAP W<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
@@ -2632,7 +2662,7 @@ def render_ewz_vwap_vol_plotly_chart():
         fig.add_trace(go.Scatter(x=x_values, y=plot_df[col], mode="lines", name=name, line=dict(color=color, width=1.1, dash=dash), customdata=hover_labels, hovertemplate=f"{name}<br>%{{customdata}}<br>%{{y:.2f}}<extra></extra>"))
 
     fig.update_layout(
-        title=dict(text="EWZ 5m | Pre-market + Regular | VWAPs + Bandas Vol HV252", x=0.01, font=dict(size=16, color="#F8FAFC")),
+        title=dict(text=("EWZ | Snapshot do dashboard + Bandas Vol" if snapshot_mode else "EWZ 5m | Pre-market + Regular | VWAPs + Bandas Vol HV252"), x=0.01, font=dict(size=16, color="#F8FAFC")),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#07111F",
         font=dict(family='"Roboto Mono", monospace', color="#CBD5E1"),
@@ -2643,6 +2673,20 @@ def render_ewz_vwap_vol_plotly_chart():
         xaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, title=None, tickmode="array", tickvals=tickvals, ticktext=ticktext),
         yaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, title="Preco EWZ"),
     )
+    if snapshot_mode:
+        fig.add_annotation(
+            text="Fallback visual baseado em mercados_globais: preço, máxima, mínima e fechamento anterior.",
+            xref="paper",
+            yref="paper",
+            x=0.01,
+            y=0.98,
+            showarrow=False,
+            font=dict(size=10, color="#FACC15"),
+            align="left",
+            bgcolor="rgba(15,23,42,.72)",
+            bordercolor="#334155",
+            borderwidth=1,
+        )
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
