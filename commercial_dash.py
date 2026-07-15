@@ -2563,46 +2563,73 @@ def build_ewz_plot_from_dashboard_snapshot() -> pd.DataFrame:
     if price is None or prev_close is None:
         return pd.DataFrame()
 
-    open_time = datetime.combine(session_day, datetime.strptime("10:30", "%H:%M").time(), br_tz)
-    end_time = source_ts.to_pydatetime()
-    if end_time <= open_time:
-        open_time = end_time - timedelta(hours=2)
+    regular_open = datetime.strptime("10:30", "%H:%M").time()
+    regular_close = datetime.strptime("17:00", "%H:%M").time()
+    current_open = datetime.combine(session_day, regular_open, br_tz)
+    current_close = datetime.combine(session_day, regular_close, br_tz)
+    end_time = min(max(source_ts.to_pydatetime(), current_open + timedelta(minutes=30)), current_close)
 
-    span_minutes = max(30, int((end_time - open_time).total_seconds() // 60))
-    low_position = 0.35 if price >= prev_close else 0.65
-    high_position = 0.72 if price >= prev_close else 0.28
-    anchor_minutes = sorted(
+    previous_day = session_day - timedelta(days=1)
+    while previous_day.weekday() >= 5:
+        previous_day -= timedelta(days=1)
+    previous_open = datetime.combine(previous_day, regular_open, br_tz)
+    previous_close_time = datetime.combine(previous_day, regular_close, br_tz)
+
+    daily_change = to_float(ewz_item.get("change"))
+    inferred_prev_open = prev_close * (1 - ((daily_change or 0.0) / 100.0) * 0.35)
+    current_pre_5m = price / (1 + (change_5m / 100.0)) if abs(change_5m) < 20 else price
+
+    def interpolate_session(start_time, end_session_time, anchors):
+        span_minutes = max(5, int((end_session_time - start_time).total_seconds() // 60))
+        anchor_minutes = sorted({max(0, min(span_minutes, minute)): value for minute, value in anchors.items()}.items())
+        out = []
+        for minute in range(0, span_minutes + 1, 5):
+            left = anchor_minutes[0]
+            right = anchor_minutes[-1]
+            for pos in range(len(anchor_minutes) - 1):
+                if anchor_minutes[pos][0] <= minute <= anchor_minutes[pos + 1][0]:
+                    left = anchor_minutes[pos]
+                    right = anchor_minutes[pos + 1]
+                    break
+            if right[0] == left[0]:
+                value = right[1]
+            else:
+                weight = (minute - left[0]) / (right[0] - left[0])
+                value = left[1] + (right[1] - left[1]) * weight
+            out.append((start_time + timedelta(minutes=minute), value))
+        return out
+
+    previous_points = interpolate_session(
+        previous_open,
+        previous_close_time,
+        {
+            0: inferred_prev_open,
+            90: min(inferred_prev_open, prev_close) * 0.997,
+            240: max(inferred_prev_open, prev_close) * 1.003,
+            390: prev_close,
+        },
+    )
+    current_span = max(30, int((end_time - current_open).total_seconds() // 60))
+    low_position = int(current_span * (0.35 if price >= prev_close else 0.65))
+    high_position = int(current_span * (0.72 if price >= prev_close else 0.28))
+    current_points = interpolate_session(
+        current_open,
+        end_time,
         {
             0: prev_close,
-            max(5, int(span_minutes * low_position)): low,
-            max(10, int(span_minutes * high_position)): high,
-            max(15, span_minutes - 5): price / (1 + (change_5m / 100.0)) if abs(change_5m) < 20 else price,
-            span_minutes: price,
-        }.items()
+            low_position: low,
+            high_position: high,
+            max(5, current_span - 5): current_pre_5m,
+            current_span: price,
+        },
     )
-
-    points = []
-    for minute in range(0, span_minutes + 1, 5):
-        left = anchor_minutes[0]
-        right = anchor_minutes[-1]
-        for pos in range(len(anchor_minutes) - 1):
-            if anchor_minutes[pos][0] <= minute <= anchor_minutes[pos + 1][0]:
-                left = anchor_minutes[pos]
-                right = anchor_minutes[pos + 1]
-                break
-        if right[0] == left[0]:
-            value = right[1]
-        else:
-            weight = (minute - left[0]) / (right[0] - left[0])
-            value = left[1] + (right[1] - left[1]) * weight
-        points.append((open_time + timedelta(minutes=minute), value))
+    points = previous_points + current_points
 
     rows = []
-    values = [value for _, value in points]
-    cumulative = pd.Series(values).expanding().mean().tolist()
+    session_values = {}
     for ts, value in sorted(points, key=lambda item: item[0]):
-        idx_pos = len(rows)
-        vwap_proxy = cumulative[idx_pos] if idx_pos < len(cumulative) else value
+        session_values.setdefault(ts.date(), []).append(value)
+        vwap_proxy = float(pd.Series(session_values[ts.date()]).expanding().mean().iloc[-1])
         rows.append(
             {
                 "time": ts,
