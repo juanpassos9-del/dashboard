@@ -2162,6 +2162,17 @@ def get_ewz_vwap_plotly_data():
         cache_key = "ewz_plotly_ohlcv"
         local_cache_path = os.path.join(LOCAL_TMP_DIR, "ewz_plotly_ohlcv.json")
 
+        def to_float(value):
+            try:
+                if value is None or value is pd.NA:
+                    return None
+                numeric = float(value)
+                if math.isnan(numeric) or math.isinf(numeric):
+                    return None
+                return numeric
+            except Exception:
+                return None
+
         def normalize_ohlcv_columns(source: pd.DataFrame) -> pd.DataFrame:
             if source is None or source.empty:
                 return pd.DataFrame()
@@ -2190,11 +2201,11 @@ def get_ewz_vwap_plotly_data():
                 records.append(
                     {
                         "time": ts.isoformat(),
-                        "open": _safe_float(row.get("Open")),
-                        "high": _safe_float(row.get("High")),
-                        "low": _safe_float(row.get("Low")),
-                        "close": _safe_float(row.get("Close")),
-                        "volume": _safe_float(row.get("Volume")) or 0.0,
+                        "open": to_float(row.get("Open")),
+                        "high": to_float(row.get("High")),
+                        "low": to_float(row.get("Low")),
+                        "close": to_float(row.get("Close")),
+                        "volume": to_float(row.get("Volume")) or 0.0,
                     }
                 )
             return {
@@ -2217,11 +2228,11 @@ def get_ewz_vwap_plotly_data():
                     rows.append(
                         {
                             "time": pd.to_datetime(item.get("time"), utc=True),
-                            "Open": _safe_float(item.get("open")),
-                            "High": _safe_float(item.get("high")),
-                            "Low": _safe_float(item.get("low")),
-                            "Close": _safe_float(item.get("close")),
-                            "Volume": _safe_float(item.get("volume")) or 0.0,
+                            "Open": to_float(item.get("open")),
+                            "High": to_float(item.get("high")),
+                            "Low": to_float(item.get("low")),
+                            "Close": to_float(item.get("close")),
+                            "Volume": to_float(item.get("volume")) or 0.0,
                         }
                     )
                 except Exception:
@@ -2283,10 +2294,10 @@ def get_ewz_vwap_plotly_data():
                     source_ts = pd.Timestamp(datetime.now(timezone.utc))
                 source_ts = source_ts.tz_convert(br_tz)
                 session_day = source_ts.date()
-                prev_close = _safe_float(ewz_item.get("prev_close")) or _safe_float(ewz_item.get("price"))
-                low = _safe_float(ewz_item.get("low")) or prev_close
-                high = _safe_float(ewz_item.get("high")) or prev_close
-                price = _safe_float(ewz_item.get("price")) or prev_close
+                prev_close = to_float(ewz_item.get("prev_close")) or to_float(ewz_item.get("price"))
+                low = to_float(ewz_item.get("low")) or prev_close
+                high = to_float(ewz_item.get("high")) or prev_close
+                price = to_float(ewz_item.get("price")) or prev_close
                 points = [
                     (datetime.combine(session_day, datetime.strptime("10:30", "%H:%M").time(), br_tz), prev_close),
                     (datetime.combine(session_day, datetime.strptime("12:30", "%H:%M").time(), br_tz), low),
