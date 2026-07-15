@@ -2154,6 +2154,117 @@ def render_terminal_global_line_chart():
         )
 
 
+@st.cache_data(ttl=120, show_spinner=False)
+def get_ewz_vwap_plotly_data():
+    try:
+        import yfinance as yf
+
+        df = yf.download(
+            "EWZ",
+            period="7d",
+            interval="5m",
+            progress=False,
+            auto_adjust=False,
+            threads=False,
+            timeout=10,
+        )
+        if df is None or df.empty:
+            mark_source("EWZ VWAP Plotly", "error", message="Yahoo Finance retornou vazio.", source="yfinance")
+            return pd.DataFrame()
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        required = ["High", "Low", "Close", "Volume"]
+        if any(col not in df.columns for col in required):
+            return pd.DataFrame()
+        df = df.dropna(subset=["High", "Low", "Close"]).copy()
+        br_tz = ZoneInfo("America/Sao_Paulo")
+        idx = pd.to_datetime(df.index)
+        if getattr(idx, "tz", None) is None:
+            idx = idx.tz_localize("UTC")
+        df.index = idx.tz_convert(br_tz)
+        session_dates = sorted(pd.Series(df.index.date).drop_duplicates().tolist())
+        if len(session_dates) >= 2:
+            keep_dates = set(session_dates[-2:])
+        else:
+            keep_dates = set(session_dates[-1:])
+        df = df[[d in keep_dates for d in df.index.date]].copy()
+        if df.empty:
+            return pd.DataFrame()
+        typical = (df["High"].astype(float) + df["Low"].astype(float) + df["Close"].astype(float)) / 3.0
+        volume = df["Volume"].fillna(0).astype(float).replace(0, pd.NA)
+        df["session_date"] = df.index.date
+        df["week_key"] = df.index.to_period("W").astype(str)
+        df["month_key"] = df.index.to_period("M").astype(str)
+
+        def grouped_vwap(group_key):
+            pv = typical * volume.fillna(0)
+            cum_pv = pv.groupby(group_key).cumsum()
+            cum_vol = volume.fillna(0).groupby(group_key).cumsum().replace(0, pd.NA)
+            return (cum_pv / cum_vol).ffill()
+
+        df["price"] = df["Close"].astype(float)
+        df["vwap_d"] = grouped_vwap(df["session_date"])
+        df["vwap_w"] = grouped_vwap(df["week_key"])
+        df["vwap_m"] = grouped_vwap(df["month_key"])
+
+        returns = df["price"].pct_change().rolling(24, min_periods=8).std().bfill().fillna(0)
+        vol_abs = df["price"] * returns
+        df["bv_up_1"] = df["vwap_d"] + vol_abs
+        df["bv_dn_1"] = df["vwap_d"] - vol_abs
+        df["bv_up_2"] = df["vwap_d"] + 2 * vol_abs
+        df["bv_dn_2"] = df["vwap_d"] - 2 * vol_abs
+        mark_source("EWZ VWAP Plotly", "ok", rows=len(df), message="EWZ 5m dia anterior + atual carregado.", source="yfinance")
+        return df[["price", "vwap_d", "vwap_w", "vwap_m", "bv_up_1", "bv_dn_1", "bv_up_2", "bv_dn_2"]]
+    except Exception as exc:
+        mark_source("EWZ VWAP Plotly", "error", message=str(exc), source="yfinance")
+        return pd.DataFrame()
+
+
+def render_ewz_vwap_vol_plotly_chart():
+    df = get_ewz_vwap_plotly_data()
+    if df.empty:
+        st.info("Grafico EWZ VWAP/Bandas Vol indisponivel agora.")
+        return
+
+    import plotly.graph_objects as go
+
+    plot_df = df.reset_index(drop=False).copy()
+    hover_labels = [idx.strftime("%d/%m %H:%M") if hasattr(idx, "strftime") else str(idx) for idx in df.index]
+    x_values = list(range(len(plot_df)))
+    tick_step = max(1, len(plot_df) // 8)
+    tickvals = list(range(0, len(plot_df), tick_step))
+    if len(plot_df) - 1 not in tickvals:
+        tickvals.append(len(plot_df) - 1)
+    ticktext = [hover_labels[i] for i in tickvals]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=x_values, y=plot_df["price"], mode="lines", name="EWZ", line=dict(color="#F8FAFC", width=2.4), customdata=hover_labels, hovertemplate="EWZ<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=x_values, y=plot_df["vwap_d"], mode="lines", name="VWAP D", line=dict(color="#FACC15", width=1.8), customdata=hover_labels, hovertemplate="VWAP D<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=x_values, y=plot_df["vwap_w"], mode="lines", name="VWAP W", line=dict(color="#38BDF8", width=1.5), customdata=hover_labels, hovertemplate="VWAP W<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=x_values, y=plot_df["vwap_m"], mode="lines", name="VWAP M", line=dict(color="#A78BFA", width=1.4), customdata=hover_labels, hovertemplate="VWAP M<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
+    for col, name, color, dash in [
+        ("bv_up_1", "Bandas Vol +1", "#FB7185", "dot"),
+        ("bv_up_2", "Bandas Vol +2", "#EF4444", "dash"),
+        ("bv_dn_1", "Bandas Vol -1", "#34D399", "dot"),
+        ("bv_dn_2", "Bandas Vol -2", "#10B981", "dash"),
+    ]:
+        fig.add_trace(go.Scatter(x=x_values, y=plot_df[col], mode="lines", name=name, line=dict(color=color, width=1.1, dash=dash), customdata=hover_labels, hovertemplate=f"{name}<br>%{{customdata}}<br>%{{y:.2f}}<extra></extra>"))
+
+    fig.update_layout(
+        title=dict(text="EWZ 5m | VWAPs + Bandas Vol | Dia anterior e atual", x=0.01, font=dict(size=16, color="#F8FAFC")),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#07111F",
+        font=dict(family='"Roboto Mono", monospace', color="#CBD5E1"),
+        margin=dict(l=48, r=22, t=54, b=34),
+        height=460,
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10)),
+        xaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, title=None, tickmode="array", tickvals=tickvals, ticktext=ticktext),
+        yaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, title="Preco EWZ"),
+    )
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
 def render_terminal_market_modules():
     st.markdown(
         """
@@ -5706,6 +5817,7 @@ def pagina_terminal():
     render_regime_juros_section()
     render_top_movers_brasil()
     render_terminal_global_line_chart()
+    render_ewz_vwap_vol_plotly_chart()
     render_terminal_lightweight_copy()
     secao_boletim_focus_fragment() # Estático/Lento (300s)
     secao_fluxo_estrangeiro_fragment() # Fluxo B3 (300s)
