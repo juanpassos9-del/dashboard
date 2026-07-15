@@ -5255,23 +5255,32 @@ def pagina_monitor_macro():
         return
 
     refresh = st.button("Atualizar Monitor Macro", type="primary", use_container_width=True, key="macro_monitor_refresh")
-    calendar_events = get_calendar_data() or []
 
     try:
         if refresh:
+            calendar_events = get_calendar_data() or []
             with st.spinner("Atualizando FRED e interpretando eventos da semana..."):
                 payload = build_macro_fred_monitor(calendar_events=calendar_events, force_refresh=True)
         else:
-            payload = load_cached_macro_fred_monitor()
-            if not payload:
-                payload = build_macro_fred_monitor(calendar_events=calendar_events, force_refresh=False)
+            # A pagina precisa abrir instantaneamente: FRED/calendario so rodam no botao.
+            payload = load_cached_macro_fred_monitor(max_age_seconds=30 * 24 * 60 * 60)
     except Exception as e:
         st.error(f"Erro ao atualizar Monitor Macro: {e}")
         return
 
     if not payload:
-        st.info("Sem dados suficientes para o Monitor Macro agora.")
+        st.info("Monitor Macro sem cache local ainda. Clique em Atualizar Monitor Macro para gerar a primeira leitura.")
         return
+
+    try:
+        updated_dt = datetime.fromisoformat(str(payload.get("updated_at", "")).replace("Z", "+00:00"))
+        if updated_dt.tzinfo is None:
+            updated_dt = updated_dt.replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+        age_minutes = (datetime.now(ZoneInfo("America/Sao_Paulo")) - updated_dt.astimezone(ZoneInfo("America/Sao_Paulo"))).total_seconds() / 60
+        if age_minutes > 360:
+            st.warning(f"Exibindo cache do Monitor Macro ({age_minutes/60:.1f}h). Use Atualizar Monitor Macro para recalcular FRED e eventos.")
+    except Exception:
+        pass
 
     regime = payload.get("regime", {}) if isinstance(payload, dict) else {}
     blocks = payload.get("blocks", {}) if isinstance(payload, dict) else {}
