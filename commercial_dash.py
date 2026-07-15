@@ -2874,10 +2874,20 @@ def render_ewz_vwap_vol_plotly_chart():
     phase_text = df["market_phase"].astype(str)
     snapshot_mode = bool(phase_text.str.contains("Dashboard snapshot", na=False).any())
     comparative_mode = bool(phase_text.str.contains("Comparativo EWZ", na=False).any())
-    fig.add_trace(go.Scatter(x=x_values, y=plot_df["price"], mode="lines", name="EWZ", line=dict(color="#F8FAFC", width=2.4), customdata=hover_labels, hovertemplate="EWZ<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
-    fig.add_trace(go.Scatter(x=x_values, y=plot_df["vwap_d"], mode="lines", name="VWAP D", line=dict(color="#FACC15", width=1.8), customdata=hover_labels, hovertemplate="VWAP D<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
-    fig.add_trace(go.Scatter(x=x_values, y=plot_df["vwap_w"], mode="lines", name="VWAP W", line=dict(color="#38BDF8", width=1.5), customdata=hover_labels, hovertemplate="VWAP W<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
-    fig.add_trace(go.Scatter(x=x_values, y=plot_df["vwap_m"], mode="lines", name="VWAP M", line=dict(color="#A78BFA", width=1.4), customdata=hover_labels, hovertemplate="VWAP M<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
+    focus_cols = ["price", "vwap_d", "vwap_w", "vwap_m", "bv_ref"]
+    focus_values = pd.to_numeric(plot_df[focus_cols].stack(), errors="coerce").dropna()
+    if not focus_values.empty:
+        y_min = float(focus_values.min())
+        y_max = float(focus_values.max())
+        pad = max((y_max - y_min) * 0.65, y_max * 0.003, 0.08)
+        y_range = [y_min - pad, y_max + pad]
+    else:
+        y_range = None
+
+    fig.add_trace(go.Scatter(x=x_values, y=plot_df["price"], mode="lines+markers", name="EWZ", line=dict(color="#F8FAFC", width=3.2), marker=dict(size=4, color="#F8FAFC"), customdata=hover_labels, hovertemplate="EWZ<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=x_values, y=plot_df["vwap_d"], mode="lines", name="VWAP D", line=dict(color="#FACC15", width=2.2), customdata=hover_labels, hovertemplate="VWAP D<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=x_values, y=plot_df["vwap_w"], mode="lines", name="VWAP W", line=dict(color="#38BDF8", width=1.2, dash="dot"), opacity=0.72, customdata=hover_labels, hovertemplate="VWAP W<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=x_values, y=plot_df["vwap_m"], mode="lines", name="VWAP M", line=dict(color="#A78BFA", width=1.1, dash="dot"), opacity=0.58, customdata=hover_labels, hovertemplate="VWAP M<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
     fig.add_trace(go.Scatter(x=x_values, y=plot_df["bv_ref"], mode="lines", name="Fech. ant.", line=dict(color="#94A3B8", width=1.2, dash="dash"), customdata=hover_labels, hovertemplate="Fech. ant.<br>%{customdata}<br>%{y:.2f}<extra></extra>"))
     for col, name, color, dash in [
         ("bv_up_1", "HV252 +1", "#FB7185", "dot"),
@@ -2885,7 +2895,7 @@ def render_ewz_vwap_vol_plotly_chart():
         ("bv_dn_1", "HV252 -1", "#34D399", "dot"),
         ("bv_dn_2", "HV252 -2", "#10B981", "dash"),
     ]:
-        fig.add_trace(go.Scatter(x=x_values, y=plot_df[col], mode="lines", name=name, line=dict(color=color, width=1.1, dash=dash), customdata=hover_labels, hovertemplate=f"{name}<br>%{{customdata}}<br>%{{y:.2f}}<extra></extra>"))
+        fig.add_trace(go.Scatter(x=x_values, y=plot_df[col], mode="lines", name=name, line=dict(color=color, width=0.9, dash=dash), opacity=0.42 if (snapshot_mode or comparative_mode) else 0.75, customdata=hover_labels, hovertemplate=f"{name}<br>%{{customdata}}<br>%{{y:.2f}}<extra></extra>"))
 
     fig.update_layout(
         title=dict(text=("EWZ | Comparativo intraday alinhado a cotacao + Bandas Vol" if comparative_mode else "EWZ | Snapshot do dashboard + Bandas Vol" if snapshot_mode else "EWZ 5m | Pre-market + Regular | VWAPs + Bandas Vol HV252"), x=0.01, font=dict(size=16, color="#F8FAFC")),
@@ -2893,11 +2903,11 @@ def render_ewz_vwap_vol_plotly_chart():
         plot_bgcolor="#07111F",
         font=dict(family='"Roboto Mono", monospace', color="#CBD5E1"),
         margin=dict(l=48, r=22, t=54, b=34),
-        height=460,
+        height=540,
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10)),
         xaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, title=None, tickmode="array", tickvals=tickvals, ticktext=ticktext),
-        yaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, title="Preco EWZ"),
+        yaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, title="Preco EWZ", range=y_range, tickformat=".2f"),
     )
     if snapshot_mode or comparative_mode:
         fig.add_annotation(
