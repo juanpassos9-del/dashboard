@@ -23,7 +23,8 @@ function Write-Log {
 
 function Test-BusinessWindow {
     $now = Get-Date
-    if ($now.DayOfWeek -in @("Saturday", "Sunday")) {
+    $dayName = $now.DayOfWeek.ToString()
+    if ($dayName -in @("Saturday", "Sunday")) {
         return $false
     }
 
@@ -35,8 +36,38 @@ function Test-BusinessWindow {
     return ($now -ge $startToday -and $now -lt $endToday)
 }
 
+function Wait-ForBusinessWindow {
+    $now = Get-Date
+    $dayName = $now.DayOfWeek.ToString()
+    if ($dayName -in @("Saturday", "Sunday")) {
+        return $false
+    }
+
+    $start = [datetime]::ParseExact($StartTime, "HH:mm", $null)
+    $end = [datetime]::ParseExact($EndTime, "HH:mm", $null)
+    $startToday = Get-Date -Hour $start.Hour -Minute $start.Minute -Second 0
+    $endToday = Get-Date -Hour $end.Hour -Minute $end.Minute -Second 0
+
+    if ($now -lt $startToday) {
+        $waitSeconds = [int]($startToday - $now).TotalSeconds
+        if ($waitSeconds -le 180) {
+            Write-Log "Aguardando abertura da janela por ${waitSeconds}s."
+            Start-Sleep -Seconds ([Math]::Max(1, $waitSeconds + 2))
+            return (Test-BusinessWindow)
+        }
+        return $false
+    }
+
+    return ($now -lt $endToday)
+}
+
 Set-Location $ProjectRoot
 Write-Log "Iniciando sync Regime de Juros. Janela: $StartTime-$EndTime | Intervalo: ${IntervalSeconds}s"
+
+if (!(Wait-ForBusinessWindow)) {
+    Write-Log "Fora da janela operacional. Encerrando sync."
+    exit 0
+}
 
 while (Test-BusinessWindow) {
     try {

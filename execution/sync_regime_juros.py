@@ -61,7 +61,16 @@ def read_regime_juros_open_excel(path: str = DEFAULT_EXCEL_PATH) -> dict | None:
     except Exception:
         return None
 
-    for wb in excel.Workbooks:
+    try:
+        workbooks = excel.Workbooks
+    except Exception:
+        try:
+            excel = win32com.client.Dispatch("Excel.Application")
+            workbooks = excel.Workbooks
+        except Exception:
+            return None
+
+    for wb in workbooks:
         try:
             same_file = Path(str(wb.FullName)).resolve().samefile(target)
         except Exception:
