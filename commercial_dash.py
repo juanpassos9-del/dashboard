@@ -2443,6 +2443,14 @@ def get_ewz_vwap_plotly_data():
             except Exception:
                 return pd.DataFrame()
 
+        def london_edge_intraday() -> pd.DataFrame:
+            try:
+                from execution.lse_client import fetch_lse_ohlcv
+
+                return fetch_lse_ohlcv("EWZ", interval="5m", limit=500)
+            except Exception:
+                return pd.DataFrame()
+
         def download_intraday(prepost: bool):
             try:
                 import yfinance as yf
@@ -2498,6 +2506,10 @@ def get_ewz_vwap_plotly_data():
         if intraday_df is None or intraday_df.empty:
             intraday_df = alpha_vantage_intraday()
             source_label = "Alpha Vantage"
+            used_prepost = False
+        if intraday_df is None or intraday_df.empty:
+            intraday_df = london_edge_intraday()
+            source_label = "London Strategic Edge"
             used_prepost = False
         if intraday_df is not None and not intraday_df.empty:
             write_dashboard_ohlcv_cache(intraday_df, source_label)

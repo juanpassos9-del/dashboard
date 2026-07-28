@@ -11,6 +11,14 @@ from zoneinfo import ZoneInfo
 import requests
 
 try:
+    from execution.lse_client import fetch_lse_quote
+except Exception:
+    try:
+        from lse_client import fetch_lse_quote
+    except Exception:
+        fetch_lse_quote = None
+
+try:
     import tomllib
 except Exception:
     tomllib = None
@@ -363,6 +371,25 @@ def _fetch_brapi_candidate(name, ticker_symbol):
         return None
 
 
+def _fetch_lse_candidate(name, ticker_symbol):
+    if fetch_lse_quote is None:
+        return None
+    try:
+        payload = fetch_lse_quote(ticker_symbol)
+        if not payload or payload.get("df") is None or payload["df"].empty:
+            return None
+        return _candidate_from_frame(
+            name,
+            ticker_symbol,
+            payload["df"],
+            source="London Strategic Edge",
+            source_symbol=payload.get("source_symbol") or ticker_symbol,
+        )
+    except Exception as e:
+        print(f"[!] London Strategic Edge falhou para {ticker_symbol}: {e}")
+        return None
+
+
 def _quote_candidates(name, ticker_symbol, yfinance_df=None):
     candidates = []
     if yfinance_df is not None and not yfinance_df.empty:
@@ -376,9 +403,9 @@ def _quote_candidates(name, ticker_symbol, yfinance_df=None):
     if best_age is not None and best_age <= 120:
         return candidates
 
-    # Brapi e Twelve tendem a ser os melhores fallbacks gratuitos para o painel.
+    # Brapi, London e Twelve tendem a ser bons fallbacks para o painel.
     # Alpha entra por ultimo porque o plano gratuito e mais limitado.
-    for fetcher in (_fetch_brapi_candidate, _fetch_twelve_candidate, _fetch_alpha_candidate):
+    for fetcher in (_fetch_brapi_candidate, _fetch_lse_candidate, _fetch_twelve_candidate, _fetch_alpha_candidate):
         candidate = fetcher(name, ticker_symbol)
         if candidate:
             candidates.append(candidate)
@@ -396,7 +423,7 @@ def _select_best_candidate(candidates):
         age = item.get("age_seconds")
         if age is None:
             age = 10**9
-        source_bonus = {"Brapi": -10, "Twelve Data": -5, "Yahoo Finance": 0, "Alpha Vantage": 20}.get(item.get("source"), 0)
+        source_bonus = {"Brapi": -10, "London Strategic Edge": -8, "Twelve Data": -5, "Yahoo Finance": 0, "Alpha Vantage": 20}.get(item.get("source"), 0)
         return (float(age) + source_bonus, item.get("source") != "Yahoo Finance")
 
     return sorted(valid, key=score)[0]
