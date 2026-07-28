@@ -18,6 +18,7 @@ LSE_SECRET_NAMES = (
 )
 
 LSE_SYMBOL_MAP = {
+    "^BVSP": ("IBOV", "IBOVESPA", "^BVSP"),
     "^GSPC": ("SPY", "SPX", "US500", "S&P 500"),
     "^IXIC": ("QQQ", "NDX", "NASDAQ"),
     "^DJI": ("DIA", "DJI"),

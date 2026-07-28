@@ -90,6 +90,7 @@ APP_STATE_ALLOWED_KEYS = {
     "market_report",
     "market_report_daily",
     "mercados_globais",
+    "lse_realtime_quotes",
     "ewz_plotly_ohlcv",
     "regime_juros",
     "risk_manual_trades",
@@ -798,16 +799,66 @@ def fetch_live_global_markets():
         mark_source("Yahoo Finance", "error", message=str(e), source="execution.fetch_global_markets")
         return None
 
+def _apply_lse_realtime_quotes(global_data):
+    if not isinstance(global_data, dict):
+        return global_data
+    realtime = fetch_app_state_cached("lse_realtime_quotes")
+    quotes = realtime.get("quotes") if isinstance(realtime, dict) else None
+    if not isinstance(quotes, dict) or not quotes:
+        return global_data
+
+    max_age = 120
+    changed = 0
+    data = json.loads(json.dumps(global_data))
+    for rows in (data.get("categories") or {}).values():
+        if not isinstance(rows, list):
+            continue
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            symbol = str(item.get("symbol") or "").upper()
+            quote = quotes.get(symbol)
+            if not quote:
+                continue
+            age = quote.get("age_seconds")
+            if age is not None and float(age) > max_age:
+                continue
+            price = quote.get("price")
+            if price is None:
+                continue
+            item.update({
+                "price": price,
+                "source": "London Strategic Edge",
+                "source_symbol": quote.get("source_symbol") or symbol,
+                "source_timestamp": quote.get("source_timestamp"),
+                "age_seconds": age,
+                "change_5m": quote.get("change_5m", item.get("change_5m")),
+            })
+            if quote.get("prev_close"):
+                item["prev_close"] = quote.get("prev_close")
+                try:
+                    item["change"] = round(((float(price) - float(quote["prev_close"])) / float(quote["prev_close"])) * 100, 2)
+                except Exception:
+                    pass
+            changed += 1
+    if changed:
+        data.setdefault("metadata", {})["lse_realtime_overlay"] = {
+            "quotes": changed,
+            "updated_at": realtime.get("updated_at"),
+        }
+        mark_source("London Realtime", "ok", rows=changed, message="Overlay London aplicado ao painel.", source="LSE app_state")
+    return data
+
 def get_global_markets_data():
     """Usa Supabase/cache primeiro para nao travar o boot do Streamlit Cloud."""
     cached_data = fetch_app_state_cached("mercados_globais")
     if cached_data:
         rows = sum(len(v) for v in (cached_data.get("categories", cached_data) or {}).values() if isinstance(v, list))
         mark_source("Mercados Globais Cache", "stale", message="Usando app_state/Supabase como fallback rapido.", rows=rows, source="Supabase app_state")
-        return cached_data
+        return _apply_lse_realtime_quotes(cached_data)
     live_data = fetch_live_global_markets()
     if live_data:
-        return live_data
+        return _apply_lse_realtime_quotes(live_data)
     mark_source("Mercados Globais Cache", "error", message="Sem cache e sem fonte ao vivo.", source="Supabase/Yahoo")
     return None
 
