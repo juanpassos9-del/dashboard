@@ -37,3 +37,4 @@ jobs:
           SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE || secrets.SUPABASE_KEY || secrets.SUPABASE_SERVICE }}
         run: |
           python execution/lse_realtime_collector.py --once --ignore-market-window
+          python execution/lse_diagnostics.py

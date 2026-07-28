@@ -26,6 +26,7 @@ APP_STATE_ALLOWED_KEYS = {
     "market_report_daily",
     "mercados_globais",
     "lse_realtime_quotes",
+    "lse_diagnostics",
     "ewz_plotly_ohlcv",
     "risk_manual_trades",
 }

@@ -91,6 +91,7 @@ APP_STATE_ALLOWED_KEYS = {
     "market_report_daily",
     "mercados_globais",
     "lse_realtime_quotes",
+    "lse_diagnostics",
     "ewz_plotly_ohlcv",
     "regime_juros",
     "risk_manual_trades",
@@ -3784,10 +3785,27 @@ def painel_topo_global():
 def render_source_health_panel():
     """Mostra a saude das fontes sem disparar novas chamadas externas."""
     health = get_source_health(max_age_seconds=1800)
+    lse_diag = fetch_app_state_cached("lse_diagnostics")
+    if isinstance(lse_diag, dict):
+        summary = lse_diag.get("summary") if isinstance(lse_diag.get("summary"), dict) else {}
+        health = dict(health or {})
+        status = str(lse_diag.get("status") or "error")
+        if status == "empty":
+            status = "stale"
+        health["London API"] = {
+            "name": "London API",
+            "status": status if status in {"ok", "stale", "error", "disabled"} else "error",
+            "message": lse_diag.get("message") or "Diagnostico London.",
+            "rows": summary.get("ok"),
+            "source": "app_state.lse_diagnostics",
+            "updated_at": lse_diag.get("updated_at"),
+            "updated_ts": pd.Timestamp(lse_diag.get("updated_at")).timestamp() if lse_diag.get("updated_at") else 0,
+        }
     if not health:
         return
 
     order = [
+        "London API",
         "Yahoo Finance",
         "Mercados Globais Cache",
         "Investing Calendar",
@@ -3799,6 +3817,7 @@ def render_source_health_panel():
         "Lightweight BCB",
     ]
     labels = {
+        "London API": "London API",
         "Yahoo Finance": "Yahoo",
         "Mercados Globais Cache": "Mercados cache",
         "Investing Calendar": "Investing",
