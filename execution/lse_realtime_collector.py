@@ -201,7 +201,12 @@ def is_market_window(now_br: datetime | None = None) -> bool:
 def parse_symbols(raw: str) -> list[str]:
     if not raw:
         return DEFAULT_SYMBOLS
-    return [item.strip() for item in raw.split(",") if item.strip()]
+    symbols = [item.strip() for item in raw.split(",") if item.strip()]
+    # GitHub/Streamlit envs sometimes keep a one-symbol test value around.
+    # For the production 24/7 collector, fall back to the curated universe.
+    if len(symbols) < 5:
+        return DEFAULT_SYMBOLS
+    return symbols
 
 
 def main() -> int:

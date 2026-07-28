@@ -2,8 +2,8 @@ name: Update Market Data 24/7
 
 on:
   schedule:
-    # Roda de hora em hora (gratuito no GitHub)
-    - cron: '0 * * * *'
+    # Roda 24/7 a cada 5 minutos para reduzir atraso do painel de cotacoes.
+    - cron: '*/5 * * * *'
   workflow_dispatch:
     # Permite que o usuário clique em um botão no GitHub para rodar manualmente a qualquer momento
 
