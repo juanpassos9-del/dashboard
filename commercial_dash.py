@@ -807,7 +807,7 @@ def _apply_lse_realtime_quotes(global_data):
     if not isinstance(quotes, dict) or not quotes:
         return global_data
 
-    max_age = 120
+    max_age = 420
     changed = 0
     data = json.loads(json.dumps(global_data))
     for rows in (data.get("categories") or {}).values():

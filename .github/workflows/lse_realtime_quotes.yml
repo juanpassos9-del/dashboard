@@ -2,9 +2,9 @@ name: LSE Realtime Quotes
 
 on:
   schedule:
-    # 09:00-17:00 em Sao Paulo (UTC-3), segunda a sexta.
+    # 24/7 a cada 5 minutos. O dashboard escolhe o dado valido mais recente.
     # GitHub Actions tem granularidade minima pratica de 5 minutos.
-    - cron: "*/5 12-20 * * 1-5"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -36,4 +36,4 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL || secrets.SUPABASE }}
           SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE || secrets.SUPABASE_KEY || secrets.SUPABASE_SERVICE }}
         run: |
-          python execution/lse_realtime_collector.py --once
+          python execution/lse_realtime_collector.py --once --ignore-market-window
