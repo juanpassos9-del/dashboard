@@ -2208,61 +2208,140 @@ def render_terminal_global_line_chart():
         )
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_terminal_interest_rate_comparison_data() -> tuple[pd.DataFrame, dict]:
+    """Carrega Selic/meta Brasil e Fed Funds em escala regular para comparacao."""
+    start_date = (datetime.now() - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
+    meta = {"sources": [], "errors": []}
+    series = []
+
+    try:
+        bcb_resp = requests.get(
+            "https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados",
+            params={"formato": "json", "dataInicial": (datetime.now() - timedelta(days=365 * 5)).strftime("%d/%m/%Y")},
+            timeout=8,
+        )
+        if bcb_resp.ok:
+            rows = bcb_resp.json()
+            br_df = pd.DataFrame(rows)
+            if not br_df.empty and {"data", "valor"}.issubset(br_df.columns):
+                br_df["date"] = pd.to_datetime(br_df["data"], format="%d/%m/%Y", errors="coerce")
+                br_df["BRINTR"] = pd.to_numeric(br_df["valor"].astype(str).str.replace(",", ".", regex=False), errors="coerce")
+                br_df = br_df[["date", "BRINTR"]].dropna()
+                if not br_df.empty:
+                    series.append(br_df)
+                    meta["sources"].append("BCB SGS 432")
+        else:
+            meta["errors"].append(f"BCB HTTP {bcb_resp.status_code}")
+    except Exception as exc:
+        meta["errors"].append(f"BCB: {exc}")
+
+    fred_key = _get_secret_value("FRED_API_KEY", "FRED_KEY")
+    if fred_key:
+        try:
+            fred_resp = requests.get(
+                "https://api.stlouisfed.org/fred/series/observations",
+                params={
+                    "series_id": "DFF",
+                    "api_key": fred_key,
+                    "file_type": "json",
+                    "observation_start": start_date,
+                },
+                timeout=8,
+            )
+            if fred_resp.ok:
+                observations = fred_resp.json().get("observations", [])
+                us_df = pd.DataFrame(observations)
+                if not us_df.empty and {"date", "value"}.issubset(us_df.columns):
+                    us_df["date"] = pd.to_datetime(us_df["date"], errors="coerce")
+                    us_df["USINTR"] = pd.to_numeric(us_df["value"].replace(".", pd.NA), errors="coerce")
+                    us_df = us_df[["date", "USINTR"]].dropna()
+                    if not us_df.empty:
+                        series.append(us_df)
+                        meta["sources"].append("FRED DFF")
+            else:
+                meta["errors"].append(f"FRED HTTP {fred_resp.status_code}")
+        except Exception as exc:
+            meta["errors"].append(f"FRED: {exc}")
+    else:
+        meta["errors"].append("FRED_API_KEY ausente")
+
+    if not series:
+        return pd.DataFrame(), meta
+
+    df = series[0]
+    for item in series[1:]:
+        df = pd.merge(df, item, on="date", how="outer")
+    df = df.sort_values("date").set_index("date").ffill().dropna(how="all")
+    df = df.tail(365 * 5)
+    return df, meta
+
+
 def render_terminal_interest_rate_tv_comparison():
-    """TradingView: compara taxa de juros Brasil x EUA em escala regular."""
+    """Compara taxa de juros Brasil x EUA em escala regular sem depender de embed TradingView."""
     st.markdown("#### Juros oficiais | BRINTR x USINTR")
-    st.caption("TradingView Symbol Overview com comparacao em escala regular (Normal), sem percentual.")
-    tv_html = """
-    <div class="tradingview-widget-container" style="height: 430px; width: 100%; background:#0b0f17; border:1px solid #1f2a3a; border-radius:8px; overflow:hidden;">
-      <div class="tradingview-widget-container__widget" style="height:100%; width:100%;"></div>
-      <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-symbol-overview.js" async>
-      {
-        "symbols": [
-          [
-            "Brazil Interest Rate",
-            "ECONOMICS:BRINTR|1D"
-          ]
-        ],
-        "chartOnly": true,
-        "width": "100%",
-        "height": "100%",
-        "locale": "br",
-        "colorTheme": "dark",
-        "autosize": true,
-        "showVolume": false,
-        "showMA": false,
-        "hideDateRanges": false,
-        "hideMarketStatus": true,
-        "hideSymbolLogo": true,
-        "scalePosition": "right",
-        "scaleMode": "Normal",
-        "fontFamily": "Roboto Mono, Consolas, monospace",
-        "fontSize": "11",
-        "noTimeScale": false,
-        "valuesTracking": "1",
-        "changeMode": "price-only",
-        "chartType": "line",
-        "lineColor": "rgba(0, 255, 163, 1)",
-        "lineWidth": 3,
-        "lineType": 0,
-        "compareSymbol": {
-          "symbol": "ECONOMICS:USINTR",
-          "lineColor": "rgba(56, 189, 248, 1)",
-          "lineWidth": 3
-        },
-        "dateRanges": [
-          "3m|1D",
-          "6m|1D",
-          "12m|1D",
-          "60m|1W"
-        ],
-        "dateFormat": "dd/MM/yyyy",
-        "timeHoursFormat": "24-hours"
-      }
-      </script>
-    </div>
-    """
-    components.html(tv_html, height=450, scrolling=False)
+    st.caption("Escala regular de taxa, sem normalizacao percentual. Fonte: BCB SGS 432 + FRED DFF.")
+
+    df, meta = get_terminal_interest_rate_comparison_data()
+    if df.empty:
+        st.info("Comparativo BRINTR x USINTR indisponivel agora. Verifique BCB/FRED e tente novamente.")
+        return
+
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+    if "BRINTR" in df.columns and df["BRINTR"].notna().any():
+        fig.add_trace(go.Scatter(
+            x=df.index,
+            y=df["BRINTR"],
+            mode="lines",
+            name="BRINTR / Selic meta",
+            line=dict(color="#00FFA3", width=3),
+            hovertemplate="BRINTR<br>%{x|%d/%m/%Y}<br>%{y:.2f}%<extra></extra>",
+        ))
+    if "USINTR" in df.columns and df["USINTR"].notna().any():
+        fig.add_trace(go.Scatter(
+            x=df.index,
+            y=df["USINTR"],
+            mode="lines",
+            name="USINTR / Fed Funds",
+            line=dict(color="#38BDF8", width=3),
+            hovertemplate="USINTR<br>%{x|%d/%m/%Y}<br>%{y:.2f}%<extra></extra>",
+        ))
+
+    latest = df.ffill().dropna(how="all").tail(1)
+    if not latest.empty:
+        for col, color, label in (("BRINTR", "#00FFA3", "BR"), ("USINTR", "#38BDF8", "US")):
+            value = latest.iloc[0].get(col)
+            if pd.notna(value):
+                fig.add_annotation(
+                    x=latest.index[0],
+                    y=float(value),
+                    text=f"{label} {float(value):.2f}%",
+                    showarrow=False,
+                    xanchor="left",
+                    xshift=8,
+                    font=dict(color=color, size=11),
+                    bgcolor="rgba(8,13,24,.88)",
+                    bordercolor=color,
+                    borderwidth=1,
+                )
+
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#07111F",
+        font=dict(family='"Roboto Mono", monospace', color="#CBD5E1"),
+        margin=dict(l=42, r=74, t=18, b=32),
+        height=430,
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=11)),
+        xaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, title=None),
+        yaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, ticksuffix="%", title="Taxa oficial"),
+    )
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    source_msg = " + ".join(meta.get("sources", [])) or "fontes indisponiveis"
+    st.caption(f"Fonte carregada: {source_msg}.")
 
 
 @st.cache_data(ttl=120, show_spinner=False)
