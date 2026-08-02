@@ -2211,53 +2211,54 @@ def render_terminal_global_line_chart():
 def render_terminal_interest_rate_tv_comparison():
     """TradingView: compara taxa de juros Brasil x EUA em escala regular."""
     st.markdown("#### Juros oficiais | BRINTR x USINTR")
-    st.caption("TradingView widget em escala regular de preco/taxa, sem normalizacao percentual.")
-    container_id = "terminal_brintr_usintr_tv"
-    tv_html = f"""
+    st.caption("TradingView Symbol Overview com comparacao em escala regular (Normal), sem percentual.")
+    tv_html = """
     <div class="tradingview-widget-container" style="height: 430px; width: 100%; background:#0b0f17; border:1px solid #1f2a3a; border-radius:8px; overflow:hidden;">
-      <div id="{container_id}" style="height: 100%; width: 100%;"></div>
-      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-      <script type="text/javascript">
-      new TradingView.widget(
-      {{
-        "autosize": true,
-        "symbol": "ECONOMICS:BRINTR",
-        "interval": "D",
-        "timezone": "America/Sao_Paulo",
-        "theme": "dark",
-        "style": "2",
+      <div class="tradingview-widget-container__widget" style="height:100%; width:100%;"></div>
+      <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-symbol-overview.js" async>
+      {
+        "symbols": [
+          [
+            "Brazil Interest Rate",
+            "ECONOMICS:BRINTR|1D"
+          ]
+        ],
+        "chartOnly": true,
+        "width": "100%",
+        "height": "100%",
         "locale": "br",
-        "toolbar_bg": "#0b0f17",
-        "enable_publishing": false,
-        "hide_top_toolbar": false,
-        "hide_side_toolbar": true,
-        "allow_symbol_change": true,
-        "save_image": false,
-        "details": false,
-        "hotlist": false,
-        "calendar": false,
-        "hide_volume": true,
-        "range": "12M",
-        "container_id": "{container_id}",
-        "overrides": {{
-          "mainSeriesProperties.lineStyle.color": "#00FFA3",
-          "mainSeriesProperties.lineStyle.linewidth": 3,
-          "mainSeriesProperties.priceAxisProperties.percentage": false,
-          "mainSeriesProperties.priceAxisProperties.indexedTo100": false,
-          "paneProperties.background": "#0b0f17",
-          "paneProperties.vertGridProperties.color": "#1f2937",
-          "paneProperties.horzGridProperties.color": "#1f2937",
-          "scalesProperties.textColor": "#CBD5E1"
-        }},
-        "studies": [
-          {{
-            "id": "Overlay@tv-basicstudies",
-            "inputs": {{ "symbol": "ECONOMICS:USINTR" }},
-            "plots": {{ "Plot": {{ "color": "#38BDF8", "linewidth": 3 }} }}
-          }}
-        ]
-      }}
-      );
+        "colorTheme": "dark",
+        "autosize": true,
+        "showVolume": false,
+        "showMA": false,
+        "hideDateRanges": false,
+        "hideMarketStatus": true,
+        "hideSymbolLogo": true,
+        "scalePosition": "right",
+        "scaleMode": "Normal",
+        "fontFamily": "Roboto Mono, Consolas, monospace",
+        "fontSize": "11",
+        "noTimeScale": false,
+        "valuesTracking": "1",
+        "changeMode": "price-only",
+        "chartType": "line",
+        "lineColor": "rgba(0, 255, 163, 1)",
+        "lineWidth": 3,
+        "lineType": 0,
+        "compareSymbol": {
+          "symbol": "ECONOMICS:USINTR",
+          "lineColor": "rgba(56, 189, 248, 1)",
+          "lineWidth": 3
+        },
+        "dateRanges": [
+          "3m|1D",
+          "6m|1D",
+          "12m|1D",
+          "60m|1W"
+        ],
+        "dateFormat": "dd/MM/yyyy",
+        "timeHoursFormat": "24-hours"
+      }
       </script>
     </div>
     """
