@@ -2215,6 +2215,46 @@ def get_terminal_interest_rate_comparison_data() -> tuple[pd.DataFrame, dict]:
     meta = {"sources": [], "errors": []}
     series = []
 
+    def parse_rate_value(value) -> float | None:
+        try:
+            if value is None or value is pd.NA:
+                return None
+            text = str(value).strip().replace("%", "").replace(",", ".")
+            num = float(text)
+            return num if math.isfinite(num) else None
+        except Exception:
+            return None
+
+    def constant_rate_series(label: str, value: float, days: int = 365 * 5) -> pd.DataFrame:
+        end = pd.Timestamp(datetime.now().date())
+        idx = pd.date_range(end=end, periods=days, freq="D")
+        return pd.DataFrame({"date": idx, label: float(value)})
+
+    def tradingeconomics_brazil_interest_rate() -> float | None:
+        try:
+            resp = requests.get(
+                "https://tradingeconomics.com/brazil/interest-rate",
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=8,
+            )
+            if not resp.ok:
+                meta["errors"].append(f"TradingEconomics HTTP {resp.status_code}")
+                return None
+            text = resp.text or ""
+            import re
+            patterns = [
+                r"last recorded at\s+([0-9]+(?:\.[0-9]+)?)\s+percent",
+                r"BCB Selic Rate</a>\s*</td>\s*<td[^>]*>\s*([0-9]+(?:\.[0-9]+)?)",
+                r"Actual\s*</th>.*?<td[^>]*>\s*([0-9]+(?:\.[0-9]+)?)",
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+                if match:
+                    return parse_rate_value(match.group(1))
+        except Exception as exc:
+            meta["errors"].append(f"TradingEconomics: {exc}")
+        return None
+
     try:
         bcb_resp = requests.get(
             "https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados",
@@ -2235,6 +2275,44 @@ def get_terminal_interest_rate_comparison_data() -> tuple[pd.DataFrame, dict]:
             meta["errors"].append(f"BCB HTTP {bcb_resp.status_code}")
     except Exception as exc:
         meta["errors"].append(f"BCB: {exc}")
+
+    has_brintr = any("BRINTR" in item.columns and item["BRINTR"].notna().any() for item in series)
+    if not has_brintr:
+        te_rate = tradingeconomics_brazil_interest_rate()
+        if te_rate is not None:
+            series.append(constant_rate_series("BRINTR", te_rate))
+            meta["sources"].append("Trading Economics Brazil Interest Rate fallback")
+            has_brintr = True
+
+    if not has_brintr:
+        try:
+            focus_data = fetch_app_state_cached("boletim_focus")
+            current_year = str(datetime.now().year)
+            selic_value = None
+            if isinstance(focus_data, dict):
+                selic_node = (focus_data.get("years") or {}).get(current_year, {}).get("Selic")
+                if isinstance(selic_node, dict):
+                    selic_value = parse_rate_value(selic_node.get("hoje") or selic_node.get("1_sem") or selic_node.get("4_sem"))
+            if selic_value is not None:
+                series.append(constant_rate_series("BRINTR", selic_value))
+                meta["sources"].append("Boletim Focus Selic fallback")
+                has_brintr = True
+        except Exception as exc:
+            meta["errors"].append(f"Focus Selic fallback: {exc}")
+
+    if not has_brintr:
+        try:
+            regime_data = fetch_app_state_fast("regime_juros")
+            if not isinstance(regime_data, dict) and os.path.exists(REGIME_JUROS_SNAPSHOT_PATH):
+                with open(REGIME_JUROS_SNAPSHOT_PATH, "r", encoding="utf-8") as fp:
+                    regime_data = json.load(fp)
+            regime_rate = parse_rate_value((regime_data or {}).get("taxa_sintetica") if isinstance(regime_data, dict) else None)
+            if regime_rate is not None:
+                series.append(constant_rate_series("BRINTR", regime_rate))
+                meta["sources"].append("Regime de Juros taxa sintetica fallback")
+                has_brintr = True
+        except Exception as exc:
+            meta["errors"].append(f"Regime juros fallback: {exc}")
 
     fred_key = _get_secret_value("FRED_API_KEY", "FRED_KEY")
     if fred_key:
