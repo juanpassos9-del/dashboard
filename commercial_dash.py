@@ -2230,6 +2230,64 @@ def get_terminal_interest_rate_comparison_data() -> tuple[pd.DataFrame, dict]:
         idx = pd.date_range(end=end, periods=days, freq="D")
         return pd.DataFrame({"date": idx, label: float(value)})
 
+    def tradingeconomics_brazil_interest_rate_api() -> pd.DataFrame:
+        api_key = _get_secret_value(
+            "TRADING_ECONOMICS_API_KEY",
+            "TRADINGECONOMICS_API_KEY",
+            "TE_API_KEY",
+        )
+        if not api_key:
+            meta["errors"].append("TradingEconomics API key ausente")
+            return pd.DataFrame()
+
+        def parse_rows(rows) -> pd.DataFrame:
+            if isinstance(rows, dict):
+                rows = rows.get("data") or rows.get("historical") or rows.get("HistoricalData") or [rows]
+            if not isinstance(rows, list) or not rows:
+                return pd.DataFrame()
+            parsed = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                date_value = (
+                    row.get("DateTime")
+                    or row.get("date")
+                    or row.get("Date")
+                    or row.get("LatestValueDate")
+                    or row.get("LastUpdate")
+                )
+                rate_value = (
+                    row.get("Value")
+                    if row.get("Value") is not None
+                    else row.get("LatestValue")
+                    if row.get("LatestValue") is not None
+                    else row.get("Last")
+                    if row.get("Last") is not None
+                    else row.get("Actual")
+                )
+                date = pd.to_datetime(date_value, errors="coerce")
+                rate = parse_rate_value(rate_value)
+                if pd.notna(date) and rate is not None:
+                    parsed.append({"date": date, "BRINTR": rate})
+            return pd.DataFrame(parsed).dropna() if parsed else pd.DataFrame()
+
+        endpoints = [
+            "https://api.tradingeconomics.com/historical/country/brazil/indicator/interest%20rate",
+            "https://api.tradingeconomics.com/country/brazil/interest-rate",
+        ]
+        for endpoint in endpoints:
+            try:
+                resp = requests.get(endpoint, params={"c": api_key}, timeout=10)
+                if not resp.ok:
+                    meta["errors"].append(f"TradingEconomics API HTTP {resp.status_code}")
+                    continue
+                df_api = parse_rows(resp.json())
+                if not df_api.empty:
+                    return df_api[["date", "BRINTR"]].sort_values("date")
+            except Exception as exc:
+                meta["errors"].append(f"TradingEconomics API: {exc}")
+        return pd.DataFrame()
+
     def tradingeconomics_brazil_interest_rate() -> float | None:
         try:
             resp = requests.get(
@@ -2277,6 +2335,13 @@ def get_terminal_interest_rate_comparison_data() -> tuple[pd.DataFrame, dict]:
         meta["errors"].append(f"BCB: {exc}")
 
     has_brintr = any("BRINTR" in item.columns and item["BRINTR"].notna().any() for item in series)
+    if not has_brintr:
+        te_api_df = tradingeconomics_brazil_interest_rate_api()
+        if not te_api_df.empty:
+            series.append(te_api_df)
+            meta["sources"].append("Trading Economics API Brazil Interest Rate")
+            has_brintr = True
+
     if not has_brintr:
         te_rate = tradingeconomics_brazil_interest_rate()
         if te_rate is not None:
