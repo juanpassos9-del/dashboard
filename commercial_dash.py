@@ -736,7 +736,7 @@ def fetch_app_state(key: str):
     if key not in APP_STATE_ALLOWED_KEYS:
         print(f"[SECURITY] app_state read blocked for unexpected key: {key}")
         return None
-    """Busca dados no Supabase com tratamento de erro e redundância."""
+    # Busca dados no Supabase com tratamento de erro e redundancia.
     if not supabase: return None
     try:
         response = supabase.table("app_state").select("value").eq("key", key).execute()
