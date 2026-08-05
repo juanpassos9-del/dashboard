@@ -157,9 +157,10 @@ def save_cache(cache_data):
     """Salva as notícias traduzidas no cache local."""
     try:
         # Mantém apenas as últimas 500 notícias para evitar crescimento indefinido do cache
-        if len(cache_data) > 500:
+        news_keys = [k for k, v in cache_data.items() if k != "last_network_fetch" and isinstance(v, dict)]
+        if len(news_keys) > 500:
             # Ordena por timestamp para apagar os mais antigos
-            sorted_keys = sorted(cache_data.keys(), key=lambda k: cache_data[k].get("timestamp", 0))
+            sorted_keys = sorted(news_keys, key=lambda k: cache_data[k].get("timestamp", 0))
             for k in sorted_keys[:-500]:
                 cache_data.pop(k, None)
                 
