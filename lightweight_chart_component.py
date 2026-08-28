@@ -450,6 +450,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         <aside class="lw-side">
           <div class="lw-stat"><span>ATR 14</span><strong id="lw-atr14">---</strong><small id="lw-atr14-extra">Stop 1x/1.5x ---</small></div>
           <div class="lw-stat"><span>GARCH intraday</span><strong id="lw-garch-intraday">---</strong><small id="lw-garch-intraday-extra">Timeframe atual</small></div>
+          <div class="lw-stat"><span>Regime Vol</span><strong id="lw-vol-regime">---</strong><small id="lw-vol-regime-extra">HV252 + GARCH + ATR</small></div>
           <div class="lw-stat"><span>Sinal / Candle</span><strong id="lw-hover-title">Passe o mouse</strong><small id="lw-hover-data">OHLC, VWAP e sinal.</small></div>
           <div class="lw-settings" id="lw-ma-settings">
             <div class="lw-settings-title">Medias moveis</div>
@@ -1253,6 +1254,41 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         if (abs < 3) return { zone:"extreme", side, sigmaDistance, message:"Zona estatisticamente esticada." };
         return { zone:"anomaly", side, sigmaDistance, message:"Movimento anormal. Exigir confirmacao forte." };
       }
+      function classifyVolatilityRegime(indicators, candles) {
+        const last = candles?.[candles.length - 1];
+        const hv = indicators?.hv252 || {};
+        const garch = indicators?.garch || {};
+        const gIntraday = indicators?.garchIntraday || {};
+        const atr = indicators?.atr14 || {};
+        if (!last || !hv.ok || !Number.isFinite(hv.dailyVol) || hv.dailyVol <= 0) {
+          return { label:"Indisponivel", tone:"neutral", detail:"Historico diario insuficiente para regime." };
+        }
+        const reference = Number.isFinite(hv.prevClose) ? hv.prevClose : garch.referencePrice;
+        const hvSigma = Number.isFinite(reference) && reference > 0 ? Math.log(last.close / reference) / hv.dailyVol : NaN;
+        const garchSigma = garch.classification?.sigmaDistance;
+        const intradaySigma = gIntraday.classification?.sigmaDistance;
+        const atrPct = Number.isFinite(atr.percent) ? atr.percent : NaN;
+        const absHv = Math.abs(hvSigma);
+        const absGarch = Math.abs(garchSigma);
+        let label = "Neutro";
+        let tone = "neutral";
+        if (absHv >= 2.5 || absGarch >= 2.5) {
+          label = hvSigma > 0 ? "Extremo superior" : "Extremo inferior";
+          tone = hvSigma > 0 ? "sell" : "buy";
+        } else if (absHv >= 1.5 || absGarch >= 1.5) {
+          label = hvSigma > 0 ? "Venda em alerta" : "Compra em alerta";
+          tone = hvSigma > 0 ? "sell" : "buy";
+        } else if (Number.isFinite(atrPct) && atrPct < 0.35 && Math.abs(intradaySigma || 0) < 0.6) {
+          label = "Compressao";
+          tone = "neutral";
+        }
+        const detailParts = [
+          `HV ${Number.isFinite(hvSigma) ? hvSigma.toFixed(2) : "---"} sigma`,
+          `GARCH ${Number.isFinite(garchSigma) ? garchSigma.toFixed(2) : "---"} sigma`,
+          `ATR ${Number.isFinite(atrPct) ? atrPct.toFixed(2) : "---"}%`,
+        ];
+        return { label, tone, detail:detailParts.join(" | ") };
+      }
       function calculateGarchOverlay(candles, dailyCandles, refs, vwapDay) {
         const cfg = state.signalConfig.garch || {};
         const referenceMode = cfg.referenceMode || "previousClose";
@@ -1867,6 +1903,8 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const atrExtraEl = document.getElementById("lw-atr14-extra");
         const garchEl = document.getElementById("lw-garch-intraday");
         const garchExtraEl = document.getElementById("lw-garch-intraday-extra");
+        const volRegimeEl = document.getElementById("lw-vol-regime");
+        const volRegimeExtraEl = document.getElementById("lw-vol-regime-extra");
         if (atrEl) atrEl.textContent = atr.ok ? `${fmt(atr.value, 4)} | ${Number.isFinite(atr.percent) ? atr.percent.toFixed(2) : "---"}%` : "ATR indisponivel";
         if (atrExtraEl) atrExtraEl.textContent = atr.ok ? `Stop 1x ${fmt(atr.value, 4)} | 1.5x ${fmt(atr.value * 1.5, 4)}` : "Aguardando 14 candles";
         if (garchEl) {
@@ -1879,6 +1917,12 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
             ? `${state.timeframe} | anual ${(garchIntraday.annualizedVolatility * 100).toFixed(2)}% | ${gClass.zone || "---"}`
             : "Historico insuficiente no timeframe atual";
         }
+        const volRegime = classifyVolatilityRegime(indicators, state.candles);
+        if (volRegimeEl) {
+          volRegimeEl.textContent = volRegime.label;
+          volRegimeEl.style.color = volRegime.tone === "buy" ? "#22c55e" : volRegime.tone === "sell" ? "#ef4444" : "#f8fafc";
+        }
+        if (volRegimeExtraEl) volRegimeExtraEl.textContent = volRegime.detail;
         renderAlerts(last, lastVwap, lastVol.rvol, indicators.signals);
       }
       function renderAlerts(last, vwap, rvol, signals) {

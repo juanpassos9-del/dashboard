@@ -7535,14 +7535,16 @@ def pagina_watchlist_quant():
             },
         )
     with tab5:
-        st.markdown("#### Volatility")
+        st.markdown("#### Volatility Regime")
         fmt_quant_df(
             payload.get("volatility", []),
-            ["symbol", "block", "direction", "score", "price", "entry", "stop", "target", "vol20", "atr14", "z20", "setup"],
+            ["symbol", "block", "regime", "direction", "score", "price", "entry", "stop", "target", "vol20", "vol252", "vol_ratio", "atr14", "atr_pct", "z20", "sigma252", "setup"],
             {
-                "symbol": "Ativo", "block": "Classe", "direction": "Regime", "score": "Score",
+                "symbol": "Ativo", "block": "Classe", "regime": "Regime Vol", "direction": "Acao", "score": "Score",
                 "price": "Preco", "entry": "Referencia", "stop": "Stop", "target": "Alvo",
-                "vol20": "Vol 20d %", "atr14": "ATR 14", "z20": "Z 20d", "setup": "Setup",
+                "vol20": "Vol 20d %", "vol252": "Vol 252d %", "vol_ratio": "Vol 20/252",
+                "atr14": "ATR 14", "atr_pct": "ATR %", "z20": "Z 20d", "sigma252": "Sigma 252",
+                "setup": "Leitura",
             },
         )
     with tab6:

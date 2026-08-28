@@ -112,11 +112,20 @@ def _snapshot(asset: dict[str, str], df: pd.DataFrame) -> dict[str, Any] | None:
     ret60 = _ret(close, 60)
     ret120 = _ret(close, 120)
     vol20 = _safe_float(close.pct_change().tail(20).std() * math.sqrt(252) * 100, 0.0)
+    vol60 = _safe_float(close.pct_change().tail(60).std() * math.sqrt(252) * 100, vol20)
+    vol252 = _safe_float(close.pct_change().tail(252).std() * math.sqrt(252) * 100, vol60)
     atr14 = _atr(df)
     z20 = 0.0
     std20 = _safe_float(close.tail(20).std(), 0.0)
     if std20 > 0:
         z20 = (price - ma20) / std20
+    sigma252 = 0.0
+    std252 = _safe_float(close.tail(252).std(), 0.0)
+    mean252 = _safe_float(close.tail(252).mean(), ma200)
+    if std252 > 0:
+        sigma252 = (price - mean252) / std252
+    atr_pct = (atr14 / price) * 100 if price > 0 else 0.0
+    vol_ratio = vol20 / vol252 if vol252 > 0 else 1.0
     return {
         **asset,
         "price": price,
@@ -127,8 +136,13 @@ def _snapshot(asset: dict[str, str], df: pd.DataFrame) -> dict[str, Any] | None:
         "ret60": ret60,
         "ret120": ret120,
         "vol20": vol20,
+        "vol60": vol60,
+        "vol252": vol252,
+        "vol_ratio": vol_ratio,
         "atr14": atr14,
+        "atr_pct": atr_pct,
         "z20": z20,
+        "sigma252": sigma252,
         "support": _safe_float(df["Low"].astype(float).tail(20).min(), price),
         "resistance": _safe_float(df["High"].astype(float).tail(20).max(), price),
     }
@@ -213,24 +227,40 @@ def _event_driven_signal(s: dict[str, Any]) -> dict[str, Any] | None:
 def _volatility_signal(s: dict[str, Any]) -> dict[str, Any] | None:
     if s["vol20"] <= 0 or s["atr14"] <= 0:
         return None
-    compression = s["vol20"] < 24 and abs(s["z20"]) < 1.0
-    expansion = s["vol20"] >= 38 and abs(s["z20"]) >= 1.0
+    compression = (s["vol_ratio"] < 0.78 or s["vol20"] < 24) and abs(s["z20"]) < 1.0
+    expansion = (s["vol_ratio"] > 1.18 or s["vol20"] >= 38) and abs(s["z20"]) >= 1.0
+    stretched = abs(s.get("sigma252", 0.0)) >= 1.35 or abs(s["z20"]) >= 1.65
     if not compression and not expansion:
         return None
-    direction = "breakout" if compression else ("compra volatilidade" if s["z20"] < 0 else "venda volatilidade")
-    score = 58 + (24 - s["vol20"]) * 0.9 if compression else 54 + min(s["vol20"], 90) * 0.38 + abs(s["z20"]) * 6
+    if compression:
+        direction = "compressao / breakout"
+        regime = "Compressao"
+    elif s["z20"] < 0:
+        direction = "reversao compra"
+        regime = "Expansao inferior"
+    else:
+        direction = "reversao venda"
+        regime = "Expansao superior"
+    score = 58 + max(0, 1 - s["vol_ratio"]) * 34 if compression else 54 + min(s["vol20"], 90) * 0.34 + abs(s["z20"]) * 6 + (8 if stretched else 0)
     entry = s["price"]
-    stop = entry - s["atr14"] * 1.5 if direction != "venda volatilidade" else entry + s["atr14"] * 1.5
-    target = entry + s["atr14"] * 2.4 if direction != "venda volatilidade" else entry - s["atr14"] * 2.4
+    stop = entry + s["atr14"] * 1.5 if direction == "reversao venda" else entry - s["atr14"] * 1.5
+    target = entry - s["atr14"] * 2.4 if direction == "reversao venda" else entry + s["atr14"] * 2.4
     return {
         **s,
         "strategy": "Volatility",
         "direction": direction,
+        "regime": regime,
         "score": round(max(0, min(100, score)), 1),
         "entry": round(entry, 4),
         "stop": round(stop, 4),
         "target": round(target, 4),
-        "setup": "compressao de volatilidade; aguardar rompimento" if compression else "expansao de volatilidade; operar com stop mais curto",
+        "risk_unit": round(s["atr14"], 4),
+        "expected_1atr": round(s["atr14"] / entry * 100, 2) if entry else 0.0,
+        "setup": (
+            f"vol20 {s['vol20']:.1f}% vs vol252 {s['vol252']:.1f}% ({s['vol_ratio']:.2f}x); "
+            f"z20 {s['z20']:.2f}; sigma252 {s.get('sigma252', 0.0):.2f}; "
+            f"risco base 1 ATR {s['atr_pct']:.2f}%"
+        ),
     }
 
 
