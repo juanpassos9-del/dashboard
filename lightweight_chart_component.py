@@ -451,6 +451,7 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           <div class="lw-stat"><span>ATR 14</span><strong id="lw-atr14">---</strong><small id="lw-atr14-extra">Stop 1x/1.5x ---</small></div>
           <div class="lw-stat"><span>GARCH intraday</span><strong id="lw-garch-intraday">---</strong><small id="lw-garch-intraday-extra">Timeframe atual</small></div>
           <div class="lw-stat"><span>Regime Vol</span><strong id="lw-vol-regime">---</strong><small id="lw-vol-regime-extra">HV252 + GARCH + ATR</small></div>
+          <div class="lw-stat"><span>Risco / Stop</span><strong id="lw-risk-stop">---</strong><small id="lw-risk-stop-extra">ATR, VWAP e bandas</small></div>
           <div class="lw-stat"><span>Sinal / Candle</span><strong id="lw-hover-title">Passe o mouse</strong><small id="lw-hover-data">OHLC, VWAP e sinal.</small></div>
           <div class="lw-settings" id="lw-ma-settings">
             <div class="lw-settings-title">Medias moveis</div>
@@ -1289,6 +1290,55 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         ];
         return { label, tone, detail:detailParts.join(" | ") };
       }
+      function calculateRiskPanel(indicators, candles) {
+        const last = candles?.[candles.length - 1];
+        const atr = indicators?.atr14 || {};
+        const vwap = indicators?.vwapDay?.[indicators.vwapDay.length - 1]?.value;
+        const refs = indicators?.refs || {};
+        if (!last || !Number.isFinite(last.close)) {
+          return { label:"Indisponivel", tone:"neutral", detail:"Sem candle valido." };
+        }
+        const price = last.close;
+        const signal = (indicators?.signals || []).slice(-1)[0];
+        const direction = signal?.direction || (
+          price < vwap ? "buy" :
+          price > vwap ? "sell" :
+          "neutral"
+        );
+        const riskUnit = atr.ok && Number.isFinite(atr.value) && atr.value > 0 ? atr.value : Math.abs(price) * 0.006;
+        const stop = direction === "sell" ? price + riskUnit * 1.2 : direction === "buy" ? price - riskUnit * 1.2 : NaN;
+        const targetCandidates = [
+          { label:"VWAP", price:vwap },
+          { label:"Fech. ant.", price:refs.prevClose },
+          { label:"D max", price:refs.day?.high },
+          { label:"D min", price:refs.day?.low },
+        ].filter((item) => Number.isFinite(item.price));
+        const directionalTargets = targetCandidates.filter((item) => direction === "sell" ? item.price < price : direction === "buy" ? item.price > price : true);
+        const target = (directionalTargets.length ? directionalTargets : targetCandidates)
+          .sort((a,b) => Math.abs(a.price - price) - Math.abs(b.price - price))[0];
+        const bands = collectVolatilityBands(indicators)
+          .filter((band) => band.source !== "REFERENCE")
+          .sort((a,b) => Math.abs(a.price - price) - Math.abs(b.price - price));
+        const nearestBand = bands[0];
+        const stopPct = Number.isFinite(stop) ? Math.abs((price - stop) / price) * 100 : NaN;
+        const targetPct = target ? Math.abs((target.price - price) / price) * 100 : NaN;
+        const bandPct = nearestBand ? Math.abs((nearestBand.price - price) / price) * 100 : NaN;
+        let label = "Zona neutra";
+        let tone = "neutral";
+        if (signal) {
+          label = `${signal.direction === "buy" ? "BUY" : "SELL"} score ${signal.score}`;
+          tone = signal.direction === "buy" ? "buy" : "sell";
+        } else if (nearestBand && bandPct <= Math.max(0.18, stopPct || 0.18)) {
+          label = nearestBand.side === "lower" ? "Perto suporte vol" : "Perto resistencia vol";
+          tone = nearestBand.side === "lower" ? "buy" : "sell";
+        }
+        const detail = [
+          `Stop ${Number.isFinite(stop) ? fmt(stop, 2) : "---"} (${Number.isFinite(stopPct) ? stopPct.toFixed(2) : "---"}%)`,
+          `Alvo ${target ? `${target.label} ${fmt(target.price, 2)}` : "---"}`,
+          `Banda ${nearestBand ? `${nearestBand.label} ${Number.isFinite(bandPct) ? bandPct.toFixed(2) : "---"}%` : "---"}`,
+        ].join(" | ");
+        return { label, tone, detail, stop, target:target?.price, nearestBand:nearestBand?.price };
+      }
       function calculateGarchOverlay(candles, dailyCandles, refs, vwapDay) {
         const cfg = state.signalConfig.garch || {};
         const referenceMode = cfg.referenceMode || "previousClose";
@@ -1905,6 +1955,8 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
         const garchExtraEl = document.getElementById("lw-garch-intraday-extra");
         const volRegimeEl = document.getElementById("lw-vol-regime");
         const volRegimeExtraEl = document.getElementById("lw-vol-regime-extra");
+        const riskStopEl = document.getElementById("lw-risk-stop");
+        const riskStopExtraEl = document.getElementById("lw-risk-stop-extra");
         if (atrEl) atrEl.textContent = atr.ok ? `${fmt(atr.value, 4)} | ${Number.isFinite(atr.percent) ? atr.percent.toFixed(2) : "---"}%` : "ATR indisponivel";
         if (atrExtraEl) atrExtraEl.textContent = atr.ok ? `Stop 1x ${fmt(atr.value, 4)} | 1.5x ${fmt(atr.value * 1.5, 4)}` : "Aguardando 14 candles";
         if (garchEl) {
@@ -1923,6 +1975,12 @@ def render_lightweight_chart_html(signal_mode="all", chart_title=None, instance_
           volRegimeEl.style.color = volRegime.tone === "buy" ? "#22c55e" : volRegime.tone === "sell" ? "#ef4444" : "#f8fafc";
         }
         if (volRegimeExtraEl) volRegimeExtraEl.textContent = volRegime.detail;
+        const riskPanel = calculateRiskPanel(indicators, state.candles);
+        if (riskStopEl) {
+          riskStopEl.textContent = riskPanel.label;
+          riskStopEl.style.color = riskPanel.tone === "buy" ? "#22c55e" : riskPanel.tone === "sell" ? "#ef4444" : "#f8fafc";
+        }
+        if (riskStopExtraEl) riskStopExtraEl.textContent = riskPanel.detail;
         renderAlerts(last, lastVwap, lastVol.rvol, indicators.signals);
       }
       function renderAlerts(last, vwap, rvol, signals) {
