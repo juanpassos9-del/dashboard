@@ -4394,6 +4394,56 @@ def render_yield_curve_regime_panel():
         unsafe_allow_html=True,
     )
 
+
+def render_koyfin_terminal_global_embed():
+    """Embed compartilhado do Koyfin no Terminal Global."""
+    koyfin_url = "https://app.koyfin.com/share/371c5db6a3/simple"
+    embed_html = """
+        <style>
+            html, body {
+                margin: 0;
+                padding: 0;
+                background: transparent;
+                overflow: hidden;
+            }
+            .koyfin-embed-card {
+                border: 1px solid #263247;
+                background: linear-gradient(180deg, #0b1220 0%, #090d14 100%);
+                border-radius: 8px;
+                padding: 12px 12px 14px;
+                margin: 0;
+                color: #E5E7EB;
+                box-shadow: 0 10px 28px rgba(0,0,0,0.22);
+                box-sizing: border-box;
+                height: 470px;
+            }
+            .koyfin-embed-title {
+                color: #93A4B8;
+                font: 800 0.72rem "Roboto Mono", monospace;
+                text-transform: uppercase;
+                letter-spacing: .03em;
+                margin-bottom: 9px;
+            }
+            .koyfin-frame {
+                width: 100%;
+                height: 420px;
+                border: 0;
+                border-radius: 6px;
+                background: #05070c;
+            }
+        </style>
+        <section class="koyfin-embed-card">
+            <div class="koyfin-embed-title">Koyfin Embed | Macro View</div>
+            <iframe class="koyfin-frame" src="__KOYFIN_URL__" frameborder="0" loading="lazy"></iframe>
+        </section>
+        """.replace("__KOYFIN_URL__", koyfin_url)
+    components.html(
+        embed_html,
+        height=470,
+        scrolling=False,
+    )
+
+
 @st.fragment(run_every=30)
 def painel_corpo_global():
     """Tabelas detalhadas de mercados globais."""
@@ -5876,7 +5926,11 @@ def pagina_terminal_global():
     st.markdown("<div id='tg-top'></div>", unsafe_allow_html=True)
     painel_topo_global()
     render_source_health_panel()
-    render_yield_curve_regime_panel()
+    curve_col, koyfin_col = st.columns([0.58, 0.42], gap="medium")
+    with curve_col:
+        render_yield_curve_regime_panel()
+    with koyfin_col:
+        render_koyfin_terminal_global_embed()
     secao_calendario_global_fragment()
     
     body_col, corr_col = st.columns([0.74, 0.26], gap="medium")
