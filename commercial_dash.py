@@ -4395,9 +4395,8 @@ def render_yield_curve_regime_panel():
     )
 
 
-def render_koyfin_terminal_global_embed():
-    """Embed compartilhado do Koyfin no Terminal Global."""
-    koyfin_url = "https://app.koyfin.com/share/371c5db6a3/simple"
+def render_koyfin_embed(koyfin_url, title="Koyfin Embed | Macro View"):
+    """Renderiza um iframe compartilhado do Koyfin como bloco visual isolado."""
     embed_html = """
         <style>
             html, body {
@@ -4433,14 +4432,30 @@ def render_koyfin_terminal_global_embed():
             }
         </style>
         <section class="koyfin-embed-card">
-            <div class="koyfin-embed-title">Koyfin Embed | Macro View</div>
+            <div class="koyfin-embed-title">__KOYFIN_TITLE__</div>
             <iframe class="koyfin-frame" src="__KOYFIN_URL__" frameborder="0" loading="lazy"></iframe>
         </section>
-        """.replace("__KOYFIN_URL__", koyfin_url)
+        """.replace("__KOYFIN_URL__", koyfin_url).replace("__KOYFIN_TITLE__", html.escape(title))
     components.html(
         embed_html,
         height=470,
         scrolling=False,
+    )
+
+
+def render_koyfin_terminal_global_embed():
+    """Embed compartilhado do Koyfin no Terminal Global."""
+    render_koyfin_embed(
+        "https://app.koyfin.com/share/371c5db6a3/simple",
+        "Koyfin Embed | Macro View",
+    )
+
+
+def render_koyfin_terminal_trading_embed():
+    """Embed compartilhado do Koyfin ao lado do Regime de Juros."""
+    render_koyfin_embed(
+        "https://app.koyfin.com/share/67d3b6e906/simple",
+        "Koyfin Embed | Regime de Juros",
     )
 
 
@@ -6911,7 +6926,11 @@ def render_terminal_lightweight_copy():
 def pagina_terminal():
     """Renderiza o terminal principal de trading."""
     painel_tickers_topo()   # Indicadores Globais no Topo
-    render_regime_juros_section()
+    regime_col, koyfin_col = st.columns([0.68, 0.32], gap="medium")
+    with regime_col:
+        render_regime_juros_section()
+    with koyfin_col:
+        render_koyfin_terminal_trading_embed()
     render_top_movers_brasil()
     render_terminal_global_line_chart()
     render_terminal_interest_rate_tv_comparison()
