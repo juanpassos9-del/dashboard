@@ -2205,10 +2205,17 @@ def render_terminal_global_currency_performance_chart():
 
     import plotly.graph_objects as go
 
-    plot_df = df.copy().ffill().dropna(how="all")
+    plot_df = df.copy().ffill().dropna(how="any")
+    if plot_df.empty:
+        plot_df = df.copy().ffill().dropna(how="all")
     if plot_df.empty:
         st.info("Comparativo de moedas sem pontos validos nesta atualizacao.")
         return
+    if len(plot_df) < 2:
+        st.info("Comparativo de moedas aguardando mais pontos intradiarios.")
+        return
+    base = 1.0 + (plot_df.iloc[0].astype(float) / 100.0)
+    plot_df = (((1.0 + (plot_df.astype(float) / 100.0)).div(base, axis=1)) - 1.0) * 100.0
 
     hover_labels = [
         idx.strftime("%d/%m %H:%M") if hasattr(idx, "strftime") else str(idx)
@@ -2255,7 +2262,7 @@ def render_terminal_global_currency_performance_chart():
 
     fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="#94A3B8", opacity=0.75)
     fig.update_layout(
-        title=dict(text="Normalized Performance | Moedas", x=0.01, font=dict(size=16, color="#F8FAFC")),
+        title=dict(text="Intraday Performance | Moedas desde 0%", x=0.01, font=dict(size=16, color="#F8FAFC")),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#111821",
         font=dict(family='"Roboto Mono", monospace', color="#CBD5E1"),
@@ -2295,9 +2302,8 @@ def render_terminal_global_currency_performance_chart():
         fig,
         use_container_width=True,
         config={
-            "displayModeBar": True,
+            "displayModeBar": False,
             "displaylogo": False,
-            "modeBarButtonsToRemove": ["select2d", "lasso2d", "autoScale2d"],
         },
     )
 
