@@ -2059,6 +2059,29 @@ GLOBAL_LINE_CHART_GROUPS = {
 }
 
 
+CURRENCY_PERFORMANCE_GROUP = {
+    "EURUSD": "EURUSD=X",
+    "GBPUSD": "GBPUSD=X",
+    "USDJPY": "JPY=X",
+    "USDBRL": "BRL=X",
+    "AUDUSD": "AUDUSD=X",
+    "USDCAD": "CAD=X",
+    "USDCHF": "CHF=X",
+    "6L": "6L=F",
+}
+
+CURRENCY_PERFORMANCE_COLORS = {
+    "EURUSD": "#38BDF8",
+    "GBPUSD": "#84CC16",
+    "USDJPY": "#F43F5E",
+    "USDBRL": "#FACC15",
+    "AUDUSD": "#22C55E",
+    "USDCAD": "#FB923C",
+    "USDCHF": "#A78BFA",
+    "6L": "#00FFA3",
+}
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def get_terminal_global_line_chart_data(tickers: tuple[tuple[str, str], ...], period: str = "1d", interval: str = "5m") -> pd.DataFrame:
     try:
@@ -2171,6 +2194,112 @@ def render_terminal_line_chart_pair(title: str, tickers_map: dict, colors: dict)
         yaxis=dict(showgrid=True, gridcolor="#172338", zeroline=False, ticksuffix="%", title="Var. normalizada"),
     )
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
+def render_terminal_global_currency_performance_chart():
+    """Grafico intraday normalizado de moedas no Terminal Global."""
+    df = get_terminal_global_line_chart_data(tuple(CURRENCY_PERFORMANCE_GROUP.items()), period="1d", interval="5m")
+    if df.empty:
+        st.info("Comparativo de moedas indisponivel agora.")
+        return
+
+    import plotly.graph_objects as go
+
+    plot_df = df.copy().ffill().dropna(how="all")
+    if plot_df.empty:
+        st.info("Comparativo de moedas sem pontos validos nesta atualizacao.")
+        return
+
+    hover_labels = [
+        idx.strftime("%d/%m %H:%M") if hasattr(idx, "strftime") else str(idx)
+        for idx in plot_df.index
+    ]
+    x_values = list(range(len(plot_df)))
+    tick_step = max(1, len(plot_df) // 9)
+    tickvals = list(range(0, len(plot_df), tick_step))
+    if len(plot_df) - 1 not in tickvals:
+        tickvals.append(len(plot_df) - 1)
+    ticktext = [hover_labels[i] for i in tickvals]
+
+    fig = go.Figure()
+    for col in plot_df.columns:
+        color = CURRENCY_PERFORMANCE_COLORS.get(col, "#E2E8F0")
+        fig.add_trace(go.Scatter(
+            x=x_values,
+            y=plot_df[col],
+            mode="lines",
+            name=col,
+            line=dict(color=color, width=2.0),
+            connectgaps=True,
+            customdata=hover_labels,
+            hovertemplate=f"{col}<br>%{{customdata}}<br>%{{y:+.3f}}%<extra></extra>",
+        ))
+        try:
+            valid_series = plot_df[col].dropna()
+            last_value = float(valid_series.iloc[-1])
+            last_x = int(plot_df.index.get_loc(valid_series.index[-1]))
+            fig.add_annotation(
+                x=last_x,
+                y=last_value,
+                text=f"{col} {last_value:+.2f}%",
+                showarrow=False,
+                xanchor="left",
+                xshift=8,
+                font=dict(size=10, color="#FFFFFF"),
+                bgcolor=color,
+                bordercolor=color,
+                borderpad=3,
+            )
+        except Exception:
+            continue
+
+    fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="#94A3B8", opacity=0.75)
+    fig.update_layout(
+        title=dict(text="Normalized Performance | Moedas", x=0.01, font=dict(size=16, color="#F8FAFC")),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#111821",
+        font=dict(family='"Roboto Mono", monospace', color="#CBD5E1"),
+        margin=dict(l=46, r=116, t=54, b=44),
+        height=430,
+        hovermode="x unified",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            font=dict(size=10),
+            bgcolor="rgba(0,0,0,0)",
+        ),
+        xaxis=dict(
+            showgrid=True,
+            gridcolor="#1F2937",
+            zeroline=False,
+            title=None,
+            tickmode="array",
+            tickvals=tickvals,
+            ticktext=ticktext,
+            tickfont=dict(size=10),
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor="#1F2937",
+            zeroline=False,
+            ticksuffix="%",
+            title="Var. normalizada",
+            tickformat="+.2f",
+            side="right",
+        ),
+    )
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={
+            "displayModeBar": True,
+            "displaylogo": False,
+            "modeBarButtonsToRemove": ["select2d", "lasso2d", "autoScale2d"],
+        },
+    )
 
 
 def render_terminal_global_line_chart():
@@ -5949,6 +6078,7 @@ def pagina_terminal_global():
     st.markdown("<div id='tg-top'></div>", unsafe_allow_html=True)
     painel_topo_global()
     render_source_health_panel()
+    render_terminal_global_currency_performance_chart()
     render_koyfin_terminal_global_top_embed()
     curve_col, koyfin_col = st.columns([0.58, 0.42], gap="medium")
     with curve_col:
