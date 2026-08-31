@@ -4451,6 +4451,14 @@ def render_koyfin_terminal_global_embed():
     )
 
 
+def render_koyfin_terminal_global_top_embed():
+    """Embed compartilhado do Koyfin acima da curva de juros americana."""
+    render_koyfin_embed(
+        "https://app.koyfin.com/share/4b77fc3a68/simple",
+        "Koyfin Embed | Global View",
+    )
+
+
 def render_koyfin_terminal_trading_embed():
     """Embed compartilhado do Koyfin ao lado do Regime de Juros."""
     render_koyfin_embed(
@@ -5941,6 +5949,7 @@ def pagina_terminal_global():
     st.markdown("<div id='tg-top'></div>", unsafe_allow_html=True)
     painel_topo_global()
     render_source_health_panel()
+    render_koyfin_terminal_global_top_embed()
     curve_col, koyfin_col = st.columns([0.58, 0.42], gap="medium")
     with curve_col:
         render_yield_curve_regime_panel()
