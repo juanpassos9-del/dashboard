@@ -2444,6 +2444,18 @@ def get_fx_command_center_data():
         alignment_score = 100.0 if aligned else 35.0
         volatility_score = min(100.0, float(pair_series.diff().dropna().std() or 0.0) * 650.0)
         score = min(100.0, (abs(spread) * 0.44) + (momentum_score * 0.18) + (alignment_score * 0.14) + (volatility_score * 0.04))
+        base_score = float(strength.get(base, 0.0))
+        quote_score = float(strength.get(quote, 0.0))
+        driver_count = 1
+        driver_count += 1 if abs(spread) >= 45 else 0
+        driver_count += 1 if aligned else 0
+        driver_count += 1 if abs(ret) >= 0.10 else 0
+        driver_count += 1 if volatility_score >= 12 else 0
+        thesis = (
+            f"{base} {base_score:+.0f} vs {quote} {quote_score:+.0f}; "
+            f"momentum {'confirma' if aligned else 'diverge'}; "
+            f"spread {spread:+.0f}."
+        )
         rows.append({
             "Par": pair,
             "Direcao": direction,
@@ -2451,8 +2463,10 @@ def get_fx_command_center_data():
             "Quote": quote,
             "Spread": round(spread, 1),
             "Momentum %": round(ret, 3),
+            "Drivers": f"{driver_count}/5",
             "Score": round(score, 1),
             "Alinhado": "Sim" if aligned else "Divergente",
+            "Tese": thesis,
         })
 
     opportunities = sorted(rows, key=lambda item: item["Score"], reverse=True)
@@ -2518,6 +2532,14 @@ def render_fx_command_center():
     regime = data["regime"]
     opportunities = data["opportunities"]
     updated = html.escape(str(data.get("updated_at", "---")))
+    strongest, strongest_score = max(strength.items(), key=lambda item: item[1])
+    weakest, weakest_score = min(strength.items(), key=lambda item: item[1])
+    best = opportunities[0] if opportunities else {}
+    best_direction = html.escape(str(best.get("Direcao", "---")))
+    best_pair = html.escape(str(best.get("Par", "---")))
+    best_score = html.escape(str(best.get("Score", "---")))
+    best_drivers = html.escape(str(best.get("Drivers", "---")))
+    best_thesis = html.escape(str(best.get("Tese", "Aguardando pares validos.")))
 
     st.markdown(
         textwrap.dedent(f"""
@@ -2527,8 +2549,19 @@ def render_fx_command_center():
           .fxcc-card span {{ display:block; color:#94A3B8; font-size:.68rem; font-weight:900; letter-spacing:.06em; text-transform:uppercase; }}
           .fxcc-card strong {{ display:block; color:#F8FAFC; font-size:1.25rem; font-weight:950; margin-top:5px; }}
           .fxcc-summary {{ border:1px solid #1E3A5F; border-radius:8px; padding:12px 14px; background:#07111F; color:#CBD5E1; font-size:.9rem; font-weight:800; margin-bottom:14px; }}
+          .fxcc-best {{ display:grid; grid-template-columns:1.1fr .9fr 1.4fr; gap:10px; margin:10px 0 14px; }}
+          .fxcc-best-box {{ border:1px solid #334155; border-radius:8px; padding:12px 14px; background:linear-gradient(180deg,#0B1220,#07111F); }}
+          .fxcc-best-box span {{ color:#94A3B8; font-size:.68rem; font-weight:900; letter-spacing:.06em; text-transform:uppercase; }}
+          .fxcc-best-box strong {{ display:block; color:#F8FAFC; font-size:1.35rem; font-weight:950; margin-top:5px; }}
+          .fxcc-best-box small {{ display:block; color:#CBD5E1; font-size:.76rem; font-weight:800; margin-top:5px; line-height:1.35; }}
           @media(max-width:900px) {{ .fxcc-grid {{ grid-template-columns:1fr 1fr; }} }}
+          @media(max-width:900px) {{ .fxcc-best {{ grid-template-columns:1fr; }} }}
         </style>
+        <div class="fxcc-best">
+          <div class="fxcc-best-box"><span>Moeda forte x fraca</span><strong>{html.escape(str(strongest))} {strongest_score:+.0f} / {html.escape(str(weakest))} {weakest_score:+.0f}</strong><small>Base do mapa de forca relativa intraday.</small></div>
+          <div class="fxcc-best-box"><span>Best Expression</span><strong>{best_direction} {best_pair}</strong><small>Score {best_score} | Drivers {best_drivers}</small></div>
+          <div class="fxcc-best-box"><span>Tese deterministica</span><strong>{best_pair}</strong><small>{best_thesis}</small></div>
+        </div>
         <div class="fxcc-grid">
           <div class="fxcc-card"><span>USD Regime</span><strong>{html.escape(str(regime.get("USD", "---")))}</strong></div>
           <div class="fxcc-card"><span>Risk</span><strong>{html.escape(str(regime.get("RISK", "---")))}</strong></div>
@@ -2585,11 +2618,24 @@ def render_fx_command_center():
     col_opps, col_drivers = st.columns([0.62, 0.38], gap="medium")
     with col_opps:
         st.markdown("#### FX Pair Scanner")
-        opp_df = pd.DataFrame(opportunities[:12])
+        opp_df = pd.DataFrame(opportunities)
         if opp_df.empty:
             st.info("Scanner aguardando pares validos.")
         else:
-            st.dataframe(opp_df, use_container_width=True, hide_index=True, height=420)
+            display_cols = ["Par", "Direcao", "Score", "Drivers", "Spread", "Momentum %", "Alinhado", "Tese"]
+            top_long = opp_df[opp_df["Direcao"] == "LONG"].head(12)
+            top_short = opp_df[opp_df["Direcao"] == "SHORT"].head(12)
+            divergences = opp_df[opp_df["Alinhado"] == "Divergente"].sort_values("Score", ascending=False).head(12)
+            tab_long, tab_short, tab_div = st.tabs(["Top Long", "Top Short", "Divergencias"])
+            with tab_long:
+                st.dataframe(top_long[display_cols], use_container_width=True, hide_index=True, height=360)
+            with tab_short:
+                st.dataframe(top_short[display_cols], use_container_width=True, hide_index=True, height=360)
+            with tab_div:
+                if divergences.empty:
+                    st.caption("Sem divergencias relevantes entre strength e momentum agora.")
+                else:
+                    st.dataframe(divergences[display_cols], use_container_width=True, hide_index=True, height=360)
 
     with col_drivers:
         st.markdown("#### Macro Drivers")
