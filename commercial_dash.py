@@ -2081,6 +2081,30 @@ CURRENCY_PERFORMANCE_COLORS = {
     "USDCHF": "#A78BFA",
 }
 
+FX_COMMAND_PAIRS = [
+    ("EURUSD", "EURUSD=X", "EUR", "USD"),
+    ("GBPUSD", "GBPUSD=X", "GBP", "USD"),
+    ("USDJPY", "JPY=X", "USD", "JPY"),
+    ("USDCHF", "CHF=X", "USD", "CHF"),
+    ("USDCAD", "CAD=X", "USD", "CAD"),
+    ("AUDUSD", "AUDUSD=X", "AUD", "USD"),
+    ("NZDUSD", "NZDUSD=X", "NZD", "USD"),
+    ("EURJPY", "EURJPY=X", "EUR", "JPY"),
+    ("GBPJPY", "GBPJPY=X", "GBP", "JPY"),
+    ("AUDJPY", "AUDJPY=X", "AUD", "JPY"),
+    ("CADJPY", "CADJPY=X", "CAD", "JPY"),
+    ("EURGBP", "EURGBP=X", "EUR", "GBP"),
+    ("EURCHF", "EURCHF=X", "EUR", "CHF"),
+    ("GBPAUD", "GBPAUD=X", "GBP", "AUD"),
+    ("GBPCAD", "GBPCAD=X", "GBP", "CAD"),
+    ("AUDNZD", "AUDNZD=X", "AUD", "NZD"),
+    ("EURAUD", "EURAUD=X", "EUR", "AUD"),
+]
+
+FX_COMMAND_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"]
+FX_COMMAND_PAIR_MAP = {label: ticker for label, ticker, _base, _quote in FX_COMMAND_PAIRS}
+FX_COMMAND_PAIR_META = {label: {"base": base, "quote": quote} for label, _ticker, base, quote in FX_COMMAND_PAIRS}
+
 
 @st.cache_data(ttl=600, show_spinner=False)
 def get_terminal_global_line_chart_data(tickers: tuple[tuple[str, str], ...], period: str = "1d", interval: str = "5m") -> pd.DataFrame:
@@ -2306,6 +2330,303 @@ def render_terminal_global_currency_performance_chart():
             "displaylogo": False,
         },
     )
+
+
+def _fx_strength_from_returns(returns: dict) -> dict:
+    contributions = {currency: [] for currency in FX_COMMAND_CURRENCIES}
+    for pair, value in returns.items():
+        meta = FX_COMMAND_PAIR_META.get(pair)
+        if not meta:
+            continue
+        try:
+            ret = float(value)
+        except (TypeError, ValueError):
+            continue
+        contributions[meta["base"]].append(ret)
+        contributions[meta["quote"]].append(-ret)
+    raw_scores = {
+        currency: (sum(values) / len(values) if values else 0.0)
+        for currency, values in contributions.items()
+    }
+    max_abs = max([abs(v) for v in raw_scores.values()] + [1e-9])
+    return {
+        currency: max(-100.0, min(100.0, (score / max_abs) * 100.0))
+        for currency, score in raw_scores.items()
+    }
+
+
+def _fx_returns_for_lookback(df: pd.DataFrame, bars: int | None) -> dict:
+    if df.empty:
+        return {}
+    clean = df.ffill().dropna(how="all")
+    if clean.empty:
+        return {}
+    latest = clean.iloc[-1].dropna()
+    if bars is None or len(clean) <= bars:
+        base = clean.iloc[0].dropna()
+    else:
+        base = clean.iloc[-bars - 1].dropna()
+    values = {}
+    for col in clean.columns:
+        if col not in latest.index or col not in base.index:
+            continue
+        try:
+            values[col] = float(latest[col]) - float(base[col])
+        except (TypeError, ValueError):
+            continue
+    return values
+
+
+def _fx_extract_global_item(global_data: dict | None, names: list[str]) -> dict:
+    if not isinstance(global_data, dict):
+        return {}
+    lowered = [name.lower() for name in names]
+    categories = global_data.get("categories", global_data)
+    if not isinstance(categories, dict):
+        return {}
+    for rows in categories.values():
+        if not isinstance(rows, list):
+            continue
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            candidates = [
+                str(item.get("name") or ""),
+                str(item.get("symbol") or ""),
+                str(item.get("ticker") or ""),
+                str(item.get("label") or ""),
+            ]
+            joined = " ".join(candidates).lower()
+            if any(name in joined for name in lowered):
+                return item
+    return {}
+
+
+def _fx_float(value, default=0.0):
+    try:
+        if value in (None, "", "---"):
+            return default
+        if isinstance(value, str):
+            value = value.replace("%", "").replace(",", ".")
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_fx_command_center_data():
+    pair_df = get_terminal_global_line_chart_data(tuple(FX_COMMAND_PAIR_MAP.items()), period="1d", interval="5m")
+    if pair_df.empty:
+        return {"error": "Sem dados intradiarios FX nesta atualizacao."}
+
+    pair_df = pair_df.ffill().dropna(how="all")
+    latest_returns = _fx_returns_for_lookback(pair_df, None)
+    strength = _fx_strength_from_returns(latest_returns)
+    mtf = {
+        "15m": _fx_strength_from_returns(_fx_returns_for_lookback(pair_df, 3)),
+        "1H": _fx_strength_from_returns(_fx_returns_for_lookback(pair_df, 12)),
+        "4H": _fx_strength_from_returns(_fx_returns_for_lookback(pair_df, 48)),
+        "Dia": strength,
+    }
+
+    rows = []
+    for pair, ticker, base, quote in FX_COMMAND_PAIRS:
+        if pair not in pair_df.columns:
+            continue
+        pair_series = pair_df[pair].dropna()
+        if pair_series.empty:
+            continue
+        ret = float(pair_series.iloc[-1])
+        spread = float(strength.get(base, 0.0) - strength.get(quote, 0.0))
+        direction = "LONG" if spread >= 0 else "SHORT"
+        aligned = (ret >= 0 and direction == "LONG") or (ret <= 0 and direction == "SHORT")
+        momentum_score = min(100.0, abs(ret) * 450.0)
+        alignment_score = 100.0 if aligned else 35.0
+        volatility_score = min(100.0, float(pair_series.diff().dropna().std() or 0.0) * 650.0)
+        score = min(100.0, (abs(spread) * 0.44) + (momentum_score * 0.18) + (alignment_score * 0.14) + (volatility_score * 0.04))
+        rows.append({
+            "Par": pair,
+            "Direcao": direction,
+            "Base": base,
+            "Quote": quote,
+            "Spread": round(spread, 1),
+            "Momentum %": round(ret, 3),
+            "Score": round(score, 1),
+            "Alinhado": "Sim" if aligned else "Divergente",
+        })
+
+    opportunities = sorted(rows, key=lambda item: item["Score"], reverse=True)
+    global_data = get_global_markets_data()
+    dxy_item = _fx_extract_global_item(global_data, ["dxy", "dolar index", "dólar index"])
+    vix_item = _fx_extract_global_item(global_data, ["vix"])
+    spx_item = _fx_extract_global_item(global_data, ["s&p 500", "sp 500"])
+    us10y_item = _fx_extract_global_item(global_data, ["us 10y", "10y"])
+    brent_item = _fx_extract_global_item(global_data, ["brent"])
+    gold_item = _fx_extract_global_item(global_data, ["gold", "ouro"])
+
+    dxy_change = _fx_float(dxy_item.get("change"))
+    vix_change = _fx_float(vix_item.get("change"))
+    spx_change = _fx_float(spx_item.get("change"))
+    us10y_change = _fx_float(us10y_item.get("change"))
+    brent_change = _fx_float(brent_item.get("change"))
+    gold_change = _fx_float(gold_item.get("change"))
+
+    usd_score = float(strength.get("USD", 0.0))
+    usd_bias = "BULLISH" if usd_score >= 25 else ("BEARISH" if usd_score <= -25 else "NEUTRO")
+    risk_bias = "RISK-ON" if spx_change >= 0 and vix_change <= 0 else ("RISK-OFF" if spx_change < 0 and vix_change > 0 else "MISTO")
+    rates_bias = "RISING" if us10y_change > 0 else ("FALLING" if us10y_change < 0 else "NEUTRO")
+    commodities_bias = "BULLISH" if (brent_change + gold_change) > 0 else ("BEARISH" if (brent_change + gold_change) < 0 else "NEUTRO")
+
+    strongest = max(strength.items(), key=lambda item: item[1])[0]
+    weakest = min(strength.items(), key=lambda item: item[1])[0]
+    top_pair = opportunities[0] if opportunities else {}
+    summary = (
+        f"{strongest} e a moeda mais forte contra {weakest}. "
+        f"Dolar esta {usd_bias.lower()}, risco {risk_bias.lower()} e juros EUA {rates_bias.lower()}. "
+        f"Melhor expressao atual: {top_pair.get('Direcao', '---')} {top_pair.get('Par', '---')}."
+    )
+
+    return {
+        "updated_at": datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d %H:%M:%S"),
+        "pair_df": pair_df,
+        "strength": strength,
+        "mtf": mtf,
+        "opportunities": opportunities,
+        "regime": {
+            "USD": usd_bias,
+            "RISK": risk_bias,
+            "RATES": rates_bias,
+            "COMMODITIES": commodities_bias,
+            "DXY": dxy_change,
+            "VIX": vix_change,
+            "SPX": spx_change,
+            "US10Y": us10y_change,
+            "summary": summary,
+        },
+    }
+
+
+def render_fx_command_center():
+    st.markdown("## FX COMMAND CENTER")
+    st.caption("Currency strength, regime macro e scanner intraday | dados do dashboard + yfinance/cache")
+    data = get_fx_command_center_data()
+    if data.get("error"):
+        st.info(data["error"])
+        return
+
+    strength = data["strength"]
+    regime = data["regime"]
+    opportunities = data["opportunities"]
+    updated = html.escape(str(data.get("updated_at", "---")))
+
+    st.markdown(
+        textwrap.dedent(f"""
+        <style>
+          .fxcc-grid {{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:10px 0 14px; }}
+          .fxcc-card {{ border:1px solid #243244; border-radius:8px; padding:12px; background:#0B1220; min-height:74px; }}
+          .fxcc-card span {{ display:block; color:#94A3B8; font-size:.68rem; font-weight:900; letter-spacing:.06em; text-transform:uppercase; }}
+          .fxcc-card strong {{ display:block; color:#F8FAFC; font-size:1.25rem; font-weight:950; margin-top:5px; }}
+          .fxcc-summary {{ border:1px solid #1E3A5F; border-radius:8px; padding:12px 14px; background:#07111F; color:#CBD5E1; font-size:.9rem; font-weight:800; margin-bottom:14px; }}
+          @media(max-width:900px) {{ .fxcc-grid {{ grid-template-columns:1fr 1fr; }} }}
+        </style>
+        <div class="fxcc-grid">
+          <div class="fxcc-card"><span>USD Regime</span><strong>{html.escape(str(regime.get("USD", "---")))}</strong></div>
+          <div class="fxcc-card"><span>Risk</span><strong>{html.escape(str(regime.get("RISK", "---")))}</strong></div>
+          <div class="fxcc-card"><span>Rates</span><strong>{html.escape(str(regime.get("RATES", "---")))}</strong></div>
+          <div class="fxcc-card"><span>Commodities</span><strong>{html.escape(str(regime.get("COMMODITIES", "---")))}</strong></div>
+        </div>
+        <div class="fxcc-summary">{html.escape(str(regime.get("summary", "Sem leitura.")))}<br><span style="color:#64748B; font-size:.72rem;">Atualizado {updated}</span></div>
+        """),
+        unsafe_allow_html=True,
+    )
+
+    col_strength, col_mtf = st.columns([0.44, 0.56], gap="medium")
+    with col_strength:
+        import plotly.graph_objects as go
+
+        strength_items = sorted(strength.items(), key=lambda item: item[1])
+        colors = ["#F43F5E" if value < -20 else "#94A3B8" if value < 20 else "#22C55E" for _ccy, value in strength_items]
+        fig = go.Figure(go.Bar(
+            x=[value for _ccy, value in strength_items],
+            y=[ccy for ccy, _value in strength_items],
+            orientation="h",
+            marker_color=colors,
+            text=[f"{value:+.0f}" for _ccy, value in strength_items],
+            textposition="outside",
+            hovertemplate="%{y}: %{x:+.1f}<extra></extra>",
+        ))
+        fig.add_vline(x=0, line_width=1, line_dash="dot", line_color="#94A3B8")
+        fig.update_layout(
+            title=dict(text="Currency Strength", x=0.01, font=dict(size=15, color="#F8FAFC")),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="#07111F",
+            font=dict(family='"Roboto Mono", monospace', color="#CBD5E1"),
+            margin=dict(l=45, r=42, t=44, b=24),
+            height=360,
+            xaxis=dict(range=[-115, 115], showgrid=True, gridcolor="#172338", zeroline=False),
+            yaxis=dict(showgrid=False),
+            showlegend=False,
+        )
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    with col_mtf:
+        mtf_rows = []
+        for currency in FX_COMMAND_CURRENCIES:
+            row = {"Moeda": currency}
+            for horizon in ["15m", "1H", "4H", "Dia"]:
+                row[horizon] = round(float(data["mtf"].get(horizon, {}).get(currency, 0.0)), 1)
+            mtf_rows.append(row)
+        mtf_df = pd.DataFrame(mtf_rows).sort_values("Dia", ascending=False)
+        st.markdown("#### Multi-timeframe Strength")
+        st.dataframe(mtf_df, use_container_width=True, hide_index=True, height=330)
+
+    render_terminal_global_currency_performance_chart()
+
+    col_opps, col_drivers = st.columns([0.62, 0.38], gap="medium")
+    with col_opps:
+        st.markdown("#### FX Pair Scanner")
+        opp_df = pd.DataFrame(opportunities[:12])
+        if opp_df.empty:
+            st.info("Scanner aguardando pares validos.")
+        else:
+            st.dataframe(opp_df, use_container_width=True, hide_index=True, height=420)
+
+    with col_drivers:
+        st.markdown("#### Macro Drivers")
+        drivers = [
+            ("DXY", regime.get("DXY")),
+            ("VIX", regime.get("VIX")),
+            ("S&P 500", regime.get("SPX")),
+            ("US10Y", regime.get("US10Y")),
+        ]
+        for label, value in drivers:
+            value = _fx_float(value)
+            color = "#22C55E" if value > 0 else ("#F43F5E" if value < 0 else "#94A3B8")
+            st.markdown(
+                f"<div style='display:flex; justify-content:space-between; border:1px solid #243244; border-radius:8px; padding:10px 12px; background:#0B1220; margin-bottom:8px;'><span style='color:#CBD5E1; font-weight:900;'>{html.escape(label)}</span><b style='color:{color};'>{value:+.2f}%</b></div>",
+                unsafe_allow_html=True,
+            )
+
+        events = get_calendar_data() or []
+        today = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d")
+        fx_events = [
+            event for event in events
+            if isinstance(event, dict)
+            and str(event.get("date") or "")[:10] == today
+            and str(event.get("currency") or event.get("País") or event.get("Pais") or "").upper() in FX_COMMAND_CURRENCIES
+        ][:6]
+        st.markdown("#### Event Risk")
+        if not fx_events:
+            st.caption("Sem eventos FX relevantes carregados para hoje.")
+        for event in fx_events:
+            ccy = html.escape(str(event.get("currency") or event.get("País") or event.get("Pais") or "---"))
+            hour = html.escape(str(event.get("time") or "---"))
+            name = html.escape(str(event.get("event") or event.get("Evento") or "---"))
+            importance = html.escape(str(event.get("importance") or event.get("impact") or "---"))
+            st.markdown(
+                f"<div style='border-left:3px solid #38BDF8; padding:7px 9px; background:#07111F; margin-bottom:7px;'><b style='color:#F8FAFC;'>{hour} {ccy}</b><br><span style='color:#CBD5E1;'>{name}</span><br><small style='color:#94A3B8;'>{importance}</small></div>",
+                unsafe_allow_html=True,
+            )
 
 
 def render_terminal_global_line_chart():
@@ -10986,7 +11307,7 @@ with st.sidebar:
         st.session_state.pop("auth_loading_until", None)
         _auth_rerun()
     st.markdown("### 🧭 Navegação")
-    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "MONITOR MACRO", "Crypto Terminal", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
+    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "FX COMMAND CENTER", "MONITOR MACRO", "Crypto Terminal", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
     sidebar_clock()
     
     st.markdown("---")
@@ -11003,6 +11324,8 @@ if page == "📉 Terminal de Trading":
     pagina_terminal()
 elif page == "🌎 Terminal Global":
     pagina_terminal_global()
+elif page == "FX COMMAND CENTER":
+    render_fx_command_center()
 elif page == "MONITOR MACRO":
     pagina_monitor_macro()
 elif page == "Crypto Terminal":
