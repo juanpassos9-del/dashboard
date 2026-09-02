@@ -2413,6 +2413,15 @@ def _fx_float(value, default=0.0):
         return default
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_us02y_quote_cached():
+    try:
+        from execution.fetch_global_markets import _fetch_fred_yield_candidate
+        return _fetch_fred_yield_candidate("US 02Y (Yield)", "FRED:DGS2") or {}
+    except Exception:
+        return {}
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def get_fx_command_center_data():
     pair_df = get_terminal_global_line_chart_data(tuple(FX_COMMAND_PAIR_MAP.items()), period="1d", interval="5m")
@@ -2474,6 +2483,9 @@ def get_fx_command_center_data():
     dxy_item = _fx_extract_global_item(global_data, ["dxy", "dolar index", "dólar index"])
     vix_item = _fx_extract_global_item(global_data, ["vix"])
     spx_item = _fx_extract_global_item(global_data, ["s&p 500", "sp 500"])
+    us02y_item = _fx_extract_global_item(global_data, ["us 02y", "us02y", "fred:dgs2"])
+    if not us02y_item:
+        us02y_item = get_us02y_quote_cached()
     us10y_item = _fx_extract_global_item(global_data, ["us 10y", "10y"])
     brent_item = _fx_extract_global_item(global_data, ["brent"])
     gold_item = _fx_extract_global_item(global_data, ["gold", "ouro"])
@@ -2481,6 +2493,7 @@ def get_fx_command_center_data():
     dxy_change = _fx_float(dxy_item.get("change"))
     vix_change = _fx_float(vix_item.get("change"))
     spx_change = _fx_float(spx_item.get("change"))
+    us02y_change = _fx_float(us02y_item.get("change_bps"), _fx_float(us02y_item.get("change")))
     us10y_change = _fx_float(us10y_item.get("change"))
     brent_change = _fx_float(brent_item.get("change"))
     gold_change = _fx_float(gold_item.get("change"))
@@ -2488,7 +2501,8 @@ def get_fx_command_center_data():
     usd_score = float(strength.get("USD", 0.0))
     usd_bias = "BULLISH" if usd_score >= 25 else ("BEARISH" if usd_score <= -25 else "NEUTRO")
     risk_bias = "RISK-ON" if spx_change >= 0 and vix_change <= 0 else ("RISK-OFF" if spx_change < 0 and vix_change > 0 else "MISTO")
-    rates_bias = "RISING" if us10y_change > 0 else ("FALLING" if us10y_change < 0 else "NEUTRO")
+    rates_driver = us02y_change if us02y_item else us10y_change
+    rates_bias = "RISING" if rates_driver > 0 else ("FALLING" if rates_driver < 0 else "NEUTRO")
     commodities_bias = "BULLISH" if (brent_change + gold_change) > 0 else ("BEARISH" if (brent_change + gold_change) < 0 else "NEUTRO")
 
     strongest = max(strength.items(), key=lambda item: item[1])[0]
@@ -2514,6 +2528,7 @@ def get_fx_command_center_data():
             "DXY": dxy_change,
             "VIX": vix_change,
             "SPX": spx_change,
+            "US02Y": us02y_change,
             "US10Y": us10y_change,
             "summary": summary,
         },
@@ -2640,16 +2655,18 @@ def render_fx_command_center():
     with col_drivers:
         st.markdown("#### Macro Drivers")
         drivers = [
-            ("DXY", regime.get("DXY")),
-            ("VIX", regime.get("VIX")),
-            ("S&P 500", regime.get("SPX")),
-            ("US10Y", regime.get("US10Y")),
+            ("DXY", regime.get("DXY"), "%"),
+            ("VIX", regime.get("VIX"), "%"),
+            ("S&P 500", regime.get("SPX"), "%"),
+            ("US02Y", regime.get("US02Y"), "bps"),
+            ("US10Y", regime.get("US10Y"), "%"),
         ]
-        for label, value in drivers:
+        for label, value, unit in drivers:
             value = _fx_float(value)
             color = "#22C55E" if value > 0 else ("#F43F5E" if value < 0 else "#94A3B8")
+            suffix = " bps" if unit == "bps" else "%"
             st.markdown(
-                f"<div style='display:flex; justify-content:space-between; border:1px solid #243244; border-radius:8px; padding:10px 12px; background:#0B1220; margin-bottom:8px;'><span style='color:#CBD5E1; font-weight:900;'>{html.escape(label)}</span><b style='color:{color};'>{value:+.2f}%</b></div>",
+                f"<div style='display:flex; justify-content:space-between; border:1px solid #243244; border-radius:8px; padding:10px 12px; background:#0B1220; margin-bottom:8px;'><span style='color:#CBD5E1; font-weight:900;'>{html.escape(label)}</span><b style='color:{color};'>{value:+.2f}{suffix}</b></div>",
                 unsafe_allow_html=True,
             )
 

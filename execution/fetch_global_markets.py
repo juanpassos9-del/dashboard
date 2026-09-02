@@ -390,8 +390,101 @@ def _fetch_lse_candidate(name, ticker_symbol):
         return None
 
 
+def _fetch_fred_yield_candidate(name, ticker_symbol):
+    if not str(ticker_symbol).startswith("FRED:"):
+        return None
+    api_key = _get_config_value("FRED_API_KEY", "FRED_KEY")
+    if not api_key:
+        return _fetch_us02y_yahoo_candidate(name, ticker_symbol)
+    series_id = str(ticker_symbol).split(":", 1)[1]
+    params = {
+        "series_id": series_id,
+        "api_key": api_key,
+        "file_type": "json",
+        "sort_order": "desc",
+        "limit": 10,
+    }
+    try:
+        response = requests.get("https://api.stlouisfed.org/fred/series/observations", params=params, timeout=6)
+        response.raise_for_status()
+        observations = response.json().get("observations", [])
+        values = []
+        for obs in observations:
+            value = _finite_float(obs.get("value"))
+            if value is not None:
+                values.append({"date": obs.get("date"), "value": value})
+        if len(values) < 2:
+            return None
+        latest, previous = values[0], values[1]
+        price = float(latest["value"])
+        prev = float(previous["value"])
+        change_pct = ((price - prev) / prev) * 100 if prev else 0.0
+        change_bps = (price - prev) * 100.0
+        source_time = _to_utc_timestamp(latest.get("date"), assume_tz=timezone.utc)
+        age = _age_seconds(source_time)
+        return {
+            "name": name,
+            "symbol": ticker_symbol,
+            "source_symbol": series_id,
+            "source": "FRED",
+            "source_timestamp": source_time.isoformat() if source_time else None,
+            "age_seconds": float(round(age, 1)) if age is not None else None,
+            "price": _round_price(price),
+            "high": _round_price(max(price, prev)),
+            "low": _round_price(min(price, prev)),
+            "change": float(round(change_pct, 2)),
+            "change_bps": float(round(change_bps, 2)),
+            "change_5m": None,
+            "prev_close": _round_price(prev),
+        }
+    except Exception as e:
+        print(f"[!] FRED falhou para {series_id}: {e}")
+        return _fetch_us02y_yahoo_candidate(name, ticker_symbol)
+
+
+def _fetch_us02y_yahoo_candidate(name, ticker_symbol):
+    if ticker_symbol != "FRED:DGS2":
+        return None
+    try:
+        data = yf.download(
+            "2YY=F",
+            period="10d",
+            interval="1d",
+            progress=False,
+            auto_adjust=False,
+            threads=False,
+            timeout=8,
+        )
+        if data is None or data.empty:
+            return None
+        if isinstance(data.columns, pd.MultiIndex):
+            if "2YY=F" in set(data.columns.get_level_values(0)):
+                data = data["2YY=F"]
+            elif "2YY=F" in set(data.columns.get_level_values(1)):
+                data = data.xs("2YY=F", axis=1, level=1)
+        candidate = _candidate_from_frame(name, ticker_symbol, data, source="Yahoo Finance", source_symbol="2YY=F")
+        if not candidate:
+            return None
+        try:
+            price = _finite_float(candidate.get("price"))
+            prev = _finite_float(candidate.get("prev_close"))
+            if price is not None and prev is not None:
+                candidate["change_bps"] = float(round((price - prev) * 100.0, 2))
+        except Exception:
+            pass
+        candidate["change_5m"] = None
+        return candidate
+    except Exception as e:
+        print(f"[!] Yahoo fallback US02Y falhou: {e}")
+        return None
+
+
 def _quote_candidates(name, ticker_symbol, yfinance_df=None):
     candidates = []
+    fred_candidate = _fetch_fred_yield_candidate(name, ticker_symbol)
+    if fred_candidate:
+        return [fred_candidate]
+
     if yfinance_df is not None and not yfinance_df.empty:
         candidate = _candidate_from_frame(name, ticker_symbol, yfinance_df, source="Yahoo Finance")
         if candidate:
@@ -542,6 +635,7 @@ def fetch_global_data(save_file=True):
             "USDCHF": "CHF=X"
         },
         "🇺🇸 TREASURIES (YIELDS)": {
+            "US 02Y (Yield)": "FRED:DGS2",
             "US 10Y (Yield)": "^TNX",
             "US 30Y (Yield)": "^TYX",
             "US 05Y (Yield)": "^FVX",
@@ -589,7 +683,7 @@ def fetch_global_data(save_file=True):
     # 1. Coleta todos os tickers únicos
     all_tickers = []
     for cat in categories_config.values():
-        all_tickers.extend(cat.values())
+        all_tickers.extend([ticker for ticker in cat.values() if not str(ticker).startswith("FRED:")])
     all_tickers = list(set(all_tickers))
     
     print(f"[*] Buscando dados para {len(all_tickers)} ativos via yfinance...")
