@@ -1662,6 +1662,7 @@ def painel_tickers_topo():
         "EWZ": "EWZ (Brazil ETF)",
         "EEM": "EEM (Emerging Markets)",
         "6L": "6L (Real CME)",
+        "US02Y": "US 02Y (Yield)",
         "PBR": "PETR4 (ADR)",
         "VALE": "VALE (ADR)",
         "BRENT": "BRENT OIL"
@@ -1682,16 +1683,29 @@ def painel_tickers_topo():
         with cols[i]:
             asset = found_assets.get(key)
             if asset:
-                change = asset.get('change', 0)
+                try:
+                    change = float(asset.get('change', 0) or 0)
+                except (TypeError, ValueError):
+                    change = 0.0
                 color = "#00FFA3" if change >= 0 else "#FF4B4B"
-                price = asset.get('price', 0)
+                try:
+                    price = float(asset.get('price', 0) or 0)
+                except (TypeError, ValueError):
+                    price = 0.0
                 # Formatação compacta para o topo
                 price_fmt = f"{price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                if key == "US02Y":
+                    price_fmt = f"{price:.2f}%".replace(".", ",")
+                change_fmt = f"{change:+.2f}%"
+                if asset.get("change_bps") is not None:
+                    change_bps = float(asset.get("change_bps") or 0)
+                    color = "#00FFA3" if change_bps >= 0 else "#FF4B4B"
+                    change_fmt = f"{change_bps:+.2f} bps".replace(".", ",")
                 st.markdown(f"""
                     <div style="background: #111; border: 1px solid #222; border-top: 2px solid {color}; padding: 8px; border-radius: 4px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">
                         <div style="font-size: 0.6rem; color: #888; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;">{key}</div>
                         <div style="font-size: 1.1rem; font-weight: bold; color: #FFF; margin: 2px 0;">{price_fmt}</div>
-                        <div style="font-size: 0.75rem; color: {color}; font-weight: bold;">{change:+.2f}%</div>
+                        <div style="font-size: 0.75rem; color: {color}; font-weight: bold;">{change_fmt}</div>
                     </div>
                 """, unsafe_allow_html=True)
             else:
