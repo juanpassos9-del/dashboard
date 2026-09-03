@@ -2718,7 +2718,7 @@ def render_fx_command_center():
         unsafe_allow_html=True,
     )
 
-    col_strength, col_mtf = st.columns([0.44, 0.56], gap="medium")
+    col_strength, col_driver_panel = st.columns([0.58, 0.42], gap="medium")
     with col_strength:
         import plotly.graph_objects as go
 
@@ -2747,48 +2747,7 @@ def render_fx_command_center():
         )
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-    with col_mtf:
-        mtf_rows = []
-        for currency in FX_COMMAND_CURRENCIES:
-            row = {"Moeda": currency}
-            for horizon in ["15m", "1H", "4H", "Dia"]:
-                row[horizon] = round(float(data["mtf"].get(horizon, {}).get(currency, 0.0)), 1)
-            mtf_rows.append(row)
-        mtf_df = pd.DataFrame(mtf_rows).sort_values("Dia", ascending=False)
-        st.markdown("#### Multi-timeframe Strength")
-        st.dataframe(mtf_df, use_container_width=True, hide_index=True, height=330)
-
-    render_terminal_global_currency_performance_chart()
-
-    col_opps, col_drivers = st.columns([0.62, 0.38], gap="medium")
-    with col_opps:
-        st.markdown("#### Majors Pair Scanner")
-        opp_df = pd.DataFrame(opportunities)
-        if opp_df.empty:
-            st.info("Scanner aguardando pares validos.")
-        else:
-            display_cols = ["Par", "Direcao", "Score", "Driver dominante", "Drivers", "Spread", "Momentum %", "Alinhado", "Tese"]
-            top_long = opp_df[opp_df["Direcao"] == "LONG"].head(12)
-            top_short = opp_df[opp_df["Direcao"] == "SHORT"].head(12)
-            divergences = opp_df[opp_df["Alinhado"] == "Divergente"].sort_values("Score", ascending=False).head(12)
-            tab_long, tab_short, tab_div, tab_corr = st.tabs(["Top Long", "Top Short", "Divergencias", "Correlacoes"])
-            with tab_long:
-                st.dataframe(top_long[display_cols], use_container_width=True, hide_index=True, height=360)
-            with tab_short:
-                st.dataframe(top_short[display_cols], use_container_width=True, hide_index=True, height=360)
-            with tab_div:
-                if divergences.empty:
-                    st.caption("Sem divergencias relevantes entre strength e momentum agora.")
-                else:
-                    st.dataframe(divergences[display_cols], use_container_width=True, hide_index=True, height=360)
-            with tab_corr:
-                corr_df = pd.DataFrame(correlations)
-                if corr_df.empty:
-                    st.caption("Correlacoes intradiarias aguardando mais pontos validos.")
-                else:
-                    st.dataframe(corr_df.head(28), use_container_width=True, hide_index=True, height=360)
-
-    with col_drivers:
+    with col_driver_panel:
         st.markdown("#### Dollar / Rates Drivers")
         drivers = [
             ("DXY", regime.get("DXY"), "%"),
@@ -2820,6 +2779,47 @@ def render_fx_command_center():
                 unsafe_allow_html=True,
             )
 
+    mtf_rows = []
+    for currency in FX_COMMAND_CURRENCIES:
+        row = {"Moeda": currency}
+        for horizon in ["15m", "1H", "4H", "Dia"]:
+            row[horizon] = round(float(data["mtf"].get(horizon, {}).get(currency, 0.0)), 1)
+        mtf_rows.append(row)
+    mtf_df = pd.DataFrame(mtf_rows).sort_values("Dia", ascending=False)
+    st.markdown("#### Multi-timeframe Strength")
+    st.dataframe(mtf_df, use_container_width=True, hide_index=True, height=230)
+
+    render_terminal_global_currency_performance_chart()
+
+    col_opps, col_events = st.columns([0.68, 0.32], gap="medium")
+    with col_opps:
+        st.markdown("#### Majors Pair Scanner")
+        opp_df = pd.DataFrame(opportunities)
+        if opp_df.empty:
+            st.info("Scanner aguardando pares validos.")
+        else:
+            display_cols = ["Par", "Direcao", "Score", "Driver dominante", "Drivers", "Spread", "Momentum %", "Alinhado", "Tese"]
+            top_long = opp_df[opp_df["Direcao"] == "LONG"].head(12)
+            top_short = opp_df[opp_df["Direcao"] == "SHORT"].head(12)
+            divergences = opp_df[opp_df["Alinhado"] == "Divergente"].sort_values("Score", ascending=False).head(12)
+            tab_long, tab_short, tab_div, tab_corr = st.tabs(["Top Long", "Top Short", "Divergencias", "Correlacoes"])
+            with tab_long:
+                st.dataframe(top_long[display_cols], use_container_width=True, hide_index=True, height=360)
+            with tab_short:
+                st.dataframe(top_short[display_cols], use_container_width=True, hide_index=True, height=360)
+            with tab_div:
+                if divergences.empty:
+                    st.caption("Sem divergencias relevantes entre strength e momentum agora.")
+                else:
+                    st.dataframe(divergences[display_cols], use_container_width=True, hide_index=True, height=360)
+            with tab_corr:
+                corr_df = pd.DataFrame(correlations)
+                if corr_df.empty:
+                    st.caption("Correlacoes intradiarias aguardando mais pontos validos.")
+                else:
+                    st.dataframe(corr_df.head(28), use_container_width=True, hide_index=True, height=360)
+
+    with col_events:
         events = get_calendar_data() or []
         today = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d")
         fx_events = [
