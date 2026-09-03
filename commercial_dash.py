@@ -5807,7 +5807,7 @@ def render_terminal_global_correlation_panel():
         """
         <div style="border:1px solid #243244; border-radius:8px 8px 0 0; padding:10px 12px; background:#0b1220;">
             <div style="font-size:0.72rem; color:#94A3B8; font-weight:900; text-transform:uppercase;">Correlação Macro</div>
-            <div style="font-size:0.82rem; color:#E5E7EB; font-weight:800; margin-top:2px;">USA500 | GOLD | UKOIL | US10Y | US30Y | DXY</div>
+            <div style="font-size:0.82rem; color:#E5E7EB; font-weight:800; margin-top:2px;">USA500 | GOLD | UKOIL | US02Y | US10Y | US30Y | DXY</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -5847,6 +5847,7 @@ def render_terminal_global_correlation_panel():
         "studies": [
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:GOLD" }}, "plots": {{ "Plot": {{ "color": "#FFD166" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:UKOIL" }}, "plots": {{ "Plot": {{ "color": "#2F80ED" }} }} }},
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "OTCB:US02Y" }}, "plots": {{ "Plot": {{ "color": "#FACC15" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "OTCB:US10Y" }}, "plots": {{ "Plot": {{ "color": "#FF9800" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "OTCB:US30Y" }}, "plots": {{ "Plot": {{ "color": "#00BFFF" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "CAPITALCOM:DXY" }}, "plots": {{ "Plot": {{ "color": "#F8FAFC" }} }} }}
@@ -6502,6 +6503,7 @@ def pagina_terminal_global():
             "BITCOIN": {"tv": "BINANCE:BTCUSDT", "yf": "BTC-USD"},
             "ETHUSDT": {"tv": "BINANCE:ETHUSDT", "yf": "ETH-USD"},
             "DXY (Dólar Index)": {"tv": "CAPITALCOM:DXY", "yf": "DX-Y.NYB"},
+            "US02Y OTCB": {"tv": "OTCB:US02Y", "yf": "2YY=F"},
             "US10Y OTCB": {"tv": "OTCB:US10Y", "yf": "^TNX"},
             "US30Y OTCB": {"tv": "OTCB:US30Y", "yf": "^TYX"},
             "EWZ (Brazil ETF)": {"tv": "AMEX:EWZ", "yf": "EWZ"},
@@ -8020,7 +8022,7 @@ def pagina_watchlist():
 
     with tabs[0]:
         st.markdown("#### Visao Macro Global")
-        st.write(f"Regime: **{macro.get('regime', '---')}** | SPX: `{macro.get('spx')}` | Nasdaq: `{macro.get('nasdaq')}` | VIX: `{macro.get('vix')}` | DXY: `{macro.get('dxy')}` | EWZ: `{macro.get('ewz')}` | IBOV: `{macro.get('ibov')}`")
+        st.write(f"Regime: **{macro.get('regime', '---')}** | SPX: `{macro.get('spx')}` | Nasdaq: `{macro.get('nasdaq')}` | VIX: `{macro.get('vix')}` | DXY: `{macro.get('dxy')}` | US02Y: `{macro.get('us02y')}` | EWZ: `{macro.get('ewz')}` | IBOV: `{macro.get('ibov')}`")
         st.caption(f"Fonte: {quality.get('source', '---')}. Takes e stops acionados ficam registrados no historico local da WATCHLIST.")
     with tabs[1]:
         render_recommendations(rec_filter(bloco="Brasil"), limit=16, uid_prefix="tab-brasil")
@@ -10089,7 +10091,7 @@ def pagina_correlacao():
     st.info("💡 Dica: Nos gráficos abaixo, você pode clicar em cada ativo na legenda (canto superior esquerdo) para ajustar a cor e a espessura da linha para melhor visibilidade.")
 
     # Widget 1: Correlação Macro Tradicional
-    st.markdown("#### 📊 Correlação Macro (USA500, Ouro, Petróleo, US10Y, US30Y)")
+    st.markdown("#### 📊 Correlação Macro (USA500, Ouro, Petróleo, US02Y, US10Y, US30Y)")
     tv_html = f"""
     <div class="tradingview-widget-container" style="height: {c_height}px; width: 100%;">
       <div id="tradingview_unified_v2" style="height: 100%; width: 100%;"></div>
@@ -10122,6 +10124,7 @@ def pagina_correlacao():
         "studies": [
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:GOLD" }}, "plots": {{ "Plot": {{ "color": "#FFFF00" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "TVC:UKOIL" }}, "plots": {{ "Plot": {{ "color": "#006400" }} }} }},
+          {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "OTCB:US02Y" }}, "plots": {{ "Plot": {{ "color": "#FACC15" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "OTCB:US10Y" }}, "plots": {{ "Plot": {{ "color": "#FF9800" }} }} }},
           {{ "id": "Overlay@tv-basicstudies", "inputs": {{ "symbol": "OTCB:US30Y" }}, "plots": {{ "Plot": {{ "color": "#00BFFF" }} }} }}
         ]

@@ -41,7 +41,7 @@ BRAZIL_ASSETS = {
 
 US_SECTOR_ETFS = {
     "XLE": {"ticker": "XLE", "sector": "Energy", "driver": "petroleo, inflacao, commodities, energia"},
-    "XLK": {"ticker": "XLK", "sector": "Technology", "driver": "US10Y, juros reais, Nasdaq, liquidez, crescimento"},
+    "XLK": {"ticker": "XLK", "sector": "Technology", "driver": "US02Y/US10Y, juros reais, Nasdaq, liquidez, crescimento"},
     "XLP": {"ticker": "XLP", "sector": "Consumer Staples", "driver": "defesa, recessao, volatilidade, consumo basico"},
     "XLB": {"ticker": "XLB", "sector": "Materials", "driver": "commodities, China, dolar, ciclo industrial"},
     "XLI": {"ticker": "XLI", "sector": "Industrials", "driver": "crescimento, PMIs, infraestrutura, ciclo economico"},
@@ -58,7 +58,7 @@ CRYPTO_ASSETS = {
 FX_ASSETS = {
     "EURUSD": {"ticker": "EURUSD=X", "aliases": ["EURUSD"], "sector": "G10 FX", "driver": "diferencial de juros EUA/Europa, DXY, BCE/Fed"},
     "GBPUSD": {"ticker": "GBPUSD=X", "aliases": ["GBPUSD"], "sector": "G10 FX", "driver": "BoE, DXY, apetite por risco"},
-    "USDJPY": {"ticker": "JPY=X", "aliases": ["USDJPY"], "sector": "Carry FX", "driver": "US10Y, BoJ, diferencial de juros, carry trade"},
+    "USDJPY": {"ticker": "JPY=X", "aliases": ["USDJPY"], "sector": "Carry FX", "driver": "US02Y/US10Y, BoJ, diferencial de juros, carry trade"},
     "USDBRL": {"ticker": "BRL=X", "aliases": ["USDBRL", "USDBRL (COMERCIAL)", "6L (REAL CME)"], "sector": "Emerging FX", "driver": "DXY, fiscal Brasil, commodities, fluxo estrangeiro"},
     "AUDUSD": {"ticker": "AUDUSD=X", "aliases": ["AUDUSD"], "sector": "Commodity FX", "driver": "China, commodities, DXY, risco global"},
     "USDCAD": {"ticker": "CAD=X", "aliases": ["USDCAD"], "sector": "Commodity FX", "driver": "petroleo, BoC, DXY"},
@@ -74,7 +74,7 @@ COMMODITY_ASSETS = {
 }
 
 METAL_ASSETS = {
-    "GOLD": {"ticker": "GC=F", "aliases": ["GOLD", "XAUUSD"], "sector": "Metal precioso", "driver": "juros reais, DXY, risco geopolitico, inflacao"},
+    "GOLD": {"ticker": "GC=F", "aliases": ["GOLD", "XAUUSD"], "sector": "Metal precioso", "driver": "US02Y, juros reais, DXY, risco geopolitico, inflacao"},
     "SILVER": {"ticker": "SI=F", "aliases": ["SILVER", "XAGUSD"], "sector": "Metal precioso/industrial", "driver": "ouro, demanda industrial, DXY"},
     "COPPER": {"ticker": "HG=F", "aliases": ["COPPER"], "sector": "Metal industrial", "driver": "China, ciclo industrial, dolar"},
     "PLATINUM": {"ticker": "PL=F", "aliases": ["PLATINUM"], "sector": "Metal precioso/industrial", "driver": "industria, automotivo, dolar"},
@@ -218,6 +218,7 @@ def _macro_regime(global_data: dict | None) -> dict[str, Any]:
     nasdaq = _extract_change(global_data, ["NASDAQ"])
     vix = _extract_change(global_data, ["VIX"])
     dxy = _extract_change(global_data, ["DXY"])
+    us02y = _extract_change(global_data, ["US 02Y", "US02Y", "DGS2"])
     ewz = _extract_change(global_data, ["EWZ"])
     ibov = _extract_change(global_data, ["IBOV"])
     score = 0
@@ -228,6 +229,8 @@ def _macro_regime(global_data: dict | None) -> dict[str, Any]:
         score += 1 if vix < -1 else -1 if vix > 1 else 0
     if dxy is not None:
         score += 1 if dxy < -0.15 else -1 if dxy > 0.15 else 0
+    if us02y is not None:
+        score += 1 if us02y < -0.10 else -1 if us02y > 0.10 else 0
     if score >= 3:
         regime = "Risk-on forte"
     elif score >= 1:
@@ -238,7 +241,17 @@ def _macro_regime(global_data: dict | None) -> dict[str, Any]:
         regime = "Risk-off moderado"
     else:
         regime = "Neutro/seletivo"
-    return {"regime": regime, "score": score, "spx": spx, "nasdaq": nasdaq, "vix": vix, "dxy": dxy, "ewz": ewz, "ibov": ibov}
+    return {
+        "regime": regime,
+        "score": score,
+        "spx": spx,
+        "nasdaq": nasdaq,
+        "vix": vix,
+        "dxy": dxy,
+        "us02y": us02y,
+        "ewz": ewz,
+        "ibov": ibov,
+    }
 
 
 def _regime_component(block: str, sector: str, regime: str) -> float:
@@ -653,14 +666,14 @@ def _commentary(recs: list[dict[str, Any]], block: str, macro: dict) -> str:
     if block == "Brasil":
         return f"Radar Brasil em regime {macro['regime']}. Destaques: {names}. A leitura favorece nomes com melhor tendencia e forca relativa contra Ibovespa; risco principal vem de DXY/juros locais e commodities."
     if block == "EUA":
-        return f"Rotacao setorial EUA em regime {macro['regime']}. Destaques: {names}. A leitura compara cada setor contra SPY; risco principal vem de US10Y, DXY, VIX e mudanca de apetite por risco."
+        return f"Rotacao setorial EUA em regime {macro['regime']}. Destaques: {names}. A leitura compara cada setor contra SPY; risco principal vem de US02Y/US10Y, DXY, VIX e mudanca de apetite por risco."
     if block == "Cripto":
         return f"Radar Cripto em regime {macro['regime']}. Destaques: {names}. Prioriza tendencia, forca contra BTC e sensibilidade a liquidez, Nasdaq e DXY."
     if block == "Moedas":
-        return f"Radar Moedas em regime {macro['regime']}. Destaques: {names}. A leitura observa momentum contra DXY/cesta FX, diferencial de juros e apetite por risco."
+        return f"Radar Moedas em regime {macro['regime']}. Destaques: {names}. A leitura observa momentum contra DXY/cesta FX, US02Y/diferencial de juros e apetite por risco."
     if block == "Commodities":
         return f"Radar Commodities em regime {macro['regime']}. Destaques: {names}. Foco em tendencia, pressao inflacionaria, China, geopolitica e dolar."
-    return f"Radar Metais em regime {macro['regime']}. Destaques: {names}. Foco em juros reais, DXY, ciclo industrial e demanda por protecao."
+    return f"Radar Metais em regime {macro['regime']}. Destaques: {names}. Foco em US02Y/juros reais, DXY, ciclo industrial e demanda por protecao."
 
 
 def generate_watchlist(global_data: dict | None = None) -> dict[str, Any]:

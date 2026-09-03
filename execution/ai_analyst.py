@@ -62,6 +62,11 @@ def _asset_line(label, item):
         return f"{label}: indisponivel"
     price = _price(item)
     price_txt = "---" if price is None else (f"{price:.2f}" if abs(price) >= 10 else f"{price:.4f}")
+    try:
+        if item.get("change_bps") is not None:
+            return f"{label}: {price_txt} ({float(item.get('change_bps')):+.1f} bps)"
+    except Exception:
+        pass
     return f"{label}: {price_txt} ({_change(item):+.2f}%)"
 
 
@@ -83,6 +88,7 @@ def build_macro_regime_context(local_data, global_data, calendar_data):
         "dow": _find_asset(global_data, "dow", "djia", "^dji"),
         "vix": _find_asset(global_data, "vix", "^vix", "vxx"),
         "dxy": _find_asset(global_data, "dxy", "dolar index", "dollar index", "dx-y"),
+        "us02y": _find_asset(global_data, "us 02y", "us 2y", "us02y", "dgs2", "2yy=f"),
         "us10y": _find_asset(global_data, "us 10y", "us10y", "^tnx"),
         "us30y": _find_asset(global_data, "us 30y", "us30y", "^tyx"),
         "eem": _find_asset(global_data, "eem", "emerging"),
@@ -104,6 +110,7 @@ def build_macro_regime_context(local_data, global_data, calendar_data):
         ("Nasdaq", _change(assets["nasdaq"]), True, 0.15, 1),
         ("VIX", _change(assets["vix"]), False, 0.25, 2),
         ("DXY", _change(assets["dxy"]), False, 0.12, 2),
+        ("US02Y", _change(assets["us02y"]), False, 0.08, 2),
         ("US10Y", _change(assets["us10y"]), False, 0.08, 2),
         ("US30Y", _change(assets["us30y"]), False, 0.08, 1),
         ("EEM", _change(assets["eem"]), True, 0.15, 2),
@@ -176,6 +183,7 @@ def build_macro_regime_context(local_data, global_data, calendar_data):
         _asset_line("Nasdaq", assets["nasdaq"]),
         _asset_line("VIX", assets["vix"]),
         _asset_line("DXY", assets["dxy"]),
+        _asset_line("US02Y", assets["us02y"]),
         _asset_line("US10Y", assets["us10y"]),
         _asset_line("US30Y", assets["us30y"]),
         _asset_line("EEM", assets["eem"]),
@@ -247,7 +255,7 @@ CURVA, JUROS E DOLAR
 {curve.get('regime', 'Neutro')} | {curve.get('bias', 'Neutro')}. {curve.get('reading', '')}
 
 INTERMERCADOS
-Juros e DXY sao o primeiro filtro; VIX confirma apetite a risco; EEM/EWZ/USDBRL mostram transmissao para emergentes e Brasil.
+US02Y, juros longos e DXY sao o primeiro filtro; VIX confirma apetite a risco; EEM/EWZ/USDBRL mostram transmissao para emergentes e Brasil.
 
 CALENDARIO
 {chr(10).join('- ' + item for item in calendar[:3])}
@@ -282,7 +290,7 @@ Use o painel macro estruturado abaixo como fonte principal. Os dados brutos sao 
 Seu trabalho e transformar o contexto em uma leitura curta de regime macro para o Terminal de Trading.
 
 HIERARQUIA OBRIGATORIA:
-1. Curva americana e yields
+1. Curva americana, US02Y e yields longos
 2. DXY e liquidez global
 3. VIX e apetite a risco
 4. S&P 500, Nasdaq e Dow

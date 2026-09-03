@@ -242,12 +242,16 @@ def _fmt_asset(item):
     name = item.get("name", "Ativo")
     price = item.get("price", "---")
     change = item.get("change", 0)
+    change_bps = item.get("change_bps")
     try:
         price_txt = f"{float(price):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     except Exception:
         price_txt = str(price)
     try:
-        change_txt = f"{float(change):+.2f}%"
+        if change_bps is not None:
+            change_txt = f"{float(change_bps):+.1f} bps"
+        else:
+            change_txt = f"{float(change):+.2f}%"
     except Exception:
         change_txt = str(change)
     return f"{name}: {price_txt} ({change_txt})"
@@ -288,6 +292,7 @@ def _asset_snapshot(global_data):
         "russell": _find_asset(global_data, "russell", "rty", "iwm"),
         "vix": _find_asset(global_data, "vix", "^vix", "vxx"),
         "dxy": _find_asset(global_data, "dxy", "dolar index", "dollar index", "dx-y"),
+        "us02y": _find_asset(global_data, "us02y", "us 02y", "us 2y", "2 year", "dgs2", "2yy=f"),
         "us10y": _find_asset(global_data, "us10y", "us 10y", "10 year", "^tnx"),
         "us30y": _find_asset(global_data, "us30y", "us 30y", "30 year", "^tyx"),
         "brent": _find_asset(global_data, "brent", "bz=f", "ukoil"),
@@ -319,6 +324,7 @@ def _market_regime(snapshot):
         ("Dow", snapshot.get("dow"), True),
         ("VIX", snapshot.get("vix"), False),
         ("DXY", snapshot.get("dxy"), False),
+        ("US02Y", snapshot.get("us02y"), False),
         ("US10Y", snapshot.get("us10y"), False),
         ("US30Y", snapshot.get("us30y"), False),
     ]
@@ -345,7 +351,7 @@ def _market_regime(snapshot):
 def _market_context_lines(snapshot, regime):
     groups = [
         ("Indices EUA", [snapshot.get("spx"), snapshot.get("nasdaq"), snapshot.get("dow"), snapshot.get("russell"), snapshot.get("vix")]),
-        ("Juros e dolar", [snapshot.get("us10y"), snapshot.get("us30y"), snapshot.get("dxy"), snapshot.get("usbrl")]),
+        ("Juros e dolar", [snapshot.get("us02y"), snapshot.get("us10y"), snapshot.get("us30y"), snapshot.get("dxy"), snapshot.get("usbrl")]),
         ("Commodities", [snapshot.get("brent"), snapshot.get("wti"), snapshot.get("gold")]),
         ("Brasil/EM", [snapshot.get("ibov"), snapshot.get("ewz")]),
     ]
@@ -359,6 +365,7 @@ def _market_context_lines(snapshot, regime):
 
 def _market_implications(snapshot, regime):
     dxy = _change(snapshot.get("dxy"))
+    us02y = _change(snapshot.get("us02y"))
     us10y = _change(snapshot.get("us10y"))
     us30y = _change(snapshot.get("us30y"))
     vix = _change(snapshot.get("vix"))
@@ -367,6 +374,11 @@ def _market_implications(snapshot, regime):
     usbrl = _change(snapshot.get("usbrl"))
 
     implications = []
+    if us02y > 0.05:
+        implications.append("US02Y em alta indica front-end mais hawkish; Fed e dolar seguem como filtro principal para risco.")
+    elif us02y < -0.05:
+        implications.append("US02Y cedendo sugere alivio no front-end da curva e melhora a leitura de liquidez.")
+
     if us10y > 0.05 or us30y > 0.05:
         implications.append("Juros longos em alta reduzem conforto para duration e pressionam Nasdaq/multiplos.")
     elif us10y < -0.05 or us30y < -0.05:
@@ -647,6 +659,7 @@ def _generate_local_report_text(slot_meta, date_str, local_data, global_data, ne
     spx = _find_asset(global_data, "s&p 500", "^gspc", "spy")
     nasdaq = _find_asset(global_data, "nasdaq", "^ixic")
     dxy = _find_asset(global_data, "dxy", "dx-y")
+    us02y = _find_asset(global_data, "us 02y", "us 2y", "us02y", "dgs2", "2yy=f")
     us10y = _find_asset(global_data, "us 10y", "^tnx")
     brent = _find_asset(global_data, "brent", "bz=f")
     gold = _find_asset(global_data, "gold", "gc=f")
@@ -658,6 +671,7 @@ def _generate_local_report_text(slot_meta, date_str, local_data, global_data, ne
     risk_score += _score_from_asset(nasdaq)
     risk_score += _score_from_asset(vix, positive_when_up=False)
     risk_score += _score_from_asset(dxy, positive_when_up=False)
+    risk_score += _score_from_asset(us02y, positive_when_up=False)
     risk_score += _score_from_asset(us10y, positive_when_up=False)
     risk_label = "Risk-on moderado" if risk_score >= 2 else ("Risk-off moderado" if risk_score <= -2 else "Neutro/seletivo")
     dominant_theme = _dominant_news_theme(news)
@@ -673,14 +687,14 @@ def _generate_local_report_text(slot_meta, date_str, local_data, global_data, ne
 
     return f"""### Drivers do momento
 
-- **Regime:** {risk_label}. A leitura combina indices americanos, volatilidade, DXY e juros longos.
+- **Regime:** {risk_label}. A leitura combina indices americanos, volatilidade, DXY, US02Y e juros longos.
 - **Tema dominante do radar:** {dominant_theme}. O mercado tende a precificar primeiro o impacto em Fed/juros, depois reflexo em DXY, commodities e indices.
 - **Indices/volatilidade:** {_asset_line(spx, nasdaq, vix)}
-- **Juros, moedas e commodities:** {_asset_line(us10y, dxy, usbrl, brent, gold)}
+- **Juros, moedas e commodities:** {_asset_line(us02y, us10y, dxy, usbrl, brent, gold)}
 
 ### Global vs Brasil
 
-- **Juros EUA:** queda em US10Y favorece duration, Nasdaq e ativos de risco; alta nos yields aumenta risco de compressao de multiplos.
+- **Juros EUA:** US02Y mede o front-end/Fed; queda em US10Y favorece duration, Nasdaq e ativos de risco; alta nos yields aumenta risco de compressao de multiplos.
 - **DXY/BRL:** DXY fraco e USDBRL cedendo aliviam emergentes; DXY forte muda o foco para protecao cambial e reduz apetite por Brasil.
 - **Commodities:** petroleo e ouro ajudam a separar choque inflacionario de busca por protecao. Petroleo em alta com yields subindo tende a ser mais risk-off.
 - **Brasil:** viés depende da combinacao EWZ/IBOV, USDBRL e commodities. Sem confirmacao nesses tres eixos, evitar leitura direcional agressiva.
@@ -694,7 +708,7 @@ def _generate_local_report_text(slot_meta, date_str, local_data, global_data, ne
 
 {chr(10).join(news_lines)}
 
-**Viés tatico:** {risk_label}. Confirmar pelo comportamento conjunto de DXY, US10Y, petroleo, S&P 500 e Nasdaq.
+**Viés tatico:** {risk_label}. Confirmar pelo comportamento conjunto de DXY, US02Y/US10Y, petroleo, S&P 500 e Nasdaq.
 """
 
 
@@ -736,7 +750,7 @@ def _generate_local_report_text(slot_meta, date_str, local_data, global_data, ne
 
 {chr(10).join(news_lines)}
 
-**Vies tatico:** {regime['label']}. Confirmar pelo comportamento conjunto de DXY, US10Y/US30Y, petroleo, S&P 500, Nasdaq e Dow Jones.
+**Vies tatico:** {regime['label']}. Confirmar pelo comportamento conjunto de DXY, US02Y/US10Y/US30Y, petroleo, S&P 500, Nasdaq e Dow Jones.
 """
 
 

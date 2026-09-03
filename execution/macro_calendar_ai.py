@@ -379,16 +379,18 @@ def _surprise_score(event: EconomicEvent, surprise_label: str, dominant_regime: 
 
 
 def _detect_dominant_regime(market_map: dict[str, Optional[float]]) -> str:
+    us02y = market_map.get("US02Y")
     us10y = market_map.get("US10Y")
+    rates_driver = us02y if us02y is not None else us10y
     dxy = market_map.get("DXY")
     vix = market_map.get("VIX")
     sp500 = market_map.get("S&P 500")
     nasdaq = market_map.get("NASDAQ")
 
-    if us10y is not None and dxy is not None and vix is not None:
-        if us10y > 0.15 and dxy > 0.3 and vix > 3:
+    if rates_driver is not None and dxy is not None and vix is not None:
+        if rates_driver > 0.15 and dxy > 0.3 and vix > 3:
             return "Inflacao dominante / aperto financeiro"
-        if us10y < -0.15 and dxy < -0.3 and sp500 is not None and sp500 > 0.5:
+        if rates_driver < -0.15 and dxy < -0.3 and sp500 is not None and sp500 > 0.5:
             return "Liquidez favoravel / risk-on"
 
     if vix is not None and sp500 is not None and vix > 5 and sp500 < -0.5:
@@ -418,6 +420,7 @@ def _build_market_map(global_data: Optional[dict]) -> dict[str, Optional[float]]
         "VIX": _market_change(global_data, ["VIX"]),
         "EWZ": _market_change(global_data, ["EWZ (Brazil ETF)"]),
         "USD/BRL": _market_change(global_data, ["USDBRL (Comercial)", "USDBRL"]),
+        "US02Y": _market_change(global_data, ["US 02Y (Yield)", "US02Y"]),
         "US10Y": _market_change(global_data, ["US 10Y (Yield)", "US10Y"]),
         "US30Y": _market_change(global_data, ["US 30Y (Yield)", "US30Y"]),
         "Bitcoin": _market_change(global_data, ["BITCOIN", "Bitcoin"]),
@@ -429,6 +432,7 @@ def _build_market_map(global_data: Optional[dict]) -> dict[str, Optional[float]]
 
 def _market_confirmation(market_map: dict[str, Optional[float]]) -> tuple[int, list[dict], float]:
     rules = [
+        ("US02Y", -0.12, 0.12, 8, "front-end cedendo", "front-end pressionado"),
         ("US10Y", -0.15, 0.15, 10, "queda de juros", "alta de juros"),
         ("DXY", -0.2, 0.2, 10, "dolar fraco", "dolar forte"),
         ("VIX", -2.0, 2.0, 10, "volatilidade cedendo", "volatilidade subindo"),

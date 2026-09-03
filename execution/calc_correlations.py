@@ -25,6 +25,7 @@ CORRELATION_TICKERS = {
     "Russell 2000": "^RUT",
     "EWZ": "EWZ",
     "EEM": "EEM",
+    "US02Y": "2YY=F",
     "US10Y": "^TNX",
     "US30Y": "^TYX",
     "PBR": "PBR",
@@ -62,6 +63,14 @@ KNOWN_RELATIONSHIPS = {
         "positive": "Yields e bolsa subindo juntos — economia forte, mas atenção ao aperto monetário.",
         "negative": "Yields subindo e bolsa caindo — mercado precificando aperto monetário agressivo.",
     },
+    ("US02Y", "S&P 500"): {
+        "positive": "Front-end e bolsa subindo juntos — crescimento ainda sustenta risco, mas Fed pode ficar menos confortável.",
+        "negative": "Front-end contra bolsa — mercado pode estar reprecificando cortes ou aperto de liquidez.",
+    },
+    ("US02Y", "DXY"): {
+        "positive": "Front-end dos EUA e dólar na mesma direção — diferencial de juros segue dominando FX.",
+        "negative": "Descolamento entre US02Y e DXY — checar fluxo, risco global ou moeda-base fora dos EUA.",
+    },
     ("Petróleo", "S&P 500"): {
         "positive": "Economia aquecida: demanda por energia e ações em alta.",
         "negative": "Petróleo subindo com bolsa caindo — pressão inflacionária sobre lucros.",
@@ -73,6 +82,10 @@ KNOWN_RELATIONSHIPS = {
     ("Ouro", "US10Y"): {
         "negative": "Yields altos aumentam custo de oportunidade de segurar ouro.",
         "positive": "⚠️ Ouro e yields subindo — mercado precificando inflação persistente.",
+    },
+    ("Ouro", "US02Y"): {
+        "negative": "Front-end cedendo reduz custo de oportunidade e pode favorecer ouro.",
+        "positive": "Ouro e US02Y subindo juntos sugere hedge contra inflação ou stress mesmo com Fed restritivo.",
     },
     ("PBR", "Petróleo"): {
         "positive": "Correlação esperada: Petrobras acompanha preço do petróleo.",
