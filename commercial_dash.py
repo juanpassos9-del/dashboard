@@ -6017,7 +6017,7 @@ def render_terminal_global_layout_css():
 
 
 def render_terminal_global_macro_class_comparatives():
-    """Render four compact macro class comparison charts below Terminal Global charts."""
+    """Render compact macro class comparison charts below Terminal Global charts."""
     def render_macro_class_chart(title, description, container_id, main_symbol, main_color, overlays):
         chart_height = 860
         interval = "5"
@@ -6085,7 +6085,7 @@ def render_terminal_global_macro_class_comparatives():
     st.markdown("---")
     st.markdown("### Comparativo por Classe Macro")
     st.markdown(
-        "<p style='color:#94A3B8; font-size:0.88rem; margin-top:-4px;'>Quatro leituras lado a lado em 5 minutos: commodities, moedas, equity e bonds.</p>",
+        "<p style='color:#94A3B8; font-size:0.88rem; margin-top:-4px;'>Leituras em 5 minutos: commodities, moedas, equity, bonds e Brasil offshore/ADRs.</p>",
         unsafe_allow_html=True,
     )
     commodity_col, fx_col, equity_col, bonds_col = st.columns(4, gap="medium")
@@ -6152,6 +6152,21 @@ def render_terminal_global_macro_class_comparatives():
                 ("OANDA:DE10YBEUR", "#38BDF8", "10Y Alemanha"),
             ],
         )
+
+    render_macro_class_chart(
+        "Brasil Offshore / ADRs",
+        "VALE, PBR, ITUB, BBD, NU e EWZ em USD pela TradingView.",
+        "tg_macro_brazil_adrs",
+        "NYSE:VALE",
+        "#F8FAFC",
+        [
+            ("NYSE:PBR", "#2F80ED", "PBR"),
+            ("NYSE:ITUB", "#00C853", "ITUB"),
+            ("NYSE:BBD", "#F59E0B", "BBD"),
+            ("NYSE:NU", "#22D3EE", "NU"),
+            ("AMEX:EWZ", "#DB2777", "EWZ"),
+        ],
+    )
 
 
 def _momentum_score_color(score: float) -> str:
