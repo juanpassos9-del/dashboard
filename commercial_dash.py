@@ -6088,7 +6088,7 @@ def render_terminal_global_macro_class_comparatives():
         "<p style='color:#94A3B8; font-size:0.88rem; margin-top:-4px;'>Leituras em 5 minutos: commodities, moedas, equity, bonds e Brasil offshore/ADRs.</p>",
         unsafe_allow_html=True,
     )
-    commodity_col, fx_col, equity_col, bonds_col = st.columns(4, gap="medium")
+    commodity_col, fx_col, equity_col, bonds_col, adr_col = st.columns(5, gap="medium")
     with commodity_col:
         render_macro_class_chart(
             "Commodities",
@@ -6152,21 +6152,21 @@ def render_terminal_global_macro_class_comparatives():
                 ("OANDA:DE10YBEUR", "#38BDF8", "10Y Alemanha"),
             ],
         )
-
-    render_macro_class_chart(
-        "Brasil Offshore / ADRs",
-        "VALE, PBR, ITUB, BBD, NU e EWZ em USD pela TradingView.",
-        "tg_macro_brazil_adrs",
-        "NYSE:VALE",
-        "#F8FAFC",
-        [
-            ("NYSE:PBR", "#2F80ED", "PBR"),
-            ("NYSE:ITUB", "#00C853", "ITUB"),
-            ("NYSE:BBD", "#F59E0B", "BBD"),
-            ("NYSE:NU", "#22D3EE", "NU"),
-            ("AMEX:EWZ", "#DB2777", "EWZ"),
-        ],
-    )
+    with adr_col:
+        render_macro_class_chart(
+            "Brasil Offshore / ADRs",
+            "VALE, PBR, ITUB, BBD, NU e EWZ em USD pela TradingView.",
+            "tg_macro_brazil_adrs",
+            "NYSE:VALE",
+            "#F8FAFC",
+            [
+                ("NYSE:PBR", "#2F80ED", "PBR"),
+                ("NYSE:ITUB", "#00C853", "ITUB"),
+                ("NYSE:BBD", "#F59E0B", "BBD"),
+                ("NYSE:NU", "#22D3EE", "NU"),
+                ("AMEX:EWZ", "#DB2777", "EWZ"),
+            ],
+        )
 
 
 def _momentum_score_color(score: float) -> str:
