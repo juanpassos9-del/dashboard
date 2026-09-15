@@ -6000,6 +6000,11 @@ def render_terminal_global_layout_css():
     st.markdown(
         """
         <style>
+        div[data-testid="stMainBlockContainer"] {
+            max-width: 98vw;
+            padding-left: 1.25rem;
+            padding-right: 1.25rem;
+        }
         div[data-testid="column"]:has(#tg-side-correlation-anchor) {
             position: sticky;
             top: 0.75rem;
@@ -6088,7 +6093,7 @@ def render_terminal_global_macro_class_comparatives():
         "<p style='color:#94A3B8; font-size:0.88rem; margin-top:-4px;'>Leituras em 5 minutos: commodities, moedas, equity, bonds e Brasil offshore/ADRs.</p>",
         unsafe_allow_html=True,
     )
-    commodity_col, fx_col, equity_col, bonds_col, adr_col = st.columns(5, gap="medium")
+    commodity_col, fx_col, equity_col, bonds_col, adr_col = st.columns(5, gap="small")
     with commodity_col:
         render_macro_class_chart(
             "Commodities",
