@@ -6644,7 +6644,7 @@ def pagina_terminal_global():
         render_koyfin_terminal_global_embed()
     secao_calendario_global_fragment()
     
-    body_col, corr_col = st.columns([0.82, 0.18], gap="small")
+    body_col = st.container()
 
     with body_col:
         st.markdown("---")
@@ -6865,11 +6865,6 @@ def pagina_terminal_global():
                     </div>
                 """, unsafe_allow_html=True)
             
-    with corr_col:
-        st.markdown("---")
-        st.markdown("<div id='tg-side-correlation-anchor'></div>", unsafe_allow_html=True)
-        render_terminal_global_correlation_panel()
-
 @st.fragment(run_every=30)
 def sidebar_mercados():
     global_data = get_global_markets_data()
