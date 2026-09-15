@@ -6029,7 +6029,7 @@ def render_terminal_global_layout_css():
 def render_terminal_global_macro_class_comparatives():
     """Render compact macro class comparison charts below Terminal Global charts."""
     def render_macro_class_chart(title, description, container_id, main_symbol, main_color, overlays):
-        chart_height = 860
+        chart_height = 940
         interval = "5"
         studies = ",\n          ".join(
             [
@@ -6644,7 +6644,7 @@ def pagina_terminal_global():
         render_koyfin_terminal_global_embed()
     secao_calendario_global_fragment()
     
-    body_col, corr_col = st.columns([0.74, 0.26], gap="medium")
+    body_col, corr_col = st.columns([0.82, 0.18], gap="small")
 
     with body_col:
         st.markdown("---")
