@@ -6005,6 +6005,11 @@ def render_terminal_global_layout_css():
             padding-left: 1.25rem;
             padding-right: 1.25rem;
         }
+        .tg-full-divider {
+            width: calc(98vw - 2.5rem);
+            border-top: 1px solid #263244;
+            margin: 38px 0 26px 0;
+        }
         div[data-testid="column"]:has(#tg-side-correlation-anchor) {
             position: sticky;
             top: 0.75rem;
@@ -6087,7 +6092,7 @@ def render_terminal_global_macro_class_comparatives():
         """
         components.html(tv_html_class, height=chart_height + 20)
 
-    st.markdown("---")
+    st.markdown("<div class='tg-full-divider'></div>", unsafe_allow_html=True)
     st.markdown("### Comparativo por Classe Macro")
     st.markdown(
         "<p style='color:#94A3B8; font-size:0.88rem; margin-top:-4px;'>Leituras em 5 minutos: commodities, moedas, equity, bonds e Brasil offshore/ADRs.</p>",
