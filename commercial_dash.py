@@ -850,16 +850,53 @@ def _apply_lse_realtime_quotes(global_data):
         mark_source("London Realtime", "ok", rows=changed, message="Overlay London aplicado ao painel.", source="LSE app_state")
     return data
 
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_di_futuro_cached_for_ui():
+    try:
+        from execution.fetch_di_futuro import build_di_futuro_payload
+        return build_di_futuro_payload()
+    except Exception as exc:
+        print(f"[WARN] DI Futuro UI fallback unavailable: {exc}")
+        return None
+
+def _ensure_di_futuro_category(global_data):
+    """Completa caches antigos de mercados_globais com DI Futuro BR."""
+    if not isinstance(global_data, dict):
+        return global_data
+    categories = global_data.get("categories", global_data)
+    if not isinstance(categories, dict):
+        return global_data
+    if any("DI FUTURO" in str(key).upper() for key in categories.keys()):
+        return global_data
+
+    di_payload = fetch_di_futuro_cached_for_ui()
+    di_quotes = (di_payload or {}).get("principais") or []
+    if not di_quotes:
+        return global_data
+
+    data = json.loads(json.dumps(global_data))
+    if isinstance(data.get("categories"), dict):
+        data["categories"]["🇧🇷 DI FUTURO"] = di_quotes
+    else:
+        data["🇧🇷 DI FUTURO"] = di_quotes
+    data.setdefault("metadata", {})["di_futuro_ui_fallback"] = {
+        "updated_at": di_payload.get("updated_at"),
+        "source": di_payload.get("source"),
+        "contracts": len(di_quotes),
+    }
+    mark_source("DI Futuro BR", "ok", rows=len(di_quotes), message="DI Futuro aplicado ao cache de mercados_globais.", source=di_payload.get("source", "InfoMoney DI"))
+    return data
+
 def get_global_markets_data():
     """Usa Supabase/cache primeiro para nao travar o boot do Streamlit Cloud."""
     cached_data = fetch_app_state_cached("mercados_globais")
     if cached_data:
         rows = sum(len(v) for v in (cached_data.get("categories", cached_data) or {}).values() if isinstance(v, list))
         mark_source("Mercados Globais Cache", "stale", message="Usando app_state/Supabase como fallback rapido.", rows=rows, source="Supabase app_state")
-        return _apply_lse_realtime_quotes(cached_data)
+        return _apply_lse_realtime_quotes(_ensure_di_futuro_category(cached_data))
     live_data = fetch_live_global_markets()
     if live_data:
-        return _apply_lse_realtime_quotes(live_data)
+        return _apply_lse_realtime_quotes(_ensure_di_futuro_category(live_data))
     mark_source("Mercados Globais Cache", "error", message="Sem cache e sem fonte ao vivo.", source="Supabase/Yahoo")
     return None
 
@@ -6957,7 +6994,11 @@ def sidebar_mercados():
 
     st.markdown(f"<div style='text-align:right; font-size:0.65rem; color:#666; margin-bottom:10px;'>ATUALIZADO ÀS: {last_upd}</div>", unsafe_allow_html=True)
 
-    for cat_name, assets in categories.items():
+    ordered_categories = sorted(
+        categories.items(),
+        key=lambda kv: 0 if "DI FUTURO" in str(kv[0]).upper() else 1,
+    )
+    for cat_name, assets in ordered_categories:
         st.markdown(f"<div style='font-size:0.75rem; font-weight:bold; color:#FF9800; margin-bottom:5px;'>{cat_name}</div>", unsafe_allow_html=True)
         for item in assets:
             if not isinstance(item, dict): continue
