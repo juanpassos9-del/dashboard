@@ -1041,13 +1041,11 @@ def render_di_brasil_regime_panel(global_data=None, compact=False):
             continue
         chg = changes.get(key, 0.0)
         chg_color = "#00FFA3" if chg < 0 else "#FF4B4B" if chg > 0 else "#94A3B8"
-        cards.append(f"""
-          <div class="di-card">
-            <span>{html.escape(labels.get(key, key))}</span>
-            <b>{fmt_pct(values.get(key))}</b>
-            <em style="color:{chg_color};">{chg:+.2f}%</em>
-          </div>
-        """)
+        label = html.escape(labels.get(key, key))
+        cards.append(
+            f'<div class="di-card"><span>{label}</span><b>{fmt_pct(values.get(key))}</b>'
+            f'<em style="color:{chg_color};">{chg:+.2f}%</em></div>'
+        )
 
     spreads = regime.get("spreads", {})
     spread_text = []
@@ -1062,35 +1060,36 @@ def render_di_brasil_regime_panel(global_data=None, compact=False):
         except Exception:
             dxy_text = ""
     max_width = "100%" if compact else "100%"
-    st.markdown(f"""
-    <style>
-      .di-regime-wrap{{margin:10px 0 14px;padding:12px 14px;border:1px solid #243244;border-left:4px solid {color};border-radius:8px;background:#0B1220;max-width:{max_width};}}
-      .di-regime-head{{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;}}
-      .di-regime-title{{font-size:.72rem;color:#93C5FD;font-weight:950;letter-spacing:.08em;text-transform:uppercase;}}
-      .di-regime-main{{font-size:1.05rem;color:#F8FAFC;font-weight:950;margin-top:2px;}}
-      .di-regime-sub{{font-size:.74rem;color:#94A3B8;font-weight:800;margin-top:3px;}}
-      .di-card-grid{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:11px;}}
-      .di-card{{background:#0F172A;border:1px solid #1E293B;border-radius:7px;padding:8px 9px;min-width:0;}}
-      .di-card span{{display:block;color:#94A3B8;font-size:.64rem;font-weight:900;}}
-      .di-card b{{display:block;color:#F8FAFC;font-size:1.05rem;line-height:1.1;margin-top:2px;}}
-      .di-card em{{font-style:normal;font-size:.70rem;font-weight:950;}}
-      @media(max-width:800px){{.di-card-grid{{grid-template-columns:repeat(2,minmax(0,1fr));}}}}
-    </style>
-    <section class="di-regime-wrap">
-      <div class="di-regime-head">
-        <div>
-          <div class="di-regime-title">Motor DI Brasil</div>
-          <div class="di-regime-main" style="color:{color};">{html.escape(regime['regime'])}</div>
-          <div class="di-regime-sub">{html.escape(regime['bias'])}</div>
-        </div>
-        <div class="di-regime-sub" style="text-align:right;">
-          Inclinação DI32-DI27 <b style="color:#E5E7EB;">{fmt_bps(regime.get('slope_32_27_bps'))}</b><br>
-          {' | '.join(spread_text) or 'Spreads EUA aguardando dados'}{html.escape(dxy_text)}
-        </div>
-      </div>
-      <div class="di-card-grid">{''.join(cards)}</div>
-    </section>
-    """, unsafe_allow_html=True)
+    di_html = f"""
+<style>
+.di-regime-wrap{{margin:10px 0 14px;padding:12px 14px;border:1px solid #243244;border-left:4px solid {color};border-radius:8px;background:#0B1220;max-width:{max_width};}}
+.di-regime-head{{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;}}
+.di-regime-title{{font-size:.72rem;color:#93C5FD;font-weight:950;letter-spacing:.08em;text-transform:uppercase;}}
+.di-regime-main{{font-size:1.05rem;color:#F8FAFC;font-weight:950;margin-top:2px;}}
+.di-regime-sub{{font-size:.74rem;color:#94A3B8;font-weight:800;margin-top:3px;}}
+.di-card-grid{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:11px;}}
+.di-card{{background:#0F172A;border:1px solid #1E293B;border-radius:7px;padding:8px 9px;min-width:0;}}
+.di-card span{{display:block;color:#94A3B8;font-size:.64rem;font-weight:900;}}
+.di-card b{{display:block;color:#F8FAFC;font-size:1.05rem;line-height:1.1;margin-top:2px;}}
+.di-card em{{font-style:normal;font-size:.70rem;font-weight:950;}}
+@media(max-width:800px){{.di-card-grid{{grid-template-columns:repeat(2,minmax(0,1fr));}}}}
+</style>
+<section class="di-regime-wrap">
+<div class="di-regime-head">
+<div>
+<div class="di-regime-title">Motor DI Brasil</div>
+<div class="di-regime-main" style="color:{color};">{html.escape(regime['regime'])}</div>
+<div class="di-regime-sub">{html.escape(regime['bias'])}</div>
+</div>
+<div class="di-regime-sub" style="text-align:right;">
+Inclinação DI32-DI27 <b style="color:#E5E7EB;">{fmt_bps(regime.get('slope_32_27_bps'))}</b><br>
+{' | '.join(spread_text) or 'Spreads EUA aguardando dados'}{html.escape(dxy_text)}
+</div>
+</div>
+<div class="di-card-grid">{''.join(cards)}</div>
+</section>
+"""
+    st.markdown(di_html, unsafe_allow_html=True)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_investing_calendar_live():
