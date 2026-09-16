@@ -900,6 +900,198 @@ def get_global_markets_data():
     mark_source("Mercados Globais Cache", "error", message="Sem cache e sem fonte ao vivo.", source="Supabase/Yahoo")
     return None
 
+def _find_global_asset(global_data, names_or_symbols):
+    if not isinstance(global_data, dict):
+        return None
+    categories = global_data.get("categories", global_data)
+    if not isinstance(categories, dict):
+        return None
+    wanted = {str(value).upper() for value in names_or_symbols}
+    for assets in categories.values():
+        if not isinstance(assets, list):
+            continue
+        for item in assets:
+            if not isinstance(item, dict):
+                continue
+            candidates = {
+                str(item.get("symbol", "")).upper(),
+                str(item.get("name", "")).upper(),
+                str(item.get("source_symbol", "")).upper(),
+                str(item.get("fallback_for", "")).upper(),
+            }
+            if candidates & wanted:
+                return item
+    return None
+
+def build_di_brasil_regime(global_data):
+    """Leitura deterministica da curva DI Futuro BR usando mercados_globais."""
+    tenors = {
+        "DI1F27": _find_global_asset(global_data, ["DI1F27", "DI1F27 (DI Futuro)"]),
+        "DI1F29": _find_global_asset(global_data, ["DI1F29", "DI1F29 (DI Futuro)"]),
+        "DI1F32": _find_global_asset(global_data, ["DI1F32", "DI1F32 (DI Futuro)"]),
+        "DI1F40": _find_global_asset(global_data, ["DI1F40", "DI1F39"]),
+    }
+    values = {}
+    changes = {}
+    labels = {}
+    for key, item in tenors.items():
+        if not item:
+            continue
+        try:
+            values[key] = float(item.get("price"))
+            changes[key] = float(item.get("change", 0) or 0)
+            labels[key] = str(item.get("symbol") or key)
+        except Exception:
+            continue
+
+    if len(values) < 3:
+        return None
+
+    short = values.get("DI1F27")
+    mid = values.get("DI1F29")
+    long = values.get("DI1F32") or values.get("DI1F40")
+    tail = values.get("DI1F40") or values.get("DI1F32")
+    slope_32_27 = (values.get("DI1F32", long) - short) * 100 if short is not None and long is not None else None
+    slope_tail_27 = (tail - short) * 100 if short is not None and tail is not None else None
+    avg_change = sum(changes.values()) / len(changes) if changes else 0.0
+    long_change = changes.get("DI1F32", changes.get("DI1F40", 0.0))
+    short_change = changes.get("DI1F27", 0.0)
+    steepening = long_change - short_change
+
+    if avg_change >= 0.25 and steepening >= 0.15:
+        regime = "Bear Steepening BR"
+        bias = "risco domestico/fiscal pressionando a ponta longa"
+        color = "#FF4B4B"
+    elif avg_change >= 0.20:
+        regime = "Curva DI abrindo"
+        bias = "mercado exige premio maior de juros Brasil"
+        color = "#FF9800"
+    elif avg_change <= -0.20 and steepening <= -0.10:
+        regime = "Bull Flattening BR"
+        bias = "alivio de juros com ponta longa fechando mais"
+        color = "#00FFA3"
+    elif avg_change <= -0.20:
+        regime = "Curva DI fechando"
+        bias = "alivio em juros domesticos"
+        color = "#00FFA3"
+    elif slope_32_27 is not None and slope_32_27 >= 65:
+        regime = "Premio longo elevado"
+        bias = "curva inclinada; atencao a fiscal, DXY e treasuries"
+        color = "#FF9800"
+    else:
+        regime = "DI neutro"
+        bias = "curva sem deslocamento direcional forte"
+        color = "#94A3B8"
+
+    us02y = _find_global_asset(global_data, ["US 02Y (YIELD)", "FRED:DGS2", "US02Y"])
+    us10y = _find_global_asset(global_data, ["US 10Y (YIELD)", "^TNX", "US10Y"])
+    dxy = _find_global_asset(global_data, ["DXY (DÓLAR INDEX)", "DX-Y.NYB", "DXY"])
+    spreads = {}
+    try:
+        if us02y and short is not None:
+            spreads["DI1F27_US02Y"] = (short - float(us02y.get("price"))) * 100
+    except Exception:
+        pass
+    try:
+        if us10y and long is not None:
+            spreads["DI1F32_US10Y"] = (long - float(us10y.get("price"))) * 100
+    except Exception:
+        pass
+
+    return {
+        "regime": regime,
+        "bias": bias,
+        "color": color,
+        "values": values,
+        "changes": changes,
+        "labels": labels,
+        "slope_32_27_bps": slope_32_27,
+        "slope_tail_27_bps": slope_tail_27,
+        "avg_change": avg_change,
+        "steepening": steepening,
+        "spreads": spreads,
+        "dxy_change": dxy.get("change") if isinstance(dxy, dict) else None,
+    }
+
+def render_di_brasil_regime_panel(global_data=None, compact=False):
+    global_data = global_data or get_global_markets_data()
+    regime = build_di_brasil_regime(global_data)
+    if not regime:
+        st.info("Motor DI Brasil aguardando cotações de DI Futuro no mercados_globais.")
+        return
+
+    def fmt_bps(value):
+        if value is None:
+            return "---"
+        return f"{value:+.0f} bps"
+
+    def fmt_pct(value):
+        try:
+            return f"{float(value):.2f}%".replace(".", ",")
+        except Exception:
+            return "---"
+
+    values = regime["values"]
+    changes = regime["changes"]
+    labels = regime["labels"]
+    color = regime["color"]
+    cards = []
+    for key in ["DI1F27", "DI1F29", "DI1F32", "DI1F40"]:
+        if key not in values:
+            continue
+        chg = changes.get(key, 0.0)
+        chg_color = "#00FFA3" if chg < 0 else "#FF4B4B" if chg > 0 else "#94A3B8"
+        cards.append(f"""
+          <div class="di-card">
+            <span>{html.escape(labels.get(key, key))}</span>
+            <b>{fmt_pct(values.get(key))}</b>
+            <em style="color:{chg_color};">{chg:+.2f}%</em>
+          </div>
+        """)
+
+    spreads = regime.get("spreads", {})
+    spread_text = []
+    if spreads.get("DI1F27_US02Y") is not None:
+        spread_text.append(f"DI27-US02Y {fmt_bps(spreads['DI1F27_US02Y'])}")
+    if spreads.get("DI1F32_US10Y") is not None:
+        spread_text.append(f"DI32-US10Y {fmt_bps(spreads['DI1F32_US10Y'])}")
+    dxy_text = ""
+    if regime.get("dxy_change") is not None:
+        try:
+            dxy_text = f" | DXY {float(regime.get('dxy_change')):+.2f}%"
+        except Exception:
+            dxy_text = ""
+    max_width = "100%" if compact else "100%"
+    st.markdown(f"""
+    <style>
+      .di-regime-wrap{{margin:10px 0 14px;padding:12px 14px;border:1px solid #243244;border-left:4px solid {color};border-radius:8px;background:#0B1220;max-width:{max_width};}}
+      .di-regime-head{{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;}}
+      .di-regime-title{{font-size:.72rem;color:#93C5FD;font-weight:950;letter-spacing:.08em;text-transform:uppercase;}}
+      .di-regime-main{{font-size:1.05rem;color:#F8FAFC;font-weight:950;margin-top:2px;}}
+      .di-regime-sub{{font-size:.74rem;color:#94A3B8;font-weight:800;margin-top:3px;}}
+      .di-card-grid{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:11px;}}
+      .di-card{{background:#0F172A;border:1px solid #1E293B;border-radius:7px;padding:8px 9px;min-width:0;}}
+      .di-card span{{display:block;color:#94A3B8;font-size:.64rem;font-weight:900;}}
+      .di-card b{{display:block;color:#F8FAFC;font-size:1.05rem;line-height:1.1;margin-top:2px;}}
+      .di-card em{{font-style:normal;font-size:.70rem;font-weight:950;}}
+      @media(max-width:800px){{.di-card-grid{{grid-template-columns:repeat(2,minmax(0,1fr));}}}}
+    </style>
+    <section class="di-regime-wrap">
+      <div class="di-regime-head">
+        <div>
+          <div class="di-regime-title">Motor DI Brasil</div>
+          <div class="di-regime-main" style="color:{color};">{html.escape(regime['regime'])}</div>
+          <div class="di-regime-sub">{html.escape(regime['bias'])}</div>
+        </div>
+        <div class="di-regime-sub" style="text-align:right;">
+          Inclinação DI32-DI27 <b style="color:#E5E7EB;">{fmt_bps(regime.get('slope_32_27_bps'))}</b><br>
+          {' | '.join(spread_text) or 'Spreads EUA aguardando dados'}{html.escape(dxy_text)}
+        </div>
+      </div>
+      <div class="di-card-grid">{''.join(cards)}</div>
+    </section>
+    """, unsafe_allow_html=True)
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_investing_calendar_live():
     try:
@@ -6686,6 +6878,7 @@ def pagina_terminal_global():
     st.markdown("<div id='tg-top'></div>", unsafe_allow_html=True)
     painel_topo_global()
     render_source_health_panel()
+    render_di_brasil_regime_panel()
     render_terminal_global_currency_performance_chart()
     curve_col, koyfin_col = st.columns([0.58, 0.42], gap="medium")
     with curve_col:
@@ -7677,6 +7870,7 @@ def pagina_terminal():
         render_regime_juros_section()
     with koyfin_col:
         render_koyfin_terminal_trading_embed()
+    render_di_brasil_regime_panel(compact=True)
     render_top_movers_brasil()
     render_terminal_global_line_chart()
     render_terminal_interest_rate_tv_comparison()
