@@ -4672,6 +4672,7 @@ def painel_topo_global():
     etf_assets = assets_from("🇺🇸 ETFs SETORIAIS")
     emerg_assets = assets_from("🌏 EMERGENTES & BRASIL")
     bond_assets = assets_from("🇺🇸 TREASURIES (YIELDS)")
+    di_assets = assets_from("🇧🇷 DI FUTURO")
     commodity_assets = assets_from("🛢️ COMMODITIES & CRIPTO")
     commodity_names = {str(asset.get("name", "")).upper(): asset for asset in commodity_assets}
     display_groups = [
@@ -4679,12 +4680,13 @@ def painel_topo_global():
         ("Energy", [commodity_names[name] for name in ["BRENT OIL", "WTI OIL", "NATURAL GAS"] if name in commodity_names]),
         ("Sectors", etf_assets),
         ("Bonds", bond_assets),
+        ("DI BR", di_assets),
         ("Metals", [commodity_names[name] for name in ["GOLD", "SILVER", "COPPER", "PLATINUM", "PALLADIUM"] if name in commodity_names]),
         ("Crypto", [commodity_names[name] for name in ["BITCOIN", "ETHEREUM", "SOLANA"] if name in commodity_names]),
         ("Currencies", fx_assets),
         ("Emerg", emerg_assets),
     ]
-    tabs = ["All", "Indices", "Energy", "Bonds", "Sectors", "Metals", "Crypto", "Currencies"]
+    tabs = ["All", "Indices", "Energy", "Bonds", "DI BR", "Sectors", "Metals", "Crypto", "Currencies"]
     tab_html = "".join(
         f"<span class='tg-heatmap-tab {'active' if tab == 'All' else 'muted'}'>{esc_html(tab)}</span>"
         for tab in tabs
@@ -5748,6 +5750,7 @@ def pagina_terminal_bloomberg():
         etf_assets = assets_from("🇺🇸 ETFs SETORIAIS")
         emerg_assets = assets_from("🌏 EMERGENTES & BRASIL")
         bond_assets = assets_from("🇺🇸 TREASURIES (YIELDS)")
+        di_assets = assets_from("🇧🇷 DI FUTURO")
         commodity_assets = assets_from("🛢️ COMMODITIES & CRIPTO")
 
         commodity_names = {str(asset.get("name", "")).upper(): asset for asset in commodity_assets}
@@ -5756,6 +5759,7 @@ def pagina_terminal_bloomberg():
             ("Energy", [commodity_names[name] for name in ["BRENT OIL", "WTI OIL", "NATURAL GAS"] if name in commodity_names]),
             ("Sectors", etf_assets),
             ("Bonds", bond_assets),
+            ("DI BR", di_assets),
             ("Metals", [commodity_names[name] for name in ["GOLD", "SILVER", "COPPER", "PLATINUM", "PALLADIUM"] if name in commodity_names]),
             ("Crypto", [commodity_names[name] for name in ["BITCOIN", "ETHEREUM", "SOLANA"] if name in commodity_names]),
             ("Currencies", fx_assets),
@@ -5763,7 +5767,7 @@ def pagina_terminal_bloomberg():
         ]
 
         panels = []
-        tabs = ["All", "Indices", "Energy", "Bonds", "Sectors", "Metals", "Crypto", "Currencies"]
+        tabs = ["All", "Indices", "Energy", "Bonds", "DI BR", "Sectors", "Metals", "Crypto", "Currencies"]
         for category_name, assets in display_groups:
             if not assets:
                 continue

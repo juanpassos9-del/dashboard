@@ -19,6 +19,14 @@ except Exception:
         fetch_lse_quote = None
 
 try:
+    from execution.fetch_di_futuro import build_di_futuro_payload
+except Exception:
+    try:
+        from fetch_di_futuro import build_di_futuro_payload
+    except Exception:
+        build_di_futuro_payload = None
+
+try:
     import tomllib
 except Exception:
     tomllib = None
@@ -736,6 +744,23 @@ def fetch_global_data(save_file=True):
                 print(f"[!] Erro ao processar {name} ({ticker_symbol}): {e}")
         
         results["categories"][cat_name] = cat_results
+
+    if build_di_futuro_payload is not None:
+        try:
+            di_payload = build_di_futuro_payload()
+            di_quotes = di_payload.get("principais") or di_payload.get("contracts") or []
+            if di_quotes:
+                results["categories"]["🇧🇷 DI FUTURO"] = di_quotes
+                results["metadata"]["di_futuro_br"] = {
+                    "updated_at": di_payload.get("updated_at"),
+                    "source": di_payload.get("source"),
+                    "contracts": len(di_quotes),
+                    "errors": di_payload.get("errors", []),
+                }
+                results["metadata"]["sources"][di_payload.get("source", "DI Futuro")] = len(di_quotes)
+                print(f"[+] DI Futuro BR: {len(di_quotes)} contratos carregados via {di_payload.get('source')}.")
+        except Exception as e:
+            print(f"[!] Erro ao carregar DI Futuro BR: {e}")
             
     # Só salva se tivermos dados mínimos (ex: pelo menos 5 ativos válidos)
     if valid_data_count > 5:
