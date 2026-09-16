@@ -1663,6 +1663,12 @@ def painel_tickers_topo():
         "EEM": "EEM (Emerging Markets)",
         "6L": "6L (Real CME)",
         "US02Y": "US 02Y (Yield)",
+        "DI1F27": "DI1F27 (DI Futuro)",
+        "DI1F28": "DI1F28 (DI Futuro)",
+        "DI1F29": "DI1F29 (DI Futuro)",
+        "DI1F31": "DI1F31 (DI Futuro)",
+        "DI1F32": "DI1F32 (DI Futuro)",
+        "DI1F40": "DI1F40 (DI Futuro)",
         "PBR": "PETR4 (ADR)",
         "VALE": "VALE (ADR)",
         "BRENT": "BRENT OIL"
@@ -1674,47 +1680,50 @@ def painel_tickers_topo():
             if not isinstance(cat_assets, list): continue
             for asset in cat_assets:
                 for key, target_name in targets.items():
-                    if asset.get('name') == target_name:
+                    if asset.get('name') == target_name or asset.get("symbol") == key or asset.get("fallback_for") == key:
                         found_assets[key] = asset
 
     # Renderização em colunas
-    cols = st.columns(len(targets))
-    for i, key in enumerate(targets.keys()):
-        with cols[i]:
-            asset = found_assets.get(key)
-            if asset:
-                try:
-                    change = float(asset.get('change', 0) or 0)
-                except (TypeError, ValueError):
-                    change = 0.0
-                color = "#00FFA3" if change >= 0 else "#FF4B4B"
-                try:
-                    price = float(asset.get('price', 0) or 0)
-                except (TypeError, ValueError):
-                    price = 0.0
-                # Formatação compacta para o topo
-                price_fmt = f"{price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-                if key == "US02Y":
-                    price_fmt = f"{price:.2f}%".replace(".", ",")
-                change_fmt = f"{change:+.2f}%"
-                if asset.get("change_bps") is not None:
-                    change_bps = float(asset.get("change_bps") or 0)
-                    color = "#00FFA3" if change_bps >= 0 else "#FF4B4B"
-                    change_fmt = f"{change_bps:+.2f} bps".replace(".", ",")
-                st.markdown(f"""
-                    <div style="background: #111; border: 1px solid #222; border-top: 2px solid {color}; padding: 8px; border-radius: 4px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">
-                        <div style="font-size: 0.6rem; color: #888; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;">{key}</div>
-                        <div style="font-size: 1.1rem; font-weight: bold; color: #FFF; margin: 2px 0;">{price_fmt}</div>
-                        <div style="font-size: 0.75rem; color: {color}; font-weight: bold;">{change_fmt}</div>
-                    </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                    <div style="background: #0A0A0A; border: 1px solid #222; padding: 8px; border-radius: 4px; text-align: center; color: #444;">
-                        <div style="font-size: 0.6rem;">{key}</div>
-                        <div style="font-size: 1.1rem;">---</div>
-                    </div>
-                """, unsafe_allow_html=True)
+    target_keys = list(targets.keys())
+    rows = [target_keys[i:i + 7] for i in range(0, len(target_keys), 7)]
+    for row_keys in rows:
+        cols = st.columns(len(row_keys))
+        for i, key in enumerate(row_keys):
+            with cols[i]:
+                asset = found_assets.get(key)
+                if asset:
+                    try:
+                        change = float(asset.get('change', 0) or 0)
+                    except (TypeError, ValueError):
+                        change = 0.0
+                    color = "#00FFA3" if change >= 0 else "#FF4B4B"
+                    try:
+                        price = float(asset.get('price', 0) or 0)
+                    except (TypeError, ValueError):
+                        price = 0.0
+                    # Formatação compacta para o topo
+                    price_fmt = f"{price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                    if key == "US02Y" or key.startswith("DI1"):
+                        price_fmt = f"{price:.2f}%".replace(".", ",")
+                    change_fmt = f"{change:+.2f}%"
+                    if asset.get("change_bps") is not None:
+                        change_bps = float(asset.get("change_bps") or 0)
+                        color = "#00FFA3" if change_bps >= 0 else "#FF4B4B"
+                        change_fmt = f"{change_bps:+.2f} bps".replace(".", ",")
+                    st.markdown(f"""
+                        <div style="background: #111; border: 1px solid #222; border-top: 2px solid {color}; padding: 8px; border-radius: 4px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">
+                            <div style="font-size: 0.6rem; color: #888; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;">{key}</div>
+                            <div style="font-size: 1.1rem; font-weight: bold; color: #FFF; margin: 2px 0;">{price_fmt}</div>
+                            <div style="font-size: 0.75rem; color: {color}; font-weight: bold;">{change_fmt}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                        <div style="background: #0A0A0A; border: 1px solid #222; padding: 8px; border-radius: 4px; text-align: center; color: #444;">
+                            <div style="font-size: 0.6rem;">{key}</div>
+                            <div style="font-size: 1.1rem;">---</div>
+                        </div>
+                    """, unsafe_allow_html=True)
 
 
 BR_TOP_MOVERS_TICKERS = {
