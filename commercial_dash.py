@@ -6390,16 +6390,13 @@ def render_terminal_global_macro_class_comparatives():
     with bonds_col:
         render_macro_class_chart(
             "Bonds",
-            "Curvas globais: EUA, Brasil e Alemanha.",
+            "Curvas globais: EUA e Alemanha.",
             "tg_macro_bonds",
             "OTCB:US10Y",
             "#FF9800",
             [
                 ("OTCB:US02Y", "#FACC15", "2Y USA"),
                 ("OTCB:US30Y", "#00BFFF", "30Y USA"),
-                ("BMFBOVESPA:DI1F2029", "#22C55E", "DI1F2029 BR"),
-                ("BMFBOVESPA:DI1F2032", "#14B8A6", "DI1F2032 BR"),
-                ("BMFBOVESPA:DI1F2035", "#84CC16", "DI1F2035 BR"),
                 ("OANDA:DE10YBEUR", "#38BDF8", "10Y Alemanha"),
             ],
         )
@@ -10707,16 +10704,13 @@ def pagina_correlacao():
     with bonds_col:
         render_macro_class_chart(
             "Bonds",
-            "Curvas globais: EUA, Brasil e Alemanha.",
+            "Curvas globais: EUA e Alemanha.",
             "tradingview_macro_bonds_v1",
             "OTCB:US10Y",
             "#FF9800",
             [
                 ("OTCB:US02Y", "#FACC15", "2Y USA"),
                 ("OTCB:US30Y", "#00BFFF", "30Y USA"),
-                ("BMFBOVESPA:DI1F2029", "#22C55E", "DI1F2029 BR"),
-                ("BMFBOVESPA:DI1F2032", "#14B8A6", "DI1F2032 BR"),
-                ("BMFBOVESPA:DI1F2035", "#84CC16", "DI1F2035 BR"),
                 ("OANDA:DE10YBEUR", "#38BDF8", "10Y Alemanha"),
             ],
         )
