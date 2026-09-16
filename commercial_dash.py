@@ -6390,14 +6390,13 @@ def render_terminal_global_macro_class_comparatives():
     with bonds_col:
         render_macro_class_chart(
             "Bonds",
-            "Curvas globais: EUA e Alemanha.",
+            "Curvas globais: EUA.",
             "tg_macro_bonds",
             "OTCB:US10Y",
             "#FF9800",
             [
                 ("OTCB:US02Y", "#FACC15", "2Y USA"),
                 ("OTCB:US30Y", "#00BFFF", "30Y USA"),
-                ("OANDA:DE10YBEUR", "#38BDF8", "10Y Alemanha"),
             ],
         )
     with adr_col:
@@ -10704,14 +10703,13 @@ def pagina_correlacao():
     with bonds_col:
         render_macro_class_chart(
             "Bonds",
-            "Curvas globais: EUA e Alemanha.",
+            "Curvas globais: EUA.",
             "tradingview_macro_bonds_v1",
             "OTCB:US10Y",
             "#FF9800",
             [
                 ("OTCB:US02Y", "#FACC15", "2Y USA"),
                 ("OTCB:US30Y", "#00BFFF", "30Y USA"),
-                ("OANDA:DE10YBEUR", "#38BDF8", "10Y Alemanha"),
             ],
         )
 
