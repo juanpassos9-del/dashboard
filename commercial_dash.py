@@ -7220,6 +7220,8 @@ def sidebar_mercados():
             "BITCOIN": "BTC",
             "ETHEREUM": "ETH",
             "SOLANA": "SOL",
+            "BDORY (ADR)": "BDORY",
+            "EWZS (Brazil Small Cap ETF)": "EWZS",
         }
         if name in aliases:
             return aliases[name]
@@ -7251,18 +7253,19 @@ def sidebar_mercados():
         """
         <style>
         .sidebar-quotes { width:100%; border:1px solid #1E293B; border-radius:4px; overflow:hidden; background:#080D14; }
-        .sidebar-quote-grid { display:grid; grid-template-columns:minmax(0, 1.25fr) minmax(62px, .92fr) minmax(58px, .78fr); align-items:center; column-gap:7px; }
+        .sidebar-quote-grid { display:grid; grid-template-columns:minmax(0, 1.12fr) minmax(58px, .82fr) minmax(50px, .66fr) minmax(50px, .66fr); align-items:center; column-gap:5px; }
         .sidebar-quote-header { padding:7px 7px; background:#0F1722; border-bottom:1px solid #263244; color:#94A3B8; font-size:.70rem; font-weight:800; }
         .sidebar-quote-category { padding:8px 7px 5px; border-top:1px solid #1E293B; color:#F59E0B; font-size:.69rem; font-weight:900; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .sidebar-quote-category.first { border-top:0; }
         .sidebar-quote-row { min-height:31px; padding:5px 7px; border-top:1px solid #121B28; font-variant-numeric:tabular-nums; }
         .sidebar-quote-symbol { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#D7E0EC; font-size:.76rem; font-weight:850; }
         .sidebar-quote-price { text-align:right; white-space:nowrap; color:#F8FAFC; font-size:.76rem; font-weight:850; }
-        .sidebar-quote-change { text-align:right; white-space:nowrap; font-size:.73rem; font-weight:900; }
+        .sidebar-quote-change { text-align:right; white-space:nowrap; font-size:.70rem; font-weight:900; }
+        .sidebar-quote-extended { text-align:right; white-space:nowrap; font-size:.70rem; font-weight:900; }
         </style>
         <div class="sidebar-quotes">
           <div class="sidebar-quote-grid sidebar-quote-header">
-            <span>Símbolo</span><span style="text-align:right;">Preço</span><span style="text-align:right;">Var%</span>
+            <span>Símbolo</span><span style="text-align:right;">Preço</span><span style="text-align:right;">Var%</span><span style="text-align:right;">Pré/Pós</span>
           </div>
         """
     ]
@@ -7297,6 +7300,19 @@ def sidebar_mercados():
             change_fmt = f"{displayed_change:+.2f}%".replace(".", ",")
             color = "#00E5A8" if displayed_change > 0 else ("#FF5C70" if displayed_change < 0 else "#94A3B8")
 
+            extended_change = item.get("extended_change")
+            market_state = str(item.get("market_state") or "")
+            try:
+                extended_value = float(extended_change) if extended_change is not None else None
+            except (TypeError, ValueError):
+                extended_value = None
+            if market_state in {"PRE", "POST"} and extended_value is not None:
+                extended_fmt = f"{extended_value:+.2f}%".replace(".", ",")
+                extended_color = "#00E5A8" if extended_value > 0 else ("#FF5C70" if extended_value < 0 else "#94A3B8")
+            else:
+                extended_fmt = "—"
+                extended_color = "#64748B"
+
             item_name = html.escape(str(item.get('name', '---')))
             item_source = html.escape(str(item.get("source_symbol") or item.get("source") or ""))
             symbol_label = html.escape(sidebar_symbol(item))
@@ -7306,6 +7322,7 @@ def sidebar_mercados():
                 f'<span class="sidebar-quote-symbol">{symbol_label}</span>'
                 f'<span class="sidebar-quote-price">{price_fmt}</span>'
                 f'<span class="sidebar-quote-change" style="color:{color};">{change_fmt}</span>'
+                f'<span class="sidebar-quote-extended" style="color:{extended_color};">{extended_fmt}</span>'
                 '</div>'
             )
     table_parts.append("</div>")

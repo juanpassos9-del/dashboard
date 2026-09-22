@@ -51,6 +51,11 @@ except Exception:
 BR_TZ = ZoneInfo("America/Sao_Paulo")
 NY_TZ = ZoneInfo("America/New_York")
 
+EXTENDED_HOURS_TICKERS = {
+    "EEM", "EMB", "EWZ", "EWZS", "ILF", "PBR", "VALE", "ITUB", "BBD", "BDORY",
+    "SPY", "XOP", "XLE", "XLK", "XLP", "XLB", "XLI", "XLV", "XLRE", "XBI", "XLY", "XLC",
+}
+
 
 TWELVE_SYMBOL_MAP = {
     "^GSPC": "SPY",
@@ -220,6 +225,89 @@ def _round_price(value):
     return float(round(value, 2) if abs(value) > 10 else round(value, 4))
 
 
+def _extended_hours_snapshot(ticker_symbol, ticker_df):
+    """Separa sessao regular de pre/pos-market para ativos listados nos EUA."""
+    if ticker_symbol not in EXTENDED_HOURS_TICKERS or ticker_df is None or ticker_df.empty:
+        return {}
+    try:
+        clean = ticker_df.dropna(subset=["Close"]).copy()
+        if clean.empty:
+            return {}
+        index = pd.DatetimeIndex(clean.index)
+        if index.tz is None:
+            index = index.tz_localize(timezone.utc)
+        index = index.tz_convert(NY_TZ)
+        clean.index = index
+        clean = clean.sort_index()
+
+        minutes = clean.index.hour * 60 + clean.index.minute
+        regular = clean[(minutes >= 570) & (minutes < 960)]
+        if regular.empty:
+            return {}
+
+        regular_dates = list(dict.fromkeys(regular.index.date))
+        closes = []
+        for session_date in regular_dates:
+            session = regular[regular.index.date == session_date]
+            if not session.empty:
+                closes.append((session_date, float(session["Close"].iloc[-1]), session))
+        if not closes:
+            return {}
+
+        now_ny = datetime.now(timezone.utc).astimezone(NY_TZ)
+        session_date = now_ny.date()
+        session_minutes = now_ny.hour * 60 + now_ny.minute
+        is_weekday = now_ny.weekday() < 5
+        if is_weekday and 240 <= session_minutes < 570:
+            market_state = "PRE"
+            extended = clean[(clean.index.date == session_date) & (minutes >= 240) & (minutes < 570)]
+            available_regular = [row for row in closes if row[0] < session_date]
+        elif is_weekday and 570 <= session_minutes < 960:
+            market_state = "REGULAR"
+            extended = pd.DataFrame()
+            available_regular = [row for row in closes if row[0] <= session_date]
+        elif is_weekday and 960 <= session_minutes < 1200:
+            market_state = "POST"
+            extended = clean[(clean.index.date == session_date) & (minutes >= 960) & (minutes < 1200)]
+            available_regular = [row for row in closes if row[0] <= session_date]
+        else:
+            market_state = "CLOSED"
+            extended = pd.DataFrame()
+            available_regular = [row for row in closes if row[0] <= session_date]
+
+        if not available_regular:
+            return {}
+        regular_date, regular_price, regular_session = available_regular[-1]
+        prior_regular = [row for row in closes if row[0] < regular_date]
+        previous_regular_close = prior_regular[-1][1] if prior_regular else regular_price
+        regular_change = (
+            ((regular_price - previous_regular_close) / previous_regular_close) * 100
+            if previous_regular_close > 0 else 0.0
+        )
+
+        result = {
+            "regular_price": _round_price(regular_price),
+            "regular_change": float(round(regular_change, 2)),
+            "regular_prev_close": _round_price(previous_regular_close),
+            "regular_high": _round_price(float(regular_session["High"].max())),
+            "regular_low": _round_price(float(regular_session["Low"].min())),
+            "regular_session_date": str(regular_date),
+            "market_state": market_state,
+        }
+        if market_state in {"PRE", "POST"} and not extended.empty:
+            extended_price = float(extended["Close"].iloc[-1])
+            result.update({
+                "extended_price": _round_price(extended_price),
+                "extended_change": float(round(((extended_price - regular_price) / regular_price) * 100, 2)),
+                "extended_session": market_state,
+                "extended_timestamp": extended.index[-1].isoformat(),
+            })
+        return result
+    except Exception as exc:
+        print(f"[!] Erro ao separar pre/pos-market de {ticker_symbol}: {exc}")
+        return {}
+
+
 def _derive_brlusd_candidate(us_dbrl_item):
     if not isinstance(us_dbrl_item, dict):
         return None
@@ -279,7 +367,7 @@ def _candidate_from_frame(name, ticker_symbol, ticker_df, source="Yahoo Finance"
         source_time = _to_utc_timestamp(clean_df.index[-1], assume_tz=timezone.utc)
         age = _age_seconds(source_time)
 
-        return {
+        candidate = {
             "name": name,
             "symbol": ticker_symbol,
             "source_symbol": source_symbol or ticker_symbol,
@@ -293,6 +381,15 @@ def _candidate_from_frame(name, ticker_symbol, ticker_df, source="Yahoo Finance"
             "change_5m": float(round(change_5m, 2)) if change_5m is not None else None,
             "prev_close": _round_price(prev_close),
         }
+        extended_snapshot = _extended_hours_snapshot(ticker_symbol, ticker_df)
+        if extended_snapshot:
+            candidate.update(extended_snapshot)
+            candidate["price"] = extended_snapshot["regular_price"]
+            candidate["change"] = extended_snapshot["regular_change"]
+            candidate["prev_close"] = extended_snapshot["regular_prev_close"]
+            candidate["high"] = extended_snapshot["regular_high"]
+            candidate["low"] = extended_snapshot["regular_low"]
+        return candidate
     except Exception as e:
         print(f"[!] Erro ao montar candidato {name} ({ticker_symbol}) via {source}: {e}")
         return None
@@ -727,7 +824,9 @@ def fetch_global_data(save_file=True):
             "PETR4 (ADR)": "PBR",
             "VALE (ADR)": "VALE",
             "ITUB (ADR)": "ITUB",
-            "BBD (ADR)": "BBD"
+            "BBD (ADR)": "BBD",
+            "BDORY (ADR)": "BDORY",
+            "EWZS (Brazil Small Cap ETF)": "EWZS"
         },
         "🇺🇸 ETFs SETORIAIS": {
             "SPY (S&P 500)": "SPY",
