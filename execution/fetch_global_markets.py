@@ -204,6 +204,44 @@ def _round_price(value):
     return float(round(value, 2) if abs(value) > 10 else round(value, 4))
 
 
+def _derive_brlusd_candidate(us_dbrl_item):
+    if not isinstance(us_dbrl_item, dict):
+        return None
+    price = _finite_float(us_dbrl_item.get("price"))
+    if price is None or price <= 0:
+        return None
+
+    high = _finite_float(us_dbrl_item.get("high"))
+    low = _finite_float(us_dbrl_item.get("low"))
+    prev_close = _finite_float(us_dbrl_item.get("prev_close"))
+    change = _finite_float(us_dbrl_item.get("change"))
+    change_5m = _finite_float(us_dbrl_item.get("change_5m"))
+
+    derived = {
+        "name": "BRLUSD",
+        "symbol": "BRLUSD",
+        "source_symbol": "1/BRL=X",
+        "source": "Derived from USDBRL",
+        "source_timestamp": us_dbrl_item.get("source_timestamp"),
+        "age_seconds": us_dbrl_item.get("age_seconds"),
+        "price": _round_price(1.0 / price),
+        "change": float(round(-change, 2)) if change is not None else None,
+        "change_5m": float(round(-change_5m, 2)) if change_5m is not None else None,
+        "derived_from": us_dbrl_item.get("name") or us_dbrl_item.get("symbol") or "USDBRL",
+    }
+    if low and low > 0:
+        derived["high"] = _round_price(1.0 / low)
+    else:
+        derived["high"] = derived["price"]
+    if high and high > 0:
+        derived["low"] = _round_price(1.0 / high)
+    else:
+        derived["low"] = derived["price"]
+    if prev_close and prev_close > 0:
+        derived["prev_close"] = _round_price(1.0 / prev_close)
+    return derived
+
+
 def _candidate_from_frame(name, ticker_symbol, ticker_df, source="Yahoo Finance", source_symbol=None):
     try:
         clean_df = ticker_df.dropna(subset=["Close"]).copy()
@@ -742,6 +780,14 @@ def fetch_global_data(save_file=True):
                 valid_data_count += 1
             except Exception as e:
                 print(f"[!] Erro ao processar {name} ({ticker_symbol}): {e}")
+
+        if cat_name == "💱 MOEDAS / FOREX":
+            us_dbrl_item = next((item for item in cat_results if item.get("name") == "USDBRL (Comercial)"), None)
+            brlusd_item = _derive_brlusd_candidate(us_dbrl_item)
+            if brlusd_item:
+                cat_results.insert(2, brlusd_item)
+                results["metadata"]["sources"]["Derived from USDBRL"] = results["metadata"]["sources"].get("Derived from USDBRL", 0) + 1
+                valid_data_count += 1
         
         results["categories"][cat_name] = cat_results
 
