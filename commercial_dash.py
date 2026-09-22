@@ -7180,14 +7180,94 @@ def sidebar_mercados():
 
     remember_sidebar_quotes(categories)
 
-    st.markdown(f"<div style='text-align:right; font-size:0.65rem; color:#666; margin-bottom:10px;'>ATUALIZADO ÀS: {last_upd}</div>", unsafe_allow_html=True)
+    def sidebar_symbol(item):
+        name = str(item.get("name") or "").strip()
+        symbol = str(item.get("symbol") or "").strip()
+        aliases = {
+            "IBOV": "IBOV",
+            "S&P 500": "SPX",
+            "NASDAQ": "NASDAQ",
+            "DOW JONES": "DOW",
+            "RUSSELL 2000": "RUSSELL",
+            "NIKKEI 225": "NIKKEI",
+            "EURO STOXX 50": "STOXX50",
+            "DAX": "DAX",
+            "FTSE 100": "FTSE",
+            "VIX": "VIX",
+            "DXY (Dólar Index)": "DXY",
+            "USDBRL (Comercial)": "USDBRL",
+            "BRLUSD": "BRLUSD",
+            "6L (Real CME)": "6L",
+            "EURUSD": "EURUSD",
+            "GBPUSD": "GBPUSD",
+            "USDJPY": "USDJPY",
+            "AUDUSD": "AUDUSD",
+            "USDCAD": "USDCAD",
+            "USDCHF": "USDCHF",
+            "US 02Y (Yield)": "US02Y",
+            "US 03M (Yield)": "US03M",
+            "US 05Y (Yield)": "US05Y",
+            "US 10Y (Yield)": "US10Y",
+            "US 30Y (Yield)": "US30Y",
+            "BRENT OIL": "UKOIL",
+            "WTI OIL": "USOIL",
+            "NATURAL GAS": "NATGAS",
+            "COPPER": "COPPER",
+            "GOLD": "GOLD",
+            "SILVER": "SILVER",
+            "PLATINUM": "PLATINUM",
+            "PALLADIUM": "PALLADIUM",
+            "BITCOIN": "BTC",
+            "ETHEREUM": "ETH",
+            "SOLANA": "SOL",
+        }
+        if name in aliases:
+            return aliases[name]
+        if symbol.startswith("DI1"):
+            return symbol
+        if " (" in name:
+            compact_name = name.split(" (", 1)[0].strip()
+            if compact_name and len(compact_name) <= 10:
+                return compact_name
+        compact_symbol = symbol.replace("^", "").replace("=F", "").replace("=X", "")
+        compact_symbol = compact_symbol.replace("-USD", "").replace(".SA", "")
+        return compact_symbol or name or "---"
+
+    st.markdown(
+        f"<div style='text-align:right; font-size:0.62rem; color:#64748B; margin-bottom:6px;'>ATUALIZADO {html.escape(str(last_upd))}</div>",
+        unsafe_allow_html=True,
+    )
 
     ordered_categories = sorted(
         categories.items(),
         key=lambda kv: 0 if "DI FUTURO" in str(kv[0]).upper() else 1,
     )
+    table_parts = [
+        """
+        <style>
+        .sidebar-quotes { width:100%; border:1px solid #1E293B; border-radius:4px; overflow:hidden; background:#080D14; }
+        .sidebar-quote-grid { display:grid; grid-template-columns:minmax(0, 1.25fr) minmax(62px, .92fr) minmax(58px, .78fr); align-items:center; column-gap:7px; }
+        .sidebar-quote-header { padding:6px 7px; background:#0F1722; border-bottom:1px solid #263244; color:#94A3B8; font-size:.61rem; font-weight:800; }
+        .sidebar-quote-category { padding:7px 7px 4px; border-top:1px solid #1E293B; color:#F59E0B; font-size:.62rem; font-weight:900; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .sidebar-quote-category.first { border-top:0; }
+        .sidebar-quote-row { min-height:27px; padding:4px 7px; border-top:1px solid #121B28; font-variant-numeric:tabular-nums; }
+        .sidebar-quote-symbol { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#D7E0EC; font-size:.68rem; font-weight:850; }
+        .sidebar-quote-price { text-align:right; white-space:nowrap; color:#F8FAFC; font-size:.68rem; font-weight:850; }
+        .sidebar-quote-change { text-align:right; white-space:nowrap; font-size:.66rem; font-weight:900; }
+        </style>
+        <div class="sidebar-quotes">
+          <div class="sidebar-quote-grid sidebar-quote-header">
+            <span>Símbolo</span><span style="text-align:right;">Preço</span><span style="text-align:right;">Var%</span>
+          </div>
+        """
+    ]
+    first_category = True
     for cat_name, assets in ordered_categories:
-        st.markdown(f"<div style='font-size:0.75rem; font-weight:bold; color:#FF9800; margin-bottom:5px;'>{cat_name}</div>", unsafe_allow_html=True)
+        category_class = " first" if first_category else ""
+        first_category = False
+        table_parts.append(
+            f'<div class="sidebar-quote-category{category_class}" title="{html.escape(str(cat_name))}">{html.escape(str(cat_name))}</div>'
+        )
         for item in assets:
             if not isinstance(item, dict): continue
             change_val = item.get('change', 0)
@@ -7195,37 +7275,44 @@ def sidebar_mercados():
                 try: change_val = float(change_val)
                 except (ValueError, TypeError): change_val = 0.0
 
-            color = "#00FFA3" if change_val >= 0 else "#FF4B4B"
-            
             price_val = item.get('price', 0)
             if not isinstance(price_val, (int, float)):
                 try: price_val = float(price_val)
                 except (ValueError, TypeError): price_val = 0.0
 
-            # Formatação de preço: 4 casas se for pequeno (moedas), 2 se for grande
-            price_fmt = f"{price_val:.4f}" if price_val < 10 else f"{price_val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            mom_5m, mom_5m_color, accel_label = quote_5m_momentum(item.get('name', '---'), price_val, item.get("change_5m"))
-            accel_badge = (
-                f"<span style='display:inline-block; margin-top:2px; padding:1px 5px; border-radius:999px; "
-                f"background:{mom_5m_color}22; border:1px solid {mom_5m_color}88; color:{mom_5m_color}; "
-                f"font-size:0.56rem; font-weight:900; letter-spacing:0.02em;'>{accel_label}</span>"
-                if accel_label else ""
-            )
-            
+            is_rate = "TREASUR" in str(cat_name).upper() or "DI FUTURO" in str(cat_name).upper()
+            if is_rate:
+                price_fmt = f"{price_val:.3f}%".replace(".", ",")
+            elif abs(price_val) < 10:
+                price_fmt = f"{price_val:.4f}".replace(".", ",")
+            else:
+                price_fmt = f"{price_val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+            change_bps = item.get("change_bps")
+            if change_bps is not None:
+                try:
+                    displayed_change = float(change_bps)
+                except (TypeError, ValueError):
+                    displayed_change = 0.0
+                change_fmt = f"{displayed_change:+.2f}bp".replace(".", ",")
+            else:
+                displayed_change = change_val
+                change_fmt = f"{displayed_change:+.2f}%".replace(".", ",")
+            color = "#00E5A8" if displayed_change > 0 else ("#FF5C70" if displayed_change < 0 else "#94A3B8")
+
             item_name = html.escape(str(item.get('name', '---')))
-            quote_html = (
-                "<div style='display:flex; justify-content:space-between; border-bottom:1px solid #1a1a1a; "
-                "padding:4px 0; align-items:center;'>"
-                f"<span style='font-size:0.75rem; color:#AAA; max-width:60%;'>{item_name}</span>"
-                "<div style='text-align:right; min-width:78px;'>"
-                f"<div style='font-size:0.96rem; font-weight:900; line-height:1.08;'>{price_fmt}</div>"
-                f"<div style='color:{color}; font-weight:900; font-size:0.76rem; line-height:1.12;'>{change_val:+.2f}%</div>"
-                f"<div style='color:{mom_5m_color}; font-weight:800; font-size:0.64rem; line-height:1.08;'>{mom_5m}</div>"
-                f"{accel_badge}"
-                "</div></div>"
+            item_source = html.escape(str(item.get("source_symbol") or item.get("source") or ""))
+            symbol_label = html.escape(sidebar_symbol(item))
+            table_parts.append(
+                '<div class="sidebar-quote-grid sidebar-quote-row" '
+                f'title="{item_name} | {item_source}">'
+                f'<span class="sidebar-quote-symbol">{symbol_label}</span>'
+                f'<span class="sidebar-quote-price">{price_fmt}</span>'
+                f'<span class="sidebar-quote-change" style="color:{color};">{change_fmt}</span>'
+                '</div>'
             )
-            st.markdown(quote_html, unsafe_allow_html=True)
-        st.markdown("<div style='margin-bottom:15px;'></div>", unsafe_allow_html=True)
+    table_parts.append("</div>")
+    st.markdown("".join(table_parts), unsafe_allow_html=True)
 
 
 @st.fragment(run_every=3600)
