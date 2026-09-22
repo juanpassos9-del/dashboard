@@ -7238,10 +7238,15 @@ def sidebar_mercados():
         unsafe_allow_html=True,
     )
 
-    ordered_categories = sorted(
-        categories.items(),
-        key=lambda kv: 0 if "DI FUTURO" in str(kv[0]).upper() else 1,
-    )
+    def sidebar_category_order(category_name):
+        normalized = str(category_name).upper()
+        if "TREASUR" in normalized:
+            return 0
+        if "DI FUTURO" in normalized:
+            return 1
+        return 2
+
+    ordered_categories = sorted(categories.items(), key=lambda kv: sidebar_category_order(kv[0]))
     table_parts = [
         """
         <style>
