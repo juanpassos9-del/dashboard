@@ -7247,13 +7247,13 @@ def sidebar_mercados():
         <style>
         .sidebar-quotes { width:100%; border:1px solid #1E293B; border-radius:4px; overflow:hidden; background:#080D14; }
         .sidebar-quote-grid { display:grid; grid-template-columns:minmax(0, 1.25fr) minmax(62px, .92fr) minmax(58px, .78fr); align-items:center; column-gap:7px; }
-        .sidebar-quote-header { padding:6px 7px; background:#0F1722; border-bottom:1px solid #263244; color:#94A3B8; font-size:.61rem; font-weight:800; }
-        .sidebar-quote-category { padding:7px 7px 4px; border-top:1px solid #1E293B; color:#F59E0B; font-size:.62rem; font-weight:900; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .sidebar-quote-header { padding:7px 7px; background:#0F1722; border-bottom:1px solid #263244; color:#94A3B8; font-size:.70rem; font-weight:800; }
+        .sidebar-quote-category { padding:8px 7px 5px; border-top:1px solid #1E293B; color:#F59E0B; font-size:.69rem; font-weight:900; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .sidebar-quote-category.first { border-top:0; }
-        .sidebar-quote-row { min-height:27px; padding:4px 7px; border-top:1px solid #121B28; font-variant-numeric:tabular-nums; }
-        .sidebar-quote-symbol { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#D7E0EC; font-size:.68rem; font-weight:850; }
-        .sidebar-quote-price { text-align:right; white-space:nowrap; color:#F8FAFC; font-size:.68rem; font-weight:850; }
-        .sidebar-quote-change { text-align:right; white-space:nowrap; font-size:.66rem; font-weight:900; }
+        .sidebar-quote-row { min-height:31px; padding:5px 7px; border-top:1px solid #121B28; font-variant-numeric:tabular-nums; }
+        .sidebar-quote-symbol { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#D7E0EC; font-size:.76rem; font-weight:850; }
+        .sidebar-quote-price { text-align:right; white-space:nowrap; color:#F8FAFC; font-size:.76rem; font-weight:850; }
+        .sidebar-quote-change { text-align:right; white-space:nowrap; font-size:.73rem; font-weight:900; }
         </style>
         <div class="sidebar-quotes">
           <div class="sidebar-quote-grid sidebar-quote-header">
