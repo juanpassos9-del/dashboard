@@ -27,6 +27,14 @@ except Exception:
         build_di_futuro_payload = None
 
 try:
+    from execution.fetch_treasury_yields import fetch_tradingview_treasury_candidate
+except Exception:
+    try:
+        from fetch_treasury_yields import fetch_tradingview_treasury_candidate
+    except Exception:
+        fetch_tradingview_treasury_candidate = None
+
+try:
     import tomllib
 except Exception:
     tomllib = None
@@ -527,6 +535,14 @@ def _fetch_us02y_yahoo_candidate(name, ticker_symbol):
 
 def _quote_candidates(name, ticker_symbol, yfinance_df=None):
     candidates = []
+    if fetch_tradingview_treasury_candidate is not None:
+        try:
+            treasury_candidate = fetch_tradingview_treasury_candidate(name, ticker_symbol)
+            if treasury_candidate:
+                return [treasury_candidate]
+        except Exception as e:
+            print(f"[!] TradingView OTC yields falhou para {ticker_symbol}: {e}")
+
     fred_candidate = _fetch_fred_yield_candidate(name, ticker_symbol)
     if fred_candidate:
         return [fred_candidate]

@@ -97,6 +97,7 @@ def _load_fred_curve_data():
 
 def _load_market_fallback(global_data):
     mapping = {
+        "us02y": ("us 02y", "us02y", "dgs2"),
         "us05y": ("us 05y", "5y", "^fvx"),
         "us10y": ("us 10y", "us10y", "^tnx"),
         "us30y": ("us 30y", "us30y", "^tyx"),
@@ -128,7 +129,13 @@ def _merge_curve_data(global_data=None):
     global_data = global_data or {}
     data = _load_market_fallback(global_data)
     fred_data = _load_fred_curve_data()
-    data.update({key: value for key, value in fred_data.items() if value is not None})
+    # O snapshot intradiario do mercado tem prioridade para yields nominais.
+    # FRED preenche ausencias e continua sendo a fonte de TIPS/breakevens.
+    for key, value in fred_data.items():
+        if value is None:
+            continue
+        if key.startswith(("tips_", "breakeven_")) or key not in data:
+            data[key] = value
     if data.get("us10y") is not None and data.get("us02y") is not None:
         data["spread_10y_2y"] = round(data["us10y"] - data["us02y"], 3)
     if data.get("us30y") is not None and data.get("us05y") is not None:
