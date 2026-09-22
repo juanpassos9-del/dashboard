@@ -35,6 +35,14 @@ except Exception:
         fetch_tradingview_treasury_candidate = None
 
 try:
+    from execution.fetch_commodity_futures import fetch_tradingview_commodity_candidate
+except Exception:
+    try:
+        from fetch_commodity_futures import fetch_tradingview_commodity_candidate
+    except Exception:
+        fetch_tradingview_commodity_candidate = None
+
+try:
     import tomllib
 except Exception:
     tomllib = None
@@ -542,6 +550,14 @@ def _quote_candidates(name, ticker_symbol, yfinance_df=None):
                 return [treasury_candidate]
         except Exception as e:
             print(f"[!] TradingView OTC yields falhou para {ticker_symbol}: {e}")
+
+    if fetch_tradingview_commodity_candidate is not None:
+        try:
+            commodity_candidate = fetch_tradingview_commodity_candidate(name, ticker_symbol)
+            if commodity_candidate:
+                return [commodity_candidate]
+        except Exception as e:
+            print(f"[!] TradingView commodities falhou para {ticker_symbol}: {e}")
 
     fred_candidate = _fetch_fred_yield_candidate(name, ticker_symbol)
     if fred_candidate:
