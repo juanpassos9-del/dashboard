@@ -2663,6 +2663,43 @@ def _fx_float(value, default=0.0):
         return default
 
 
+def _extended_market_rows(global_data: dict | None, symbols: set[str] | None = None) -> list[dict]:
+    """Return current pre/post-market moves without mixing them into regular returns."""
+    if not isinstance(global_data, dict):
+        return []
+    categories = global_data.get("categories", global_data)
+    if not isinstance(categories, dict):
+        return []
+    wanted = {str(symbol).upper() for symbol in symbols} if symbols else None
+    rows = []
+    for category, assets in categories.items():
+        if not isinstance(assets, list):
+            continue
+        for item in assets:
+            if not isinstance(item, dict):
+                continue
+            symbol = str(item.get("symbol") or item.get("source_symbol") or "").upper()
+            state = str(item.get("market_state") or "").upper()
+            if not symbol or state not in {"PRE", "POST"} or (wanted is not None and symbol not in wanted):
+                continue
+            try:
+                change = float(item.get("extended_change"))
+                price = float(item.get("extended_price"))
+            except (TypeError, ValueError):
+                continue
+            rows.append({
+                "symbol": symbol,
+                "name": str(item.get("name") or symbol),
+                "asset_class": str(category),
+                "session": state,
+                "price": price,
+                "change": change,
+                "timestamp": item.get("extended_timestamp"),
+                "alert": abs(change) >= 1.0,
+            })
+    return sorted(rows, key=lambda row: abs(row["change"]), reverse=True)
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_us02y_quote_cached():
     try:
@@ -2766,7 +2803,7 @@ def _fx_correlation_rows(pair_df: pd.DataFrame, driver_df: pd.DataFrame | None =
     return sorted(rows, key=lambda item: abs(item["Correlação"]), reverse=True)
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def get_fx_command_center_data():
     pair_df = get_terminal_global_line_chart_data(tuple(FX_COMMAND_PAIR_MAP.items()), period="1d", interval="5m")
     if pair_df.empty:
@@ -2793,6 +2830,10 @@ def get_fx_command_center_data():
     us30y_change = _fx_float(us30y_item.get("change"))
     brent_change = _fx_float(brent_item.get("change"))
     gold_change = _fx_float(gold_item.get("change"))
+    extended_risk = _extended_market_rows(
+        global_data,
+        {"SPY", "EWZ", "EEM", "PBR", "VALE", "ITUB", "BBD", "EWZS", "BDORY"},
+    )
 
     latest_returns = _fx_returns_for_lookback(pair_df, None)
     strength = _fx_strength_from_returns(latest_returns)
@@ -2883,6 +2924,7 @@ def get_fx_command_center_data():
         "mtf": mtf,
         "opportunities": opportunities,
         "correlations": correlations,
+        "extended_risk": extended_risk,
         "regime": {
             "USD": usd_bias,
             "RISK": risk_bias,
@@ -3015,6 +3057,19 @@ def render_fx_command_center():
                 f"<div style='display:flex; justify-content:space-between; border:1px solid #243244; border-radius:8px; padding:9px 12px; background:#07111F; margin-bottom:8px;'><span style='color:#CBD5E1; font-weight:900;'>{html.escape(label)} <small style='color:#64748B;'>→ {html.escape(impacted)}</small></span><b style='color:{color};'>{value:+.2f}%</b></div>",
                 unsafe_allow_html=True,
             )
+
+        extended_risk = data.get("extended_risk", [])
+        if extended_risk:
+            session_label = "Pre-market" if extended_risk[0].get("session") == "PRE" else "After-market"
+            st.markdown(f"#### {session_label} Risk Tape")
+            for item in extended_risk[:6]:
+                value = _fx_float(item.get("change"))
+                color = "#22C55E" if value > 0 else ("#F43F5E" if value < 0 else "#94A3B8")
+                alert = " GAP" if item.get("alert") else ""
+                st.markdown(
+                    f"<div style='display:flex; justify-content:space-between; border:1px solid #243244; border-radius:8px; padding:9px 12px; background:#07111F; margin-bottom:8px;'><span style='color:#CBD5E1; font-weight:900;'>{html.escape(str(item.get('symbol')))}<small style='color:#F59E0B;'>{alert}</small></span><b style='color:{color};'>{value:+.2f}%</b></div>",
+                    unsafe_allow_html=True,
+                )
 
     mtf_rows = []
     for currency in FX_COMMAND_CURRENCIES:
@@ -6466,6 +6521,20 @@ def _render_momentum_rank(items: list[dict[str, Any]], title: str, side: str, mo
     """).strip()
 
 
+def _render_extended_momentum_radar(rows: list[dict]) -> None:
+    if not rows:
+        return
+    session_label = "PRE" if rows[0].get("session") == "PRE" else "POS"
+    st.markdown(f"##### Radar {session_label}-market")
+    st.caption("Movimentos contra o fechamento regular; nao alteram o score intradiario.")
+    columns = st.columns(min(6, len(rows)))
+    for column, item in zip(columns, rows[:6]):
+        value = float(item.get("change") or 0)
+        label = f"{item.get('symbol', '---')}{' | GAP' if item.get('alert') else ''}"
+        with column:
+            st.metric(label, f"{float(item.get('price') or 0):.2f}", f"{value:+.2f}%")
+
+
 def render_global_momentum_screener():
     """Compact cross-asset momentum monitor for Terminal Global."""
     try:
@@ -6541,6 +6610,9 @@ def render_global_momentum_screener():
         if payload is None:
             payload = (load_cached_intraday_momentum if is_intraday else load_cached_global_momentum)(max_age_seconds=7 * 24 * 3600)
 
+    extended_rows = _extended_market_rows(get_global_markets_data()) if is_intraday else []
+    _render_extended_momentum_radar(extended_rows)
+
     if not payload:
         st.info(f"Momentum Screener {mode} aguardando primeiro ciclo. Clique em {refresh_label} para gerar o snapshot.")
         return
@@ -6587,7 +6659,6 @@ def render_global_momentum_screener():
     </div>
     """).strip()
     st.markdown(html_block, unsafe_allow_html=True)
-
 
 def _macro_block_color(score: float) -> str:
     try:
