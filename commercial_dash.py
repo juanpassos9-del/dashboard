@@ -6367,7 +6367,7 @@ def render_terminal_global_macro_class_comparatives():
                 ("OANDA:USDCAD", "#F97316", "USDCAD"),
                 ("OANDA:GBPUSD", "#A855F7", "GBPUSD"),
                 ("OANDA:EURUSD", "#38BDF8", "EURUSD"),
-                ("FX_IDC:USDBRL", "#FACC15", "USDBRL"),
+                ("FX_IDC:BRLUSD", "#FACC15", "BRLUSD"),
                 ("OANDA:USDJPY", "#EF4444", "USDJPY"),
             ],
         )
@@ -10680,7 +10680,7 @@ def pagina_correlacao():
                 ("OANDA:USDCAD", "#F97316", "USDCAD"),
                 ("OANDA:GBPUSD", "#A855F7", "GBPUSD"),
                 ("OANDA:EURUSD", "#38BDF8", "EURUSD"),
-                ("FX_IDC:USDBRL", "#FACC15", "USDBRL"),
+                ("FX_IDC:BRLUSD", "#FACC15", "BRLUSD"),
                 ("OANDA:USDJPY", "#EF4444", "USDJPY"),
             ],
         )
