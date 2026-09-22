@@ -7288,16 +7288,8 @@ def sidebar_mercados():
             else:
                 price_fmt = f"{price_val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-            change_bps = item.get("change_bps")
-            if change_bps is not None:
-                try:
-                    displayed_change = float(change_bps)
-                except (TypeError, ValueError):
-                    displayed_change = 0.0
-                change_fmt = f"{displayed_change:+.2f}bp".replace(".", ",")
-            else:
-                displayed_change = change_val
-                change_fmt = f"{displayed_change:+.2f}%".replace(".", ",")
+            displayed_change = change_val
+            change_fmt = f"{displayed_change:+.2f}%".replace(".", ",")
             color = "#00E5A8" if displayed_change > 0 else ("#FF5C70" if displayed_change < 0 else "#94A3B8")
 
             item_name = html.escape(str(item.get('name', '---')))
