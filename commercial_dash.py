@@ -6972,7 +6972,74 @@ def pagina_monitor_macro():
 @st.fragment(run_every=300)
 def render_terminal_global_latest_report():
     """Exibe no Terminal Global o mesmo ultimo report salvo no Market Report."""
-    latest_report = fetch_app_state_cached("market_report")
+    if st.button(
+        "Atualizar analise",
+        type="primary",
+        use_container_width=True,
+        key="terminal_global_market_report_refresh",
+    ):
+        with st.spinner("Atualizando Market Report..."):
+            try:
+                import json as _json
+                from execution.market_report import generate_market_report
+
+                try:
+                    for secret_key in ("GOOGLE_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"):
+                        secret_value = st.secrets.get(secret_key, "")
+                        if secret_value:
+                            os.environ[secret_key] = secret_value
+                except Exception:
+                    pass
+
+                snapshots = {
+                    "mercados_globais.json": get_global_markets_data(),
+                    "dados_mercado.json": fetch_app_state_cached("dados_mercado"),
+                    "calendario_economico.json": get_calendar_data(),
+                }
+                for path, value in snapshots.items():
+                    if value:
+                        with open(path, "w", encoding="utf-8") as snapshot_file:
+                            _json.dump(value, snapshot_file, ensure_ascii=False, indent=2)
+
+                generated = generate_market_report(force=True)
+                if not generated:
+                    st.error("Nao foi possivel gerar uma nova analise agora.")
+                else:
+                    st.session_state["tg_report_last_generated"] = generated
+                    sync_warnings = []
+                    if supabase:
+                        for state_key, paths in {
+                            "market_report": ["market_report.json", "execution/market_report.json"],
+                            "market_report_daily": ["market_report_daily.json", "execution/market_report_daily.json"],
+                            "calendario_economico": ["calendario_economico.json", "execution/calendario_economico.json"],
+                        }.items():
+                            for path in paths:
+                                if os.path.exists(path):
+                                    with open(path, "r", encoding="utf-8") as state_file:
+                                        ok, warning = sync_app_state_value(state_key, _json.load(state_file))
+                                    if warning:
+                                        sync_warnings.append(f"{state_key}: {warning}")
+                                    break
+                    fetch_app_state_cached.clear()
+                    fetch_app_state_fast.clear()
+                    if sync_warnings:
+                        st.session_state["tg_report_refresh_warning"] = "Analise gerada, com aviso ao salvar: " + " | ".join(sync_warnings[:2])
+                    elif supabase:
+                        st.session_state["tg_report_refresh_success"] = "Analise atualizada e salva."
+                    else:
+                        st.session_state["tg_report_refresh_warning"] = "Analise atualizada nesta sessao, mas o Supabase esta indisponivel."
+                    st.rerun()
+            except Exception as error:
+                st.error(f"Erro ao atualizar Market Report: {error}")
+
+    refresh_success = st.session_state.pop("tg_report_refresh_success", "")
+    refresh_warning = st.session_state.pop("tg_report_refresh_warning", "")
+    if refresh_success:
+        st.success(refresh_success)
+    if refresh_warning:
+        st.warning(refresh_warning)
+
+    latest_report = st.session_state.get("tg_report_last_generated") or fetch_app_state_cached("market_report")
     if not isinstance(latest_report, dict) or not latest_report.get("report"):
         daily_data = fetch_app_state_cached("market_report_daily")
         daily_reports = daily_data.get("reports", []) if isinstance(daily_data, dict) else []
