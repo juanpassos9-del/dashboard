@@ -783,9 +783,9 @@ def fetch_app_state_cached(key: str):
     """Cache de fallback para evitar consultas repetidas ao Supabase."""
     return fetch_app_state(key)
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_live_global_markets():
-    """Busca cotacoes globais direto da fonte com cache curto para o Streamlit Cloud."""
+    """Busca cotacoes globais direto da fonte, no maximo uma vez a cada cinco minutos."""
     try:
         from execution.fetch_global_markets import fetch_global_data
         data = fetch_global_data(save_file=False)
@@ -887,12 +887,43 @@ def _ensure_di_futuro_category(global_data):
     mark_source("DI Futuro BR", "ok", rows=len(di_quotes), message="DI Futuro aplicado ao cache de mercados_globais.", source=di_payload.get("source", "InfoMoney DI"))
     return data
 
+
+def _global_market_payload_age_seconds(global_data) -> float | None:
+    if not isinstance(global_data, dict):
+        return None
+    metadata = global_data.get("metadata") or {}
+    raw_timestamp = metadata.get("generated_at_utc") or metadata.get("full_timestamp")
+    if not raw_timestamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(raw_timestamp).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            # Legacy cloud snapshots used UTC without an explicit offset.
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds())
+    except (TypeError, ValueError):
+        return None
+
 def get_global_markets_data():
-    """Usa Supabase/cache primeiro para nao travar o boot do Streamlit Cloud."""
+    """Use fresh Supabase data, falling back to live collection when it is stale."""
     cached_data = fetch_app_state_cached("mercados_globais")
     if cached_data:
         rows = sum(len(v) for v in (cached_data.get("categories", cached_data) or {}).values() if isinstance(v, list))
-        mark_source("Mercados Globais Cache", "stale", message="Usando app_state/Supabase como fallback rapido.", rows=rows, source="Supabase app_state")
+        age_seconds = _global_market_payload_age_seconds(cached_data)
+        if age_seconds is not None and age_seconds <= 15 * 60:
+            mark_source("Mercados Globais Cache", "ok", message="Snapshot recente do Supabase.", rows=rows, source="Supabase app_state")
+            return _apply_lse_realtime_quotes(_ensure_di_futuro_category(cached_data))
+
+        age_label = f"{int(age_seconds // 60)} min" if age_seconds is not None else "idade desconhecida"
+        mark_source("Mercados Globais Cache", "stale", message=f"Snapshot atrasado ({age_label}); tentando fontes ao vivo.", rows=rows, source="Supabase app_state")
+        live_data = fetch_live_global_markets()
+        if live_data:
+            live_data.setdefault("metadata", {})["stale_cache_replaced"] = {
+                "cache_age_seconds": round(age_seconds, 1) if age_seconds is not None else None,
+                "fallback": "live_collection",
+            }
+            return _apply_lse_realtime_quotes(_ensure_di_futuro_category(live_data))
+        mark_source("Mercados Globais Live", "error", message="Coleta ao vivo falhou; mantendo ultimo snapshot conhecido.", rows=rows, source="Supabase fallback")
         return _apply_lse_realtime_quotes(_ensure_di_futuro_category(cached_data))
     live_data = fetch_live_global_markets()
     if live_data:

@@ -874,8 +874,10 @@ def fetch_global_data(save_file=True):
 
     results = {
         "metadata": {
-            "last_updated": datetime.now().strftime("%H:%M:%S"),
-            "full_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "last_updated": datetime.now(BR_TZ).strftime("%H:%M:%S"),
+            "full_timestamp": datetime.now(BR_TZ).isoformat(),
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "timezone": "America/Sao_Paulo",
             "quote_router": "freshest_source",
             "sources": {},
         },
