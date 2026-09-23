@@ -6969,6 +6969,41 @@ def pagina_monitor_macro():
                 st.caption(str(err))
 
 
+@st.fragment(run_every=300)
+def render_terminal_global_latest_report():
+    """Exibe no Terminal Global o mesmo ultimo report salvo no Market Report."""
+    latest_report = fetch_app_state_cached("market_report")
+    if not isinstance(latest_report, dict) or not latest_report.get("report"):
+        daily_data = fetch_app_state_cached("market_report_daily")
+        daily_reports = daily_data.get("reports", []) if isinstance(daily_data, dict) else []
+        valid_reports = [item for item in daily_reports if isinstance(item, dict) and item.get("report")]
+        latest_report = valid_reports[-1] if valid_reports else None
+
+    st.markdown("<div id='tg-ultimo-report'></div>", unsafe_allow_html=True)
+    st.markdown("#### Ultimo Market Report")
+    if not latest_report:
+        st.info("Nenhum Market Report disponivel no momento.")
+        return
+
+    slot_label = sanitize_text(str(latest_report.get("slot_label") or "Market Report")).upper()
+    updated_at = sanitize_text(str(latest_report.get("updated_at") or "---"))
+    provider = sanitize_text(str(latest_report.get("provider") or "---"))
+    header_html = f"""
+        <div style="background:#0A0A0A; border:1px solid #1E293B; border-top:4px solid #FF9800; padding:16px 18px; border-radius:7px; margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; gap:14px; align-items:flex-start; flex-wrap:wrap;">
+                <div>
+                    <div style="color:#94A3B8; font-size:0.68rem; font-weight:900; text-transform:uppercase;">Ultimo report</div>
+                    <div style="color:#FF9800; font-size:1.35rem; font-weight:950; margin-top:5px;">{slot_label}</div>
+                </div>
+                <div style="color:#64748B; font-size:0.72rem; font-family:'Roboto Mono', monospace; text-align:right;">{updated_at} | {provider}</div>
+            </div>
+        </div>
+    """
+    with st.container(height=680):
+        st.markdown(header_html, unsafe_allow_html=True)
+        st.markdown(str(latest_report.get("report", "")))
+
+
 def pagina_terminal_global():
     """Página de Terminal Global."""
     render_terminal_global_layout_css()
@@ -6983,6 +7018,7 @@ def pagina_terminal_global():
     with koyfin_col:
         render_koyfin_terminal_global_embed()
     secao_calendario_global_fragment()
+    render_terminal_global_latest_report()
     
     body_col = st.container()
 
