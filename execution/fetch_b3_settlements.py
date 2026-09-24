@@ -6,6 +6,7 @@ import argparse
 import io
 import json
 import logging
+from decimal import Decimal, ROUND_HALF_UP
 import re
 import zipfile
 from datetime import date, datetime, timedelta
@@ -204,6 +205,36 @@ def select_front_contract(records: list[dict[str, Any]], symbol: str, trade_date
     return dict(candidates[0])
 
 
+def build_settlement_levels(
+    settlement: float,
+    step_percent: float,
+    *,
+    levels: int = 5,
+    tick_size: float = 0.01,
+) -> dict[str, Any]:
+    """Cria uma escada simetrica de desvios, arredondada ao tick do contrato."""
+    base = Decimal(str(settlement))
+    step = Decimal(str(step_percent))
+    tick = Decimal(str(tick_size))
+
+    def at_tick(value: Decimal) -> float:
+        ticks = (value / tick).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        return float(ticks * tick)
+
+    up = []
+    down = []
+    for index in range(1, levels + 1):
+        deviation = step * index
+        up.append({"level": index, "percent": float(deviation), "price": at_tick(base * (1 + deviation / 100))})
+        down.append({"level": index, "percent": -float(deviation), "price": at_tick(base * (1 - deviation / 100))})
+    return {
+        "step_percent": float(step),
+        "tick_size": float(tick),
+        "up": up,
+        "down": down,
+    }
+
+
 def _with_changes(record: dict[str, Any]) -> dict[str, Any]:
     settlement = float(record["settlement"])
     previous = record.get("previous_settlement")
@@ -212,6 +243,11 @@ def _with_changes(record: dict[str, Any]) -> dict[str, Any]:
     record["change_percent"] = ((settlement / previous_value) - 1) * 100 if previous_value else None
     record["source"] = "B3 BVBG.187.01"
     record["reference_type"] = "official_settlement"
+    symbol = str(record.get("symbol") or record.get("ticker") or "").upper()[:3]
+    if symbol == "WIN":
+        record["deviation_levels"] = build_settlement_levels(settlement, 0.5, tick_size=5)
+    elif symbol == "WDO":
+        record["deviation_levels"] = build_settlement_levels(settlement, 0.25, tick_size=0.5)
     return record
 
 

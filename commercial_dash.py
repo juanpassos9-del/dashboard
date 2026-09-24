@@ -8187,14 +8187,47 @@ def render_b3_settlements_section():
             return f"{float(value):,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
         settlement_decimals = 0 if symbol == "WIN" else 3
+        levels = item.get("deviation_levels") or {}
+        if not levels and settlement is not None:
+            try:
+                from execution.fetch_b3_settlements import build_settlement_levels
+
+                levels = build_settlement_levels(
+                    float(settlement),
+                    0.5 if symbol == "WIN" else 0.25,
+                    tick_size=5 if symbol == "WIN" else 0.5,
+                )
+            except Exception:
+                levels = {}
+
+        def level_rows(entries, level_color, reverse=False):
+            ordered = list(reversed(entries)) if reverse else entries
+            rows = []
+            for entry in ordered:
+                pct = float(entry.get("percent") or 0)
+                rows.append(
+                    f'<div style="display:grid; grid-template-columns:58px 1fr; gap:10px; padding:4px 7px; border-bottom:1px solid #1E293B;">'
+                    f'<span style="color:{level_color}; font-size:.69rem; font-weight:900;">{pct:+.2f}%</span>'
+                    f'<span style="color:#E2E8F0; text-align:right; font-size:.76rem; font-weight:850;">{number(entry.get("price"), settlement_decimals)}</span></div>'
+                )
+            return "".join(rows)
+
+        upper_rows = level_rows(levels.get("up", []), "#00FFA3", reverse=True)
+        lower_rows = level_rows(levels.get("down", []), "#FF6B6B")
         return f"""
           <div style="flex:1; min-width:260px; border:1px solid #26364A; border-radius:7px; padding:13px 15px; background:#0F172A;">
+            <div style="display:grid; grid-template-columns:1fr; background:#0B1220; border:1px solid #1E293B; border-radius:5px; overflow:hidden; margin-bottom:9px;">
+              {upper_rows}
+            </div>
             <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
               <div>
                 <div style="font-size:.68rem; color:#94A3B8; font-weight:900;">{symbol} | {html.escape(str(item.get('ticker') or '---'))}</div>
                 <div style="font-size:1.45rem; color:#F8FAFC; font-weight:950; margin-top:3px;">{number(settlement, settlement_decimals)}</div>
               </div>
               <div style="text-align:right; color:{color}; font-weight:950; font-size:1rem;">{number(points, settlement_decimals)}<br><span style="font-size:.72rem;">{number(percent, 2)}%</span></div>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr; background:#0B1220; border:1px solid #1E293B; border-radius:5px; overflow:hidden; margin-top:9px;">
+              {lower_rows}
             </div>
             <div style="font-size:.68rem; color:#64748B; margin-top:8px;">Ajuste anterior {number(previous, settlement_decimals)} | {int(item.get('regular_transactions') or 0):,} negocios</div>
           </div>
