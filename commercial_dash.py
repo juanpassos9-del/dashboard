@@ -7308,6 +7308,9 @@ def pagina_terminal_global():
                         {insight_text.replace(chr(10), '<br>')}
                     </div>
                 """, unsafe_allow_html=True)
+
+        st.markdown("---")
+        render_b3_settlements_section()
             
 @st.fragment(run_every=30)
 def sidebar_mercados():
