@@ -82,6 +82,7 @@ APP_STATE_ALLOWED_KEYS = {
     "ai_insight",
     "ai_insight_history",
     "boletim_focus",
+    "b3_settlements",
     "calendario_economico",
     "dados_mercado",
     "financial_juice_news",
@@ -8142,6 +8143,80 @@ def render_regime_juros_section():
     )
 
 
+@st.fragment(run_every=1800)
+def render_b3_settlements_section():
+    """Ajustes oficiais EOD dos contratos frontais WIN e WDO."""
+    payload = fetch_app_state_cached("b3_settlements")
+
+    if st.button("Atualizar ajustes B3", key="refresh_b3_settlements", use_container_width=True):
+        with st.spinner("Buscando o ultimo boletim oficial BVBG.187..."):
+            try:
+                from execution.fetch_b3_settlements import get_b3_settlements
+
+                payload = get_b3_settlements(force_download=True)
+                if supabase:
+                    ok, warning = sync_app_state_value("b3_settlements", payload)
+                    if warning:
+                        st.warning(warning)
+                    elif ok:
+                        st.success("Ajustes oficiais atualizados.")
+                fetch_app_state_cached.clear()
+                fetch_app_state_fast.clear()
+                st.session_state["b3_settlements_local"] = payload
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Falha ao atualizar ajustes B3: {exc}")
+
+    payload = st.session_state.get("b3_settlements_local") or payload
+    contracts = payload.get("contracts", {}) if isinstance(payload, dict) else {}
+    if not contracts:
+        st.info("Ajustes oficiais de WIN/WDO ainda nao foram carregados. Use Atualizar ajustes B3.")
+        return
+
+    def card(symbol):
+        item = contracts.get(symbol, {})
+        settlement = item.get("settlement")
+        previous = item.get("previous_settlement")
+        points = item.get("change_points")
+        percent = item.get("change_percent")
+        color = "#00FFA3" if (points or 0) >= 0 else "#FF4B4B"
+
+        def number(value, decimals=2):
+            if value is None:
+                return "---"
+            return f"{float(value):,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+        settlement_decimals = 0 if symbol == "WIN" else 3
+        return f"""
+          <div style="flex:1; min-width:260px; border:1px solid #26364A; border-radius:7px; padding:13px 15px; background:#0F172A;">
+            <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+              <div>
+                <div style="font-size:.68rem; color:#94A3B8; font-weight:900;">{symbol} | {html.escape(str(item.get('ticker') or '---'))}</div>
+                <div style="font-size:1.45rem; color:#F8FAFC; font-weight:950; margin-top:3px;">{number(settlement, settlement_decimals)}</div>
+              </div>
+              <div style="text-align:right; color:{color}; font-weight:950; font-size:1rem;">{number(points, settlement_decimals)}<br><span style="font-size:.72rem;">{number(percent, 2)}%</span></div>
+            </div>
+            <div style="font-size:.68rem; color:#64748B; margin-top:8px;">Ajuste anterior {number(previous, settlement_decimals)} | {int(item.get('regular_transactions') or 0):,} negocios</div>
+          </div>
+        """
+
+    reference_date = html.escape(str(payload.get("date") or "---"))
+    st.markdown(
+        f"""
+        <section style="margin:10px 0 14px; padding:13px 14px; border:1px solid #243244; border-radius:8px; background:#0B1220;">
+          <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+            <div>
+              <div style="font-size:.74rem; color:#FFB020; font-weight:950; letter-spacing:.07em; text-transform:uppercase;">Ajustes oficiais B3</div>
+              <div style="font-size:.68rem; color:#64748B; margin-top:2px;">Pregao {reference_date} | BVBG.187.01 | Referencia EOD, nao e cotacao ao vivo</div>
+            </div>
+          </div>
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">{card('WIN')}{card('WDO')}</div>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_terminal_lightweight_copy():
     """Renderiza uma copia do grafico proprietario no Terminal de Trading."""
     try:
@@ -8172,6 +8247,7 @@ def pagina_terminal():
     with koyfin_col:
         render_koyfin_terminal_trading_embed()
     render_di_brasil_regime_panel(compact=True)
+    render_b3_settlements_section()
     render_top_movers_brasil()
     render_terminal_global_line_chart()
     render_terminal_interest_rate_tv_comparison()

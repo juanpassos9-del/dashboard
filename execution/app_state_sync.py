@@ -17,6 +17,7 @@ APP_STATE_ALLOWED_KEYS = {
     "ai_insight",
     "ai_insight_history",
     "boletim_focus",
+    "b3_settlements",
     "calendario_economico",
     "dados_mercado",
     "financial_juice_news",

@@ -1,0 +1,26 @@
+name: B3 WIN WDO Settlements
+
+on:
+  schedule:
+    # 20:30 e 21:10 de Sao Paulo. A segunda rodada cobre atrasos da publicacao B3.
+    - cron: '30 23 * * 1-5'
+    - cron: '10 0 * * 2-6'
+  workflow_dispatch:
+
+jobs:
+  collect-settlements:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install minimal dependencies
+        run: pip install requests python-dotenv supabase
+      - name: Collect and sync official B3 settlements
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || secrets.SUPABASE }}
+          SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE || secrets.SUPABASE_KEY || secrets.SUPABASE_SERVICE }}
+        run: python execution/fetch_b3_settlements.py --sync
