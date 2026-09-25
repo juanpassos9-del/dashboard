@@ -55,16 +55,28 @@ def test_win_levels_use_half_percent_and_five_point_tick():
     levels = build_settlement_levels(187044, 0.5, tick_size=5)
     assert [item["percent"] for item in levels["up"]] == [0.5, 1.0, 1.5, 2.0, 2.5]
     assert levels["up"][0]["price"] == 187980
+    assert levels["up"][0]["zone_lower"] == 187790
+    assert levels["up"][0]["zone_upper"] == 188170
     assert levels["down"][0]["price"] == 186110
-    assert all(item["price"] % 5 == 0 for item in levels["up"] + levels["down"])
+    assert all(
+        item[field] % 5 == 0
+        for item in levels["up"] + levels["down"]
+        for field in ("price", "zone_lower", "zone_upper")
+    )
 
 
 def test_wdo_levels_use_quarter_percent_and_half_point_tick():
     levels = build_settlement_levels(5175.139, 0.25, tick_size=0.5)
     assert [item["percent"] for item in levels["up"]] == [0.25, 0.5, 0.75, 1.0, 1.25]
     assert levels["up"][0]["price"] == 5188.0
+    assert levels["up"][0]["zone_lower"] == 5183.0
+    assert levels["up"][0]["zone_upper"] == 5193.0
     assert levels["down"][0]["price"] == 5162.0
-    assert all((item["price"] * 2).is_integer() for item in levels["up"] + levels["down"])
+    assert all(
+        (item[field] * 2).is_integer()
+        for item in levels["up"] + levels["down"]
+        for field in ("price", "zone_lower", "zone_upper")
+    )
 
 
 def test_expired_win_is_rejected():

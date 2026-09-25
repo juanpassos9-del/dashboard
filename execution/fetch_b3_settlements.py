@@ -211,25 +211,39 @@ def build_settlement_levels(
     *,
     levels: int = 5,
     tick_size: float = 0.01,
+    zone_percent: float = 0.1,
 ) -> dict[str, Any]:
-    """Cria uma escada simetrica de desvios, arredondada ao tick do contrato."""
+    """Cria desvios e regioes operacionais simetricas, respeitando o tick."""
     base = Decimal(str(settlement))
     step = Decimal(str(step_percent))
     tick = Decimal(str(tick_size))
+    zone = Decimal(str(zone_percent))
 
     def at_tick(value: Decimal) -> float:
         ticks = (value / tick).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
         return float(ticks * tick)
 
+    def level_entry(index: int, deviation: Decimal) -> dict[str, Any]:
+        center = Decimal(str(at_tick(base * (1 + deviation / 100))))
+        return {
+            "level": index,
+            "percent": float(deviation),
+            "price": float(center),
+            "zone_lower": at_tick(center * (1 - zone / 100)),
+            "zone_upper": at_tick(center * (1 + zone / 100)),
+            "zone_percent": float(zone),
+        }
+
     up = []
     down = []
     for index in range(1, levels + 1):
         deviation = step * index
-        up.append({"level": index, "percent": float(deviation), "price": at_tick(base * (1 + deviation / 100))})
-        down.append({"level": index, "percent": -float(deviation), "price": at_tick(base * (1 - deviation / 100))})
+        up.append(level_entry(index, deviation))
+        down.append(level_entry(index, -deviation))
     return {
         "step_percent": float(step),
         "tick_size": float(tick),
+        "zone_percent": float(zone),
         "up": up,
         "down": down,
     }

@@ -8209,9 +8209,12 @@ def render_b3_settlements_section():
             for entry in ordered:
                 pct = float(entry.get("percent") or 0)
                 rows.append(
-                    f'<div style="display:grid; grid-template-columns:58px 1fr; gap:10px; padding:4px 7px; border-bottom:1px solid #1E293B;">'
-                    f'<span style="color:{level_color}; font-size:.69rem; font-weight:900;">{pct:+.2f}%</span>'
-                    f'<span style="color:#E2E8F0; text-align:right; font-size:.76rem; font-weight:850;">{number(entry.get("price"), settlement_decimals)}</span></div>'
+                    f'<div style="display:grid; grid-template-columns:58px 1fr; gap:10px; padding:5px 7px; border-bottom:1px solid #1E293B;">'
+                    f'<span style="color:{level_color}; font-size:.69rem; font-weight:900; align-self:center;">{pct:+.2f}%</span>'
+                    f'<span style="text-align:right; line-height:1.2;">'
+                    f'<strong style="color:#F8FAFC; font-size:.76rem;">{number(entry.get("price"), settlement_decimals)}</strong><br>'
+                    f'<small style="color:#64748B; font-size:.60rem;">Zona {number(entry.get("zone_lower"), settlement_decimals)} - {number(entry.get("zone_upper"), settlement_decimals)}</small>'
+                    f'</span></div>'
                 )
             return "".join(rows)
 
