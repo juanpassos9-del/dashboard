@@ -26,9 +26,13 @@ function App() {
       return;
     }
 
+    const rawDestination = String(streamlitUrl || '').trim().replace(/^['"]|['"]$/g, '');
     let destination: URL;
     try {
-      destination = new URL(streamlitUrl);
+      const absoluteDestination = /^[a-z][a-z\d+.-]*:\/\//i.test(rawDestination)
+        ? rawDestination
+        : `https://${rawDestination}`;
+      destination = new URL(absoluteDestination);
       if (destination.protocol !== 'https:' && destination.hostname !== 'localhost') {
         throw new Error('Invalid destination');
       }
