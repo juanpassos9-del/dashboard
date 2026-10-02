@@ -99,12 +99,6 @@
   transform: translate(-50%, -50%);
 }
 
-.login-copy > p {
-  margin: 18px 0 0;
-  color: #a1abb5;
-  font-size: 15px;
-}
-
 .market-line {
   height: 92px;
   display: flex;
@@ -248,7 +242,6 @@
   .login-copy { max-width: none; }
   .login-copy h1 { font-size: 35px; }
   .login-brand-image { width: min(100%, 280px); margin-top: 10px; }
-  .login-copy > p { font-size: 13px; }
   .market-line { height: 62px; margin-top: 22px; }
   .copy-foot { display: none; }
   .login-panel { max-width: 440px; justify-self: center; padding: 24px; }

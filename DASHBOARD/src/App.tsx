@@ -75,7 +75,6 @@ function App() {
               alt="Trading Strategy — o mercado como você nunca viu"
             />
           </div>
-          <p>Entre com sua conta para continuar ao terminal.</p>
           <div className="market-line" aria-hidden="true">
             <span /><span /><span /><span /><span /><span /><span /><span /><span />
           </div>
