@@ -68,13 +68,13 @@ function App() {
       <section className="login-layout">
         <div className="login-copy">
           <div className="eyebrow"><span /> TERMINAL TTS</div>
-          <h1>Inteligência de mercado.<br /><em>Em um só lugar.</em></h1>
           <div className="login-brand-image">
             <img
               src="/trading-strategy-logo.png"
               alt="Trading Strategy — o mercado como você nunca viu"
             />
           </div>
+          <h1>Inteligência de mercado.<br /><em>Em um só lugar.</em></h1>
           <section className="platform-preview" aria-label="Demonstração das áreas do terminal">
             <div className="preview-heading">
               <span>PRÉVIA DO TERMINAL</span>
