@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail } from 'lucide-react';
+import { Activity, ArrowRight, CalendarDays, CandlestickChart, Eye, EyeOff, LockKeyhole, Mail, Newspaper } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 import './App.css';
 
@@ -75,10 +75,32 @@ function App() {
               alt="Trading Strategy — o mercado como você nunca viu"
             />
           </div>
-          <div className="market-line" aria-hidden="true">
-            <span /><span /><span /><span /><span /><span /><span /><span /><span />
-          </div>
-          <div className="copy-foot"><span>MACRO</span><i /> <span>FX</span><i /> <span>RISK</span></div>
+          <section className="platform-preview" aria-label="Demonstração das áreas do terminal">
+            <div className="preview-heading">
+              <span>PRÉVIA DO TERMINAL</span>
+              <span>DEMONSTRAÇÃO · NÃO É TEMPO REAL</span>
+            </div>
+            <div className="preview-row">
+              <Activity size={15} aria-hidden="true" />
+              <div><strong>FX COMMAND CENTER</strong><span>Majors · DXY · Treasuries · correlações</span></div>
+              <i className="preview-spark spark-fx" aria-hidden="true" />
+            </div>
+            <div className="preview-row">
+              <Activity size={15} aria-hidden="true" />
+              <div><strong>TERMINAL GLOBAL</strong><span>FX · ações · bonds · commodities</span></div>
+              <i className="preview-spark spark-global" aria-hidden="true" />
+            </div>
+            <div className="preview-row">
+              <CandlestickChart size={15} aria-hidden="true" />
+              <div><strong>TERMINAL DE TRADING</strong><span>WIN/WDO · ajustes · zonas de desvio</span></div>
+              <i className="preview-spark spark-trading" aria-hidden="true" />
+            </div>
+            <div className="preview-row">
+              <CalendarDays size={15} aria-hidden="true" />
+              <div><strong>INTELIGÊNCIA DE MERCADO</strong><span>Calendário econômico · Market Report</span></div>
+              <Newspaper size={14} className="preview-news" aria-hidden="true" />
+            </div>
+          </section>
         </div>
 
         <section className="login-panel" aria-labelledby="login-title">

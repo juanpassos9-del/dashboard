@@ -83,9 +83,9 @@
 
 .login-brand-image {
   position: relative;
-  width: min(100%, 300px);
+  width: min(100%, 240px);
   aspect-ratio: 1;
-  margin-top: 16px;
+  margin-top: 12px;
   overflow: hidden;
 }
 
@@ -100,37 +100,59 @@
   transform: translate(-50%, -50%);
 }
 
-.market-line {
-  height: 66px;
+.platform-preview {
+  width: min(100%, 570px);
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid #2b343c;
+  border-radius: 5px;
+  background: #10151b;
+}
+
+.preview-heading {
+  min-height: 31px;
   display: flex;
   align-items: center;
-  gap: 9px;
-  margin-top: 22px;
-  padding: 0 12px;
-  border-top: 1px solid #252c34;
-  border-bottom: 1px solid #252c34;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 10px;
+  border-bottom: 1px solid #28313a;
+  color: #7fd6cc;
+  font: 700 8px "Roboto Mono", "SFMono-Regular", Consolas, monospace;
 }
 
-.market-line span {
-  flex: 1;
-  height: var(--bar-height);
-  border-top: 2px solid var(--bar-color);
-  transform: skewY(var(--bar-slope));
-  opacity: .72;
+.preview-heading span:last-child { color: #87939e; font-size: 7px; text-align: right; }
+
+.preview-row {
+  min-height: 37px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 58px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  color: #65c9bd;
 }
 
-.market-line span:nth-child(1) { --bar-height: 28px; --bar-color: #4da3ff; --bar-slope: 8deg; }
-.market-line span:nth-child(2) { --bar-height: 47px; --bar-color: #47d6b1; --bar-slope: -4deg; }
-.market-line span:nth-child(3) { --bar-height: 34px; --bar-color: #4da3ff; --bar-slope: -10deg; }
-.market-line span:nth-child(4) { --bar-height: 56px; --bar-color: #e8ad55; --bar-slope: 5deg; }
-.market-line span:nth-child(5) { --bar-height: 42px; --bar-color: #47d6b1; --bar-slope: 8deg; }
-.market-line span:nth-child(6) { --bar-height: 62px; --bar-color: #4da3ff; --bar-slope: -6deg; }
-.market-line span:nth-child(7) { --bar-height: 35px; --bar-color: #47d6b1; --bar-slope: 3deg; }
-.market-line span:nth-child(8) { --bar-height: 49px; --bar-color: #e8ad55; --bar-slope: -8deg; }
-.market-line span:nth-child(9) { --bar-height: 30px; --bar-color: #4da3ff; --bar-slope: 5deg; }
+.preview-row + .preview-row { border-top: 1px solid #232b33; }
+.preview-row > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.preview-row strong { color: #dce3e8; font: 700 8px "Roboto Mono", "SFMono-Regular", Consolas, monospace; }
+.preview-row span { overflow: hidden; color: #87939e; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.preview-row:nth-of-type(4) { color: #e8ad55; }
+.preview-row:nth-of-type(5) { color: #4da3ff; }
+.preview-news { justify-self: center; color: #e8ad55; }
 
-.copy-foot { display: flex; align-items: center; gap: 11px; margin-top: 12px; }
-.copy-foot i { width: 3px; height: 3px; border-radius: 50%; background: #58636e; }
+.preview-spark {
+  width: 58px;
+  height: 20px;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  opacity: .8;
+}
+
+.spark-fx { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 58 20'%3E%3Cpath d='M1 15 8 13 14 16 21 7 28 10 35 5 42 9 49 3 57 6' fill='none' stroke='%2347d6b1' stroke-width='1.5'/%3E%3C/svg%3E"); }
+.spark-global { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 58 20'%3E%3Cpath d='M1 4 8 8 14 6 21 13 28 9 35 15 42 10 49 14 57 7' fill='none' stroke='%234da3ff' stroke-width='1.5'/%3E%3C/svg%3E"); }
+.spark-trading { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 58 20'%3E%3Cpath d='M2 15V7m5 11V4m6 8V2m6 13V7m6 9V5m6 12V8m6 9V3m6 12V5m6 10V8m6 8V4' stroke='%23e8ad55' stroke-width='1.4'/%3E%3C/svg%3E"); }
 
 .login-panel {
   width: 100%;
@@ -242,9 +264,14 @@
   .login-layout { grid-template-columns: 1fr; gap: 30px; padding: 40px 0 36px; }
   .login-copy { max-width: none; }
   .login-copy h1 { max-width: 580px; font-size: 40px; }
-  .login-brand-image { width: min(100%, 250px); margin-top: 12px; }
-  .market-line { height: 54px; margin-top: 18px; }
-  .copy-foot { display: none; }
+  .login-brand-image { width: min(100%, 220px); margin-top: 10px; }
+  .platform-preview { margin-top: 10px; }
+  .preview-heading { padding: 0 8px; font-size: 7px; }
+  .preview-heading span:last-child { font-size: 6px; }
+  .preview-row { grid-template-columns: 16px minmax(0, 1fr) 44px; gap: 6px; padding-inline: 8px; }
+  .preview-row strong { font-size: 7px; }
+  .preview-row span { font-size: 8px; }
+  .preview-spark { width: 44px; }
   .login-panel { max-width: 440px; justify-self: center; padding: 24px; }
   .site-footer { gap: 12px; font-size: 8px; }
 }
