@@ -26,12 +26,6 @@
   font-weight: 750;
 }
 
-.brand img {
-  width: 34px;
-  height: 34px;
-  object-fit: contain;
-}
-
 .brand b { color: #7fd6cc; font-weight: 850; }
 
 .secure-label,
@@ -86,6 +80,24 @@
 }
 
 .login-copy h1 em { color: #7fd6cc; font-style: normal; }
+
+.login-brand-image {
+  position: relative;
+  width: min(100%, 340px);
+  aspect-ratio: 1;
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+.login-brand-image img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 190%;
+  max-width: none;
+  height: auto;
+  transform: translate(-50%, -50%);
+}
 
 .login-copy > p {
   margin: 18px 0 0;
@@ -235,6 +247,7 @@
   .login-layout { grid-template-columns: 1fr; gap: 30px; padding: 44px 0 36px; }
   .login-copy { max-width: none; }
   .login-copy h1 { font-size: 35px; }
+  .login-brand-image { width: min(100%, 280px); margin-top: 10px; }
   .login-copy > p { font-size: 13px; }
   .market-line { height: 62px; margin-top: 22px; }
   .copy-foot { display: none; }
@@ -245,7 +258,6 @@
 @media (max-width: 380px) {
   .login-page { padding: 0 14px; }
   .brand { gap: 7px; font-size: 10px; }
-  .brand img { width: 29px; height: 29px; }
   .secure-label { gap: 4px; font-size: 7px; }
   .login-copy h1 { font-size: 31px; }
   .site-footer span:last-child { display: none; }

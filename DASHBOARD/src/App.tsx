@@ -60,7 +60,6 @@ function App() {
     <main className="login-page">
       <header className="site-header">
         <a className="brand" href="/" aria-label="Trading Strategy, início">
-          <img src="/trading-strategy-logo.png" alt="" />
           <span>TRADING <b>STRATEGY</b></span>
         </a>
         <span className="secure-label"><LockKeyhole size={14} /> ÁREA DO ASSINANTE</span>
@@ -70,6 +69,12 @@ function App() {
         <div className="login-copy">
           <div className="eyebrow"><span /> TERMINAL TTS</div>
           <h1>Inteligência de mercado.<br /><em>Em um só lugar.</em></h1>
+          <div className="login-brand-image">
+            <img
+              src="/trading-strategy-logo.png"
+              alt="Trading Strategy — o mercado como você nunca viu"
+            />
+          </div>
           <p>Entre com sua conta para continuar ao terminal.</p>
           <div className="market-line" aria-hidden="true">
             <span /><span /><span /><span /><span /><span /><span /><span /><span />
