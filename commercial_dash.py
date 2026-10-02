@@ -80,7 +80,7 @@ LOCAL_TMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".tmp")
 
 
 MAX_AUTH_USERS = 1000
-AUTH_REQUIRED = False
+AUTH_REQUIRED = True
 APP_STATE_ALLOWED_KEYS = {
     "ai_insight",
     "ai_insight_history",
@@ -227,7 +227,7 @@ def get_existing_profile(user_id: str):
     if not supabase or not user_id:
         return None
     try:
-        response = supabase.table("profiles").select("role").eq("user_id", user_id).limit(1).execute()
+        response = supabase.table("profiles").select("role,is_active").eq("user_id", user_id).limit(1).execute()
         if response.data:
             return response.data[0]
     except Exception:
@@ -236,7 +236,7 @@ def get_existing_profile(user_id: str):
 
 
 def resolve_new_user_role(total_profiles):
-    return "admin" if total_profiles == 0 else "member"
+    return "member"
 
 
 def upsert_auth_profile(user, phone: str = "", role: str = ""):
@@ -248,18 +248,13 @@ def upsert_auth_profile(user, phone: str = "", role: str = ""):
         return None
     try:
         existing_profile = get_existing_profile(user_id)
-        existing_role = (existing_profile or {}).get("role")
-        admin_count = count_admin_profiles()
-        if admin_count == 0 and existing_role != "admin":
-            resolved_role = "admin"
-        else:
-            resolved_role = existing_role or role or _auth_user_role(user) or "member"
+        resolved_role = (existing_profile or {}).get("role") or role or "member"
         payload = {
             "user_id": user_id,
             "email": email,
             "phone": phone or _auth_user_phone(user),
             "role": resolved_role,
-            "is_active": True,
+            "is_active": (existing_profile or {}).get("is_active", True),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         response = supabase.table("profiles").upsert(payload, on_conflict="user_id").execute()
@@ -268,39 +263,77 @@ def upsert_auth_profile(user, phone: str = "", role: str = ""):
         return f"Tabela profiles indisponivel: {e}"
 
 
+def _session_auth_client():
+    client = st.session_state.get("auth_client")
+    if client is None:
+        url = get_supabase_url_value()
+        key = get_supabase_key_value()
+        if not url or not key:
+            return None
+        client = create_client(url, key)
+        st.session_state["auth_client"] = client
+    return client
+
+
+def _clear_auth_session():
+    for key in (
+        "auth_user", "auth_session", "auth_role", "auth_client",
+        "auth_validated_at", "auth_loading_message", "auth_loading_until",
+    ):
+        st.session_state.pop(key, None)
+
+
+def _store_authenticated_session(user, session, client):
+    user_id = _auth_user_id(user)
+    if not user_id or not getattr(session, "access_token", None):
+        return "Login nao retornou usuario. Verifique email/senha."
+
+    profile = get_existing_profile(user_id)
+    if not profile:
+        # Legacy Auth users receive member access; privilege must come from profiles.role.
+        upsert_auth_profile(user)
+        profile = get_existing_profile(user_id)
+    if not profile or profile.get("is_active") is not True:
+        try:
+            client.auth.sign_out()
+        except Exception:
+            pass
+        return "Acesso indisponivel. Verifique se sua conta esta ativa com o administrador."
+
+    role = str(profile.get("role") or "")
+    if role not in {"admin", "member"}:
+        return "Perfil de acesso invalido. Contate o administrador."
+
+    st.session_state["auth_user"] = user
+    st.session_state["auth_session"] = session
+    st.session_state["auth_role"] = role
+    st.session_state["auth_validated_at"] = time.time()
+    return None
+
+
 def auth_sign_in(email: str, password: str):
     if not supabase:
         return None, "Conexao Supabase indisponivel."
     try:
-        response = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        client = _session_auth_client()
+        if not client:
+            return None, "Configuracao de autenticacao indisponivel."
+        response = client.auth.sign_in_with_password({"email": email, "password": password})
         user = getattr(response, "user", None)
         session = getattr(response, "session", None)
-        if not user:
-            return None, "Login nao retornou usuario. Verifique email/senha."
-        st.session_state["auth_user"] = user
-        st.session_state["auth_session"] = session
-        profile_warning = upsert_auth_profile(user)
-        user_id = _auth_user_id(user)
-        profile = get_existing_profile(user_id)
-        st.session_state["auth_role"] = (profile or {}).get("role") or _auth_user_role(user) or "member"
-        return profile_warning, None
+        error = _store_authenticated_session(user, session, client)
+        return None, error
     except Exception as e:
         error_text = str(e)
         if "email not confirmed" in error_text.lower():
             confirmed, result = confirm_auth_user_email(email)
             if confirmed:
                 try:
-                    response = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                    client = _session_auth_client()
+                    response = client.auth.sign_in_with_password({"email": email, "password": password})
                     user = getattr(response, "user", None)
                     session = getattr(response, "session", None)
-                    if not user:
-                        return None, "Email confirmado, mas login nao retornou usuario. Tente novamente."
-                    st.session_state["auth_user"] = user
-                    st.session_state["auth_session"] = session
-                    profile_warning = upsert_auth_profile(user)
-                    profile = get_existing_profile(_auth_user_id(user))
-                    st.session_state["auth_role"] = (profile or {}).get("role") or _auth_user_role(user) or "member"
-                    return profile_warning, None
+                    return None, _store_authenticated_session(user, session, client)
                 except Exception as retry_error:
                     return None, f"Email confirmado, mas o login ainda falhou: {retry_error}"
             return None, result
@@ -704,16 +737,49 @@ def render_auth_screen():
 
 
 def require_authenticated_user():
-    if not AUTH_REQUIRED:
-        st.session_state.pop("auth_loading_message", None)
-        st.session_state.pop("auth_loading_until", None)
-        return {"id": "public", "email": "acesso.publico@tts.local", "user_metadata": {"role": "public"}}
     user = st.session_state.get("auth_user")
     if user:
-        if "auth_role" not in st.session_state:
-            profile = get_existing_profile(_auth_user_id(user))
-            st.session_state["auth_role"] = (profile or {}).get("role") or _auth_user_role(user) or "member"
-        return user
+        client = _session_auth_client()
+        session = st.session_state.get("auth_session")
+        if not client or not session:
+            _clear_auth_session()
+            render_auth_screen()
+
+        try:
+            expires_at = getattr(session, "expires_at", None)
+            refresh_token = getattr(session, "refresh_token", None)
+            if expires_at and float(expires_at) <= time.time() + 30:
+                if not refresh_token:
+                    _clear_auth_session()
+                    render_auth_screen()
+                refreshed = client.auth.refresh_session(refresh_token)
+                session = getattr(refreshed, "session", None)
+                user = getattr(refreshed, "user", None)
+                if not session or not user:
+                    _clear_auth_session()
+                    render_auth_screen()
+                st.session_state["auth_session"] = session
+                st.session_state["auth_user"] = user
+
+            if time.time() - float(st.session_state.get("auth_validated_at", 0)) >= 60:
+                access_token = getattr(session, "access_token", None)
+                verified = client.auth.get_user(access_token) if access_token else None
+                user = getattr(verified, "user", None)
+                profile = get_existing_profile(_auth_user_id(user)) if user else None
+                if not profile or profile.get("is_active") is not True:
+                    _clear_auth_session()
+                    render_auth_screen()
+                role = str(profile.get("role") or "")
+                if role not in {"admin", "member"}:
+                    _clear_auth_session()
+                    render_auth_screen()
+                st.session_state["auth_user"] = user
+                st.session_state["auth_role"] = role
+                st.session_state["auth_validated_at"] = time.time()
+            return user
+        except Exception:
+            st.error("Nao foi possivel validar seu acesso. O dashboard permanece bloqueado; tente novamente em instantes.")
+            st.stop()
     render_auth_screen()
 
 
@@ -12410,15 +12476,12 @@ with st.sidebar:
     )
     if AUTH_REQUIRED and st.button("Sair", use_container_width=True, key="auth_logout_btn"):
         try:
-            if supabase:
-                supabase.auth.sign_out()
+            auth_client = st.session_state.get("auth_client")
+            if auth_client:
+                auth_client.auth.sign_out()
         except Exception:
             pass
-        st.session_state.pop("auth_user", None)
-        st.session_state.pop("auth_session", None)
-        st.session_state.pop("auth_role", None)
-        st.session_state.pop("auth_loading_message", None)
-        st.session_state.pop("auth_loading_until", None)
+        _clear_auth_session()
         _auth_rerun()
     st.markdown("### 🧭 Navegação")
     page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "FX COMMAND CENTER", "MONITOR MACRO", "Crypto Terminal", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
