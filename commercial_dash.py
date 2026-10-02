@@ -1509,7 +1509,7 @@ def render_macro_news_hub():
 
 
 @st.fragment(run_every=30)
-def render_bloomberg_news_feed_fragment():
+def render_bloomberg_news_feed_fragment(compact: bool = False):
     """Atualiza somente o feed de noticias, sem redesenhar o terminal inteiro."""
     if "bb_translate_news_fast" not in st.session_state:
         st.session_state.bb_translate_news_fast = False
@@ -1625,7 +1625,10 @@ def render_bloomberg_news_feed_fragment():
             return "medium", "IMPACTO MEDIO", unique_reasons[:3]
         return "low", "BAIXO IMPACTO", unique_reasons[:2]
 
-    st.caption("Somente este feed atualiza a cada 30s. O restante do terminal permanece estavel.")
+    if compact:
+        st.markdown("#### Feed de Notícias em Tempo Real")
+    else:
+        st.caption("Somente este feed atualiza a cada 30s. O restante do terminal permanece estavel.")
     refresh_col, translate_col = st.columns([1, 1])
     with refresh_col:
         if st.button("Atualizar feed agora", use_container_width=True, key="bb_refresh_news_fast"):
@@ -1743,8 +1746,12 @@ def render_bloomberg_news_feed_fragment():
         f'<span class="bb-live-pill"><span class="bb-status-led"></span>LIVE 30s - {esc(" + ".join(news_sources) or "Fontes")} - {len(filtered_news)} noticias - {"PT-BR" if translate_enabled else "EN"}</span>'
         f'</div>'
     )
-    st.markdown(f'<div class="bb-news-feed">{feed_header}{"".join(cards)}</div>', unsafe_allow_html=True)
+    feed_scope_class = "tg-bloomberg-feed" if compact else ""
+    st.markdown(f'<div class="{feed_scope_class}"><div class="bb-news-feed">{feed_header}{"".join(cards)}</div></div>', unsafe_allow_html=True)
+    status_scope_open = f'<div class="{feed_scope_class}">' if compact else ""
+    status_scope_close = "</div>" if compact else ""
     st.markdown(f"""
+    {status_scope_open}
     <div class="bb-status-footer">
         <div>
             <span class="bb-status-led"></span>
@@ -1757,6 +1764,7 @@ def render_bloomberg_news_feed_fragment():
             &nbsp;|&nbsp; Fonte critica: Financial Juice RSS + cache Supabase
         </div>
     </div>
+    {status_scope_close}
     """, unsafe_allow_html=True)
 
 def fetch_app_state_with_time(key: str):
@@ -7055,6 +7063,65 @@ def render_terminal_global_latest_report():
         st.markdown(str(latest_report.get("report", "")))
 
 
+def render_terminal_global_news_styles():
+    """Estilos compactos do feed Bloomberg quando reutilizado no Terminal Global."""
+    st.markdown(
+        """
+        <style>
+          .tg-bloomberg-feed .bb-news-feed {
+            height: 680px; overflow-y: auto; background:#090d12;
+            border:1px solid #263443; border-radius:7px;
+          }
+          .tg-bloomberg-feed .bb-feed-header {
+            position:sticky; top:0; z-index:2; display:flex; justify-content:space-between;
+            gap:8px; align-items:center; padding:7px 9px; background:#151f2a;
+            border-bottom:1px solid #283544; color:#9aa6b2; font:700 .65rem Consolas,monospace;
+            text-transform:uppercase; flex-wrap:wrap;
+          }
+          .tg-bloomberg-feed .bb-live-pill { color:#00FFA3; font-size:.6rem; }
+          .tg-bloomberg-feed .bb-status-led { display:inline-block; width:7px; height:7px; border-radius:50%; background:#00FFA3; }
+          .tg-bloomberg-feed .bb-news-card {
+            position:relative; display:grid; grid-template-columns:5px 28px minmax(0,1fr) 18px;
+            gap:7px; padding:8px 7px 7px 0; min-height:60px; background:#18222d;
+            border-bottom:1px solid #0c1218; color:#d8dee7; font-family:Inter,'Segoe UI',Arial,sans-serif;
+          }
+          .tg-bloomberg-feed .bb-news-card.bb-featured { background:#1f3141; min-height:105px; }
+          .tg-bloomberg-feed .bb-news-rail { width:5px; background:#34495e; }
+          .tg-bloomberg-feed .bb-news-card.bb-impact-high { background:#2a181b; }
+          .tg-bloomberg-feed .bb-news-card.bb-impact-critical { background:linear-gradient(90deg,#3a090b,#211216); }
+          .tg-bloomberg-feed .bb-news-card.bb-impact-medium { background:#261f12; }
+          .tg-bloomberg-feed .bb-news-card.bb-impact-critical .bb-news-rail,
+          .tg-bloomberg-feed .bb-news-card.bb-impact-high .bb-news-rail { background:#ff2d20; }
+          .tg-bloomberg-feed .bb-news-card.bb-impact-medium .bb-news-rail { background:#ff9900; }
+          .tg-bloomberg-feed .bb-news-icon {
+            width:23px; height:23px; border-radius:50%; display:flex; align-items:center;
+            justify-content:center; margin-top:3px; background:#18222d; border:2px solid #36d5f5;
+            color:#d8f8ff; font-size:.56rem; font-weight:900;
+          }
+          .tg-bloomberg-feed .bb-news-title { color:#edf2f7; font-size:.79rem; font-weight:700; line-height:1.25; margin-bottom:3px; }
+          .tg-bloomberg-feed .bb-news-card.bb-impact-critical .bb-news-title { color:#ffeded; font-weight:900; }
+          .tg-bloomberg-feed .bb-news-card.bb-impact-high .bb-news-title { color:#ff6b5f; }
+          .tg-bloomberg-feed .bb-news-card.bb-impact-medium .bb-news-title { color:#ffb24a; }
+          .tg-bloomberg-feed .bb-news-summary { color:#d1d8e0; font-size:.72rem; line-height:1.35; margin-top:4px; }
+          .tg-bloomberg-feed .bb-news-card:not(.bb-featured) .bb-news-summary { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+          .tg-bloomberg-feed .bb-news-meta { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-top:5px; color:#9aa6b2; font-size:.62rem; line-height:1.2; }
+          .tg-bloomberg-feed .bb-news-tag,
+          .tg-bloomberg-feed .bb-impact-badge { display:inline-flex; align-items:center; border-radius:4px; padding:1px 5px; background:#303946; color:#b7c0ca; font-size:.58rem; line-height:1.4; }
+          .tg-bloomberg-feed .bb-impact-badge { font-weight:900; }
+          .tg-bloomberg-feed .bb-impact-badge.critical { background:#ff2d20; color:#fff; }
+          .tg-bloomberg-feed .bb-impact-badge.high { background:#4a1111; color:#ff6b5f; }
+          .tg-bloomberg-feed .bb-impact-badge.medium { background:#3d2804; color:#ffb24a; }
+          .tg-bloomberg-feed .bb-news-link { color:#aeb8c4 !important; text-decoration:none !important; align-self:end; justify-self:center; }
+          .tg-bloomberg-feed .bb-news-close { position:absolute; top:3px; right:5px; color:#bac4ce; font-size:1rem; }
+          .tg-bloomberg-feed .bb-status-footer { margin-top:8px; padding:7px 8px; background:#050505; border:1px solid #222; border-radius:4px; color:#94a3b8; font: .62rem Consolas,monospace; overflow-wrap:anywhere; }
+          .tg-bloomberg-feed .bb-status-footer > div + div { margin-top:4px; }
+          @media (max-width: 760px) { .tg-bloomberg-feed .bb-news-feed { height:560px; } }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def pagina_terminal_global():
     """Página de Terminal Global."""
     render_terminal_global_layout_css()
@@ -7069,7 +7136,12 @@ def pagina_terminal_global():
     with koyfin_col:
         render_koyfin_terminal_global_embed()
     secao_calendario_global_fragment()
-    render_terminal_global_latest_report()
+    render_terminal_global_news_styles()
+    report_col, news_col = st.columns([1, 1], gap="medium")
+    with report_col:
+        render_terminal_global_latest_report()
+    with news_col:
+        render_bloomberg_news_feed_fragment(compact=True)
     
     body_col = st.container()
 
