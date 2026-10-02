@@ -79,7 +79,6 @@ supabase = init_supabase()
 LOCAL_TMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".tmp")
 
 
-MAX_AUTH_USERS = 1000
 AUTH_REQUIRED = True
 APP_STATE_ALLOWED_KEYS = {
     "ai_insight",
@@ -141,48 +140,6 @@ def _auth_user_phone(user) -> str:
     return metadata.get("phone", "") or metadata.get("celular", "") or ""
 
 
-def _auth_user_role(user) -> str:
-    if not user:
-        return ""
-    metadata = user.get("user_metadata", {}) if isinstance(user, dict) else getattr(user, "user_metadata", {}) or {}
-    return metadata.get("role", "") or ""
-
-
-def count_registered_profiles():
-    if not supabase:
-        return None
-    try:
-        response = supabase.table("profiles").select("id", count="exact").limit(1).execute()
-        return getattr(response, "count", None)
-    except Exception:
-        return None
-
-
-def count_admin_profiles():
-    if not supabase:
-        return None
-    try:
-        response = supabase.table("profiles").select("id", count="exact").eq("role", "admin").limit(1).execute()
-        return getattr(response, "count", None)
-    except Exception:
-        return None
-
-
-def count_registered_auth_users():
-    if not supabase:
-        return None
-    try:
-        response = supabase.auth.admin.list_users()
-        users = getattr(response, "users", None)
-        if users is not None:
-            return len(users)
-        if isinstance(response, list):
-            return len(response)
-    except Exception:
-        return None
-    return None
-
-
 def _auth_user_matches_email(user, email: str) -> bool:
     return _auth_user_email(user).strip().lower() == email.strip().lower()
 
@@ -216,13 +173,6 @@ def confirm_auth_user_email(email: str):
         return False, f"Nao consegui confirmar o email automaticamente: {e}"
 
 
-def count_registered_users():
-    profile_count = count_registered_profiles()
-    if profile_count is not None:
-        return profile_count
-    return count_registered_auth_users()
-
-
 def get_existing_profile(user_id: str):
     if not supabase or not user_id:
         return None
@@ -233,10 +183,6 @@ def get_existing_profile(user_id: str):
     except Exception:
         return None
     return None
-
-
-def resolve_new_user_role(total_profiles):
-    return "member"
 
 
 def upsert_auth_profile(user, phone: str = "", role: str = ""):
@@ -338,50 +284,6 @@ def auth_sign_in(email: str, password: str):
                     return None, f"Email confirmado, mas o login ainda falhou: {retry_error}"
             return None, result
         return None, f"Falha no login: {e}"
-
-
-def auth_sign_up(email: str, password: str, phone: str):
-    if not supabase:
-        return None, "Conexao Supabase indisponivel."
-    total_users = count_registered_users()
-    if total_users is not None and total_users >= MAX_AUTH_USERS:
-        return None, "Limite de 1000 usuarios atingido."
-    role = resolve_new_user_role(total_users)
-    try:
-        try:
-            response = supabase.auth.admin.create_user({
-                "email": email,
-                "password": password,
-                "email_confirm": True,
-                "user_metadata": {"phone": phone, "celular": phone, "role": role},
-            })
-            user = getattr(response, "user", None)
-            if user:
-                upsert_auth_profile(user, phone, role)
-            return auth_sign_in(email, password)
-        except Exception as admin_error:
-            if "already" in str(admin_error).lower() or "registered" in str(admin_error).lower() or "exists" in str(admin_error).lower():
-                confirmed, result = confirm_auth_user_email(email)
-                if confirmed:
-                    return auth_sign_in(email, password)
-            response = supabase.auth.sign_up({
-                "email": email,
-                "password": password,
-                "options": {"data": {"phone": phone, "celular": phone, "role": role}},
-            })
-        user = getattr(response, "user", None)
-        session = getattr(response, "session", None)
-        if not user:
-            return None, "Cadastro nao retornou usuario. Verifique os dados."
-        st.session_state["auth_user"] = user
-        st.session_state["auth_session"] = session
-        profile_warning = upsert_auth_profile(user, phone, role)
-        st.session_state["auth_role"] = role
-        if session:
-            return profile_warning, None
-        return profile_warning, "Cadastro criado. Se a confirmacao por email estiver ativa no Supabase, confirme o email antes de entrar."
-    except Exception as e:
-        return None, f"Falha no cadastro: {e}"
 
 
 @st.cache_data(show_spinner=False)
@@ -666,13 +568,6 @@ def render_auth_screen():
             border-radius:10px;
             padding:14px;
           }
-          .stTabs [data-baseweb="tab-list"] { gap:8px; justify-content:center; }
-          .stTabs [data-baseweb="tab"] {
-            border-radius:8px;
-            padding:8px 16px;
-            color:#CBD5E1;
-            font-weight:900;
-          }
           .stButton > button, .stFormSubmitButton > button {
             border-radius:8px;
             font-weight:950;
@@ -687,52 +582,26 @@ def render_auth_screen():
         """.replace("__LOGO_HTML__", logo_html),
         unsafe_allow_html=True,
     )
-    tab_login, tab_signup = st.tabs(["Entrar", "Criar conta"])
-    with tab_login:
-        with st.form("auth_login_form"):
-            email = st.text_input("Email", key="auth_login_email").strip().lower()
-            password = st.text_input("Senha", type="password", key="auth_login_password")
-            submitted = st.form_submit_button("Entrar", use_container_width=True)
-        if submitted:
-            if not email or not password:
-                st.error("Informe email e senha.")
+    with st.form("auth_login_form"):
+        email = st.text_input("Email", key="auth_login_email").strip().lower()
+        password = st.text_input("Senha", type="password", key="auth_login_password")
+        submitted = st.form_submit_button("Entrar", use_container_width=True)
+    if submitted:
+        if not email or not password:
+            st.error("Informe email e senha.")
+        else:
+            render_auth_loading("Validando acesso...", "Conectando ao Supabase e preparando seu terminal.")
+            with st.spinner("Abrindo dashboard..."):
+                warning, error = auth_sign_in(email, password)
+            if error:
+                st.session_state.pop("auth_loading_message", None)
+                st.error(error)
             else:
-                render_auth_loading("Validando acesso...", "Conectando ao Supabase e preparando seu terminal.")
-                with st.spinner("Abrindo dashboard..."):
-                    warning, error = auth_sign_in(email, password)
-                if error:
-                    st.session_state.pop("auth_loading_message", None)
-                    st.error(error)
-                else:
-                    if warning:
-                        st.warning(warning)
-                    st.session_state["auth_loading_message"] = "Carregando dashboard..."
-                    st.session_state["auth_loading_until"] = time.time() + 8.0
-                    _auth_rerun()
-    with tab_signup:
-        with st.form("auth_signup_form"):
-            email = st.text_input("Email", key="auth_signup_email").strip().lower()
-            phone = st.text_input("Celular", key="auth_signup_phone").strip()
-            password = st.text_input("Senha", type="password", key="auth_signup_password")
-            submitted = st.form_submit_button("Criar conta", use_container_width=True)
-        if submitted:
-            if not email or not phone or not password:
-                st.error("Informe email, celular e senha.")
-            elif len(password) < 6:
-                st.error("Use uma senha com pelo menos 6 caracteres.")
-            else:
-                render_auth_loading("Criando acesso...", "Registrando usuario e preparando seu terminal.")
-                with st.spinner("Criando conta..."):
-                    warning, message = auth_sign_up(email, password, phone)
                 if warning:
                     st.warning(warning)
-                if message:
-                    st.session_state.pop("auth_loading_message", None)
-                    st.info(message)
-                else:
-                    st.session_state["auth_loading_message"] = "Carregando dashboard..."
-                    st.session_state["auth_loading_until"] = time.time() + 8.0
-                    _auth_rerun()
+                st.session_state["auth_loading_message"] = "Carregando dashboard..."
+                st.session_state["auth_loading_until"] = time.time() + 8.0
+                _auth_rerun()
     st.stop()
 
 
