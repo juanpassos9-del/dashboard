@@ -96,6 +96,7 @@
   width: 190%;
   max-width: none;
   height: auto;
+  opacity: .78;
   transform: translate(-50%, -50%);
 }
 
