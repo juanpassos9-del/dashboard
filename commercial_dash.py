@@ -4,13 +4,16 @@ import streamlit.components.v1 as components
 import os
 import base64
 import html
+import difflib
 import json
 import math
+import re
 import time
 import pandas as pd
 import textwrap
 import requests
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 from typing import Any
 from zoneinfo import ZoneInfo
 from supabase import create_client, Client
@@ -94,6 +97,7 @@ APP_STATE_ALLOWED_KEYS = {
     "lse_realtime_quotes",
     "lse_diagnostics",
     "ewz_plotly_ohlcv",
+    "market_news_feed",
     "regime_juros",
     "risk_manual_trades",
 }
@@ -1165,6 +1169,69 @@ def get_calendar_data():
     mark_source("Calendario Cache", "error", message="Sem calendario em cache/local.", source="fallback")
     return None
 
+class _NewsHTMLTextParser(HTMLParser):
+    """Converte markup recebido das fontes em texto simples para os cards."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() in {"script", "style"}:
+            self._skip_depth += 1
+        elif not self._skip_depth and tag.lower() in {"br", "p", "div", "li"}:
+            self.parts.append(" ")
+
+    def handle_endtag(self, tag):
+        if tag.lower() in {"script", "style"} and self._skip_depth:
+            self._skip_depth -= 1
+        elif not self._skip_depth and tag.lower() in {"p", "div", "li"}:
+            self.parts.append(" ")
+
+    def handle_data(self, data):
+        if not self._skip_depth:
+            self.parts.append(data)
+
+
+def _clean_news_text(value: Any) -> str:
+    raw = html.unescape(str(value or ""))
+    parser = _NewsHTMLTextParser()
+    try:
+        parser.feed(raw)
+        cleaned = " ".join(parser.parts)
+    except Exception:
+        cleaned = re.sub(r"<[^>]*>", " ", raw)
+    return re.sub(r"\s+", " ", html.unescape(cleaned)).strip()
+
+
+def _news_published_label(timestamp: Any) -> tuple[str, str]:
+    try:
+        stamp = float(timestamp or 0)
+        if stamp <= 0:
+            return "Horário indisponível", ""
+        now = datetime.now(ZoneInfo("America/Sao_Paulo"))
+        published = datetime.fromtimestamp(stamp, timezone.utc).astimezone(ZoneInfo("America/Sao_Paulo"))
+        age_minutes = max(0, int((now - published).total_seconds() // 60))
+        if published.date() == now.date():
+            date_label = f"Hoje {published:%H:%M}"
+        elif published.date() == (now - timedelta(days=1)).date():
+            date_label = f"Ontem {published:%H:%M}"
+        else:
+            date_label = published.strftime("%d/%m %H:%M")
+        if age_minutes < 2:
+            age_label = "agora"
+        elif age_minutes < 60:
+            age_label = f"há {age_minutes} min"
+        elif age_minutes < 24 * 60:
+            age_label = f"há {age_minutes // 60} h"
+        else:
+            age_label = f"há {age_minutes // (24 * 60)} d"
+        return date_label, age_label
+    except (TypeError, ValueError, OverflowError):
+        return "Horário indisponível", ""
+
+
 @st.cache_data(ttl=30, show_spinner=False)
 def load_bloomberg_news_feed(refresh_nonce: int = 0):
     """Monta o feed pesado com cache para evitar travamentos no rerender."""
@@ -1175,6 +1242,31 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
     if news_list:
         news_sources.append("Historico Supabase")
         mark_source("Financial Juice Cache", "stale", message="Usando historico Supabase.", rows=len(news_list), source="Supabase app_state")
+
+    market_feed = fetch_app_state_cached("market_news_feed") or {}
+    market_items = market_feed.get("items", []) if isinstance(market_feed, dict) else []
+    if isinstance(market_items, list):
+        market_cutoff = datetime.now(timezone.utc).timestamp() - 7 * 24 * 3600
+        fresh_market_items = []
+        for item in market_items:
+            try:
+                if isinstance(item, dict) and float(item.get("timestamp") or 0) >= market_cutoff:
+                    fresh_market_items.append(item)
+            except (TypeError, ValueError):
+                continue
+        market_items = fresh_market_items
+    if isinstance(market_items, list) and market_items:
+        news_list.extend(market_items)
+        news_sources.extend(market_feed.get("sources", []))
+        for source_name, status in (market_feed.get("source_status") or {}).items():
+            state = status.get("status", "stale")
+            mark_source(
+                source_name,
+                state if state in {"ok", "stale", "error"} else "stale",
+                message=status.get("message", "RSS via snapshot Supabase"),
+                rows=status.get("items", 0),
+                source="RSS / Supabase",
+            )
 
     try:
         from execution.fetch_financial_juice import cached_financial_juice_news
@@ -1220,27 +1312,81 @@ def load_bloomberg_news_feed(refresh_nonce: int = 0):
         warnings.append(f"News API indisponivel: {e}")
         mark_source("News API", "stale", message=str(e), source="News API")
 
-    seen_news = set()
-    unique_news = []
-    for item in news_list:
-        key = (item.get("link") or item.get("title_en") or item.get("title_pt") or "").strip().lower()[:160]
-        if not key or key in seen_news:
+    normalized_news = []
+    for raw_item in news_list:
+        if not isinstance(raw_item, dict):
             continue
-        seen_news.add(key)
-        unique_news.append(item)
-
-    def news_sort_key(item):
+        item = dict(raw_item)
+        title = _clean_news_text(item.get("title_en") or item.get("title") or item.get("title_pt"))
+        summary = _clean_news_text(item.get("summary") or item.get("description"))
+        if not title:
+            continue
+        item["title_en"] = title
+        item["title"] = title
+        item["summary"] = "" if summary == title else summary
+        item["description"] = item["summary"]
         try:
-            return float(item.get("timestamp") or 0)
-        except Exception:
-            return 0
+            item["timestamp"] = float(item.get("timestamp") or 0)
+        except (TypeError, ValueError):
+            item["timestamp"] = 0.0
+        normalized_news.append(item)
 
-    unique_news = sorted(unique_news, key=news_sort_key, reverse=True)
+    # Processar primeiro as manchetes novas faz a deduplicacao manter o melhor registro.
+    normalized_news.sort(key=lambda item: item.get("timestamp", 0), reverse=True)
+    unique_news = []
+    seen_links = set()
+    seen_titles = []
+    for item in normalized_news:
+        title = item["title_en"]
+        title_key = re.sub(r"[^\w]+", " ", title.casefold(), flags=re.UNICODE).strip()
+        raw_link = str(item.get("link") or item.get("url") or "").strip()
+        canonical_link = re.sub(r"^https?://(?:www\.)?", "", raw_link, flags=re.IGNORECASE).split("#", 1)[0].split("?", 1)[0].rstrip("/").lower()
+        duplicate_index = None
+        if canonical_link and canonical_link in seen_links:
+            duplicate_index = next((i for i, existing in enumerate(unique_news) if existing.get("_canonical_link") == canonical_link), None)
+        if duplicate_index is None and len(title_key) >= 36:
+            for prior_key, prior_index in seen_titles:
+                if title_key == prior_key or difflib.SequenceMatcher(None, title_key, prior_key).ratio() >= 0.91:
+                    duplicate_index = prior_index
+                    break
+
+        source_names = item.get("sources") if isinstance(item.get("sources"), list) else []
+        source_name = str(item.get("source") or "Fonte desconhecida").strip()
+        source_names = list(dict.fromkeys([str(value).strip() for value in source_names if str(value).strip()] + ([source_name] if source_name else [])))
+        if duplicate_index is not None:
+            existing = unique_news[duplicate_index]
+            existing["sources"] = list(dict.fromkeys((existing.get("sources") or []) + source_names))
+            if len(item.get("summary") or "") > len(existing.get("summary") or ""):
+                existing["summary"] = item["summary"]
+                existing["description"] = item["summary"]
+            continue
+
+        item["sources"] = source_names
+        item["_canonical_link"] = canonical_link
+        unique_news.append(item)
+        if canonical_link:
+            seen_links.add(canonical_link)
+        seen_titles.append((title_key, len(unique_news) - 1))
     if not unique_news:
         try:
             from execution.fetch_financial_juice import cached_financial_juice_news
             unique_news = cached_financial_juice_news(limit=10)
             if unique_news:
+                cleaned_history = []
+                for raw_item in unique_news:
+                    if not isinstance(raw_item, dict):
+                        continue
+                    item = dict(raw_item)
+                    title = _clean_news_text(item.get("title_en") or item.get("title") or item.get("title_pt"))
+                    summary = _clean_news_text(item.get("summary") or item.get("description"))
+                    if not title:
+                        continue
+                    item["title_en"] = title
+                    item["title"] = title
+                    item["summary"] = "" if summary == title else summary
+                    item["description"] = item["summary"]
+                    cleaned_history.append(item)
+                unique_news = cleaned_history
                 news_sources.append("Historico local")
                 warnings.append("Aguardando noticias novas; exibindo ultimas 10 do historico.")
                 mark_source("Financial Juice Cache", "stale", message="Aguardando noticias novas; exibindo historico local.", rows=len(unique_news), source="cache local")
@@ -1607,7 +1753,7 @@ def render_bloomberg_news_feed_fragment(compact: bool = False):
             if any(keyword in text for keyword in keywords):
                 score += weight
                 reasons.append(label)
-        if any(word in text for word in ["breaking", "urgente", "alerta", "unexpected", "surpresa", "forecast", "previsao", "previsão"]):
+        if any(word in text for word in ["breaking", "urgente", "alerta", "unexpected", "surpresa", "beats estimates", "misses estimates", "above expectations", "below expectations", "acima do esperado", "abaixo do esperado"]):
             score += 3
             reasons.append("Surpresa")
         if any(name in source for name in ["financial", "reuters", "bloomberg", "cnbc"]):
@@ -1673,42 +1819,48 @@ def render_bloomberg_news_feed_fragment(compact: bool = False):
     else:
         filtered_news = news_list
 
-    impact_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    impact_order = {"critical": 3, "high": 2, "medium": 1, "low": 0}
+    ranking_now = datetime.now(timezone.utc).timestamp()
+
+    def relevance_score(item):
+        age_hours = max(0.0, (ranking_now - float(item.get("timestamp") or 0)) / 3600)
+        freshness = 80 * math.exp(-age_hours / 4)
+        impact = impact_order.get(market_impact(item)[0], 0) * 7
+        return freshness + impact
+
     filtered_news = sorted(
         filtered_news,
         key=lambda item: (
-            impact_order.get(market_impact(item)[0], 9),
+            -relevance_score(item),
             -(item.get("timestamp") or 0),
         ),
     )
-
-    if "selected_news_id" not in st.session_state:
-        st.session_state.selected_news_id = None
-    if not st.session_state.selected_news_id and filtered_news:
-        st.session_state.selected_news_id = filtered_news[0].get("id")
 
     if not filtered_news:
         st.info("Nenhuma manchete correspondente encontrada.")
         return
 
     translate_enabled = bool(st.session_state.get("bb_translate_news_fast", False))
-    visible_news = filtered_news[:45]
+    visible_news = filtered_news[:12 if compact else 45]
     if translate_enabled:
         with st.spinner("Traduzindo feed para portugues do Brasil..."):
-            translated_feed = [translate_news_item(item) for item in filtered_news]
-        visible_news = translated_feed[:45]
+            visible_news = [translate_news_item(item) for item in visible_news]
 
     cards = []
     for idx, item in enumerate(visible_news):
-        is_featured = item.get("id") == st.session_state.selected_news_id or idx == 0
+        is_featured = idx == 0
         impact_level, impact_label, impact_reasons = market_impact(item)
         title = esc(news_title(item))
         summary_raw = news_summary(item)
         summary = esc(summary_raw)
-        published = esc(item.get("published_str", "00:00"))
-        source = esc(item.get("source", "Financial Juice"))
+        published_label, age_label = _news_published_label(item.get("timestamp"))
+        published = esc(published_label)
+        age_html = f'<span class="bb-news-age">{esc(age_label)}</span>' if age_label else ""
+        sources = item.get("sources") or [item.get("source", "Financial Juice")]
+        source_names = list(dict.fromkeys(str(value) for value in sources if value))
+        source = esc(" + ".join(source_names))
         link = safe_external_url(item.get("link"))
-        icon_text = esc("FJ" if source == "Financial Juice" else source[:2].upper())
+        icon_text = esc("FJ" if source_names and source_names[0] == "Financial Juice" else (source_names[0][:2].upper() if source_names else "NW"))
         tags_html = "".join(f'<span class="bb-news-tag">{esc(tag)}</span>' for tag in infer_tags(item))
         impact_badge = (
             f'<span class="bb-impact-badge {impact_level}">{esc(impact_label)}</span>'
@@ -1718,7 +1870,7 @@ def render_bloomberg_news_feed_fragment(compact: bool = False):
         reason_tags = "".join(f'<span class="bb-news-tag">{esc(reason)}</span>' for reason in impact_reasons)
         featured_class = " bb-featured" if is_featured else ""
         impact_class = f" bb-impact-{impact_level}" if impact_level in ["critical", "high", "medium"] else ""
-        close_html = '<span class="bb-news-close">x</span>' if is_featured else ""
+        close_html = ""
         summary_html = (
             f'<div class="bb-news-summary">{summary}</div>'
             if summary and summary != title
@@ -1733,7 +1885,7 @@ def render_bloomberg_news_feed_fragment(compact: bool = False):
             f'<div class="bb-news-title">{title}</div>'
             f'{summary_html}'
             f'<div class="bb-news-meta">'
-            f'<span>{published}</span><span>{source}</span>{impact_badge}{reason_tags}{tags_html}'
+            f'<span>{published}</span>{age_html}<span>{source}</span>{impact_badge}{reason_tags}{tags_html}'
             f'</div>'
             f'</div>'
             f'<a class="bb-news-link" href="{link}" target="_blank" rel="noopener noreferrer">↗</a>'
@@ -1743,7 +1895,7 @@ def render_bloomberg_news_feed_fragment(compact: bool = False):
     feed_header = (
         f'<div class="bb-feed-header">'
         f'<span>Feed de Noticias em Tempo Real</span>'
-        f'<span class="bb-live-pill"><span class="bb-status-led"></span>LIVE 30s - {esc(" + ".join(news_sources) or "Fontes")} - {len(filtered_news)} noticias - {"PT-BR" if translate_enabled else "EN"}</span>'
+        f'<span class="bb-live-pill"><span class="bb-status-led"></span>Atualiza 30s - {esc(" + ".join(news_sources) or "Fontes")} - {len(filtered_news)} noticias - {"PT-BR" if translate_enabled else "EN"}</span>'
         f'</div>'
     )
     feed_scope_class = "tg-bloomberg-feed" if compact else ""
@@ -5916,6 +6068,11 @@ def pagina_terminal_bloomberg():
             line-height: 1.25;
         }
 
+        .bb-news-age {
+            color: #cbd5e1;
+            font-weight: 700;
+        }
+
         .bb-news-tag {
             display: inline-flex;
             align-items: center;
@@ -7105,6 +7262,7 @@ def render_terminal_global_news_styles():
           .tg-bloomberg-feed .bb-news-summary { color:#d1d8e0; font-size:.72rem; line-height:1.35; margin-top:4px; }
           .tg-bloomberg-feed .bb-news-card:not(.bb-featured) .bb-news-summary { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
           .tg-bloomberg-feed .bb-news-meta { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-top:5px; color:#9aa6b2; font-size:.62rem; line-height:1.2; }
+          .tg-bloomberg-feed .bb-news-age { color:#cbd5e1; font-weight:700; }
           .tg-bloomberg-feed .bb-news-tag,
           .tg-bloomberg-feed .bb-impact-badge { display:inline-flex; align-items:center; border-radius:4px; padding:1px 5px; background:#303946; color:#b7c0ca; font-size:.58rem; line-height:1.4; }
           .tg-bloomberg-feed .bb-impact-badge { font-weight:900; }
@@ -12064,7 +12222,7 @@ def sidebar_news():
         for weight, keywords in rules:
             if any(keyword in text for keyword in keywords):
                 score += weight
-        if any(word in text for word in ["breaking", "urgent", "alert", "unexpected", "surprise"]):
+        if any(word in text for word in ["breaking", "urgent", "alert", "unexpected", "surprise", "beats estimates", "misses estimates", "above expectations", "below expectations"]):
             score += 3
         if any(name in source for name in ["financial", "reuters", "bloomberg", "cnbc"]):
             score += 1
@@ -12076,14 +12234,17 @@ def sidebar_news():
             return "MEDIO", "#FF9800"
         return "BAIXO", "#94A3B8"
 
+    ranking_now = datetime.now(timezone.utc).timestamp()
+
     def sort_key(item):
         impact_label, _ = compact_impact(item)
-        impact_rank = {"URGENTE": 0, "ALTO": 1, "MEDIO": 2, "BAIXO": 3}
+        impact_rank = {"URGENTE": 3, "ALTO": 2, "MEDIO": 1, "BAIXO": 0}
         try:
-            ts = float(item.get("timestamp") or 0)
+            age_hours = max(0.0, (ranking_now - float(item.get("timestamp") or 0)) / 3600)
         except Exception:
-            ts = 0
-        return (impact_rank.get(impact_label, 9), -ts)
+            age_hours = 24 * 365
+        freshness = 80 * math.exp(-age_hours / 4)
+        return (-(freshness + impact_rank.get(impact_label, 0) * 7), -(item.get("timestamp") or 0))
 
     filtered = sorted(news_list, key=sort_key)[:10]
     translate_enabled = bool(st.session_state.get("sidebar_news_translate", False))
@@ -12105,7 +12266,9 @@ def sidebar_news():
         else:
             title_raw = item.get("title_en") or item.get("title") or item.get("title_pt") or "---"
         title = esc(title_raw)
-        published = esc(item.get("published_str", "--:--"))
+        published_label, age_label = _news_published_label(item.get("timestamp"))
+        published = esc(published_label)
+        age = esc(age_label)
         source = esc(item.get("source", "Financial Juice"))
         link = safe_external_url(item.get("link"))
         impact_label, impact_color = compact_impact(item)
@@ -12113,7 +12276,7 @@ def sidebar_news():
             f'''
             <div style="border-bottom:1px solid #1f2937; padding:9px 0;">
                 <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
-                    <span style="font-size:{meta_font:.2f}rem; color:#94A3B8;">{published} | {source}</span>
+                    <span style="font-size:{meta_font:.2f}rem; color:#94A3B8;">{published} | <strong style="color:#CBD5E1;">{age}</strong> | {source}</span>
                     <span style="font-size:{badge_font:.2f}rem; color:{impact_color}; border:1px solid {impact_color}66; border-radius:4px; padding:1px 5px; font-weight:900;">{impact_label}</span>
                 </div>
                 <a href="{link}" target="_blank" rel="noopener noreferrer" style="display:block; color:#E5E7EB; text-decoration:none; font-size:{title_font:.2f}rem; line-height:{line_height:.2f}; font-weight:700; margin-top:4px;">{title}</a>

@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -33,6 +34,15 @@ RSS_SOURCES = {
     "Bloomberg": "https://feeds.bloomberg.com/markets/news.rss",
     "CNBC": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
     "SCMP": "https://www.scmp.com/rss/91/feed",
+}
+
+FREE_MARKET_RSS_SOURCES = {
+    "Agencia Brasil - Economia": "https://agenciabrasil.ebc.com.br/rss/economia/feed.xml",
+    "Banco Central do Brasil": "https://www.bcb.gov.br/api/feed/sitebcb/sitefeeds/noticias",
+    "InfoMoney": "https://www.infomoney.com.br/feed/",
+    "CNBC": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+    "MarketWatch": "https://feeds.marketwatch.com/marketwatch/topstories/",
+    "OilPrice": "https://oilprice.com/rss/main",
 }
 
 REUTERS_QUERY = (
@@ -122,6 +132,68 @@ def _fetch_rss_sources(limit_per_source=10):
                 "timestamp": published_dt.timestamp(),
             })
     return items
+
+
+def _fetch_public_rss_source(source, url, limit_per_source):
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; TTSMarketNews/1.0)"}
+    try:
+        response = requests.get(url, headers=headers, timeout=12)
+        response.raise_for_status()
+        feed = feedparser.parse(response.content)
+        if not feed.entries:
+            raise ValueError("RSS sem entradas legiveis")
+    except Exception as exc:
+        return source, [], f"{type(exc).__name__}: {str(exc)[:140]}"
+
+    items = []
+    for entry in feed.entries[:limit_per_source]:
+        title = _clean_text(entry.get("title", ""))
+        if not title:
+            continue
+        link = entry.get("link", "")
+        published_dt = _parse_rss_datetime(entry)
+        summary = _clean_text(entry.get("summary", entry.get("description", title)))
+        items.append({
+            "id": _make_id(source.lower(), link, title),
+            "title_en": title,
+            "title_pt": "",
+            "summary": (summary or title)[:280],
+            "summary_pt": "",
+            "source": source,
+            "provider": "RSS",
+            "link": link,
+            "published_str": published_dt.astimezone(BR_TZ).strftime("%H:%M"),
+            "timestamp": published_dt.timestamp(),
+        })
+    if not items:
+        return source, [], "Feed respondeu, mas nao trouxe manchetes validas"
+    return source, items, ""
+
+
+def fetch_free_market_rss_news(limit_per_source=10):
+    """Coleta as fontes publicas aprovadas sem bloquear o Streamlit."""
+    items = []
+    statuses = {}
+    with ThreadPoolExecutor(max_workers=len(FREE_MARKET_RSS_SOURCES)) as pool:
+        futures = {
+            pool.submit(_fetch_public_rss_source, source, url, limit_per_source): source
+            for source, url in FREE_MARKET_RSS_SOURCES.items()
+        }
+        for future in as_completed(futures):
+            source = futures[future]
+            try:
+                source, source_items, error = future.result()
+            except Exception as exc:
+                source_items = []
+                error = f"{type(exc).__name__}: {str(exc)[:140]}"
+            statuses[source] = {
+                "status": "error" if error else "ok",
+                "items": len(source_items),
+                "message": error or "RSS atualizado",
+            }
+            items.extend(source_items)
+    items.sort(key=lambda item: item.get("timestamp", 0), reverse=True)
+    return items, statuses
 
 
 def _fetch_reuters_gdelt(limit=10, timespan="6h"):
