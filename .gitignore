@@ -9,6 +9,9 @@ __pycache__/
 *.json
 !package.json
 !package-lock.json
+!DASHBOARD/tsconfig.json
+!DASHBOARD/tsconfig.app.json
+!DASHBOARD/tsconfig.node.json
 
 # Senhas do Streamlit
 .streamlit/secrets.toml

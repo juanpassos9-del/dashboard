@@ -1,189 +1,142 @@
-import React, { useEffect, useState } from 'react';
-import { 
-  TrendingUp, 
-  TrendingDown, 
-  Globe, 
-  BarChart3, 
-  Newspaper, 
-  Calendar as CalendarIcon,
-  LayoutDashboard
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { createClient, type RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import { useState, type FormEvent } from 'react';
+import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
+import './App.css';
 
-type MarketQuote = {
-  symbol: string;
-  last_price?: number | null;
-  change_percent?: number | null;
-  category?: string | null;
-};
-
-// --- CONFIGURAÇÃO SUPABASE ---
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const streamlitUrl = import.meta.env.VITE_STREAMLIT_URL;
+const supabase = supabaseUrl && supabaseAnonKey
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : null;
 
-const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState('quotes');
-  const [quotes, setQuotes] = useState<MarketQuote[]>([]);
+function App() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
 
-  // Efeito para buscar dados e ouvir o Realtime
-  useEffect(() => {
-    // 1. Busca dados iniciais
-    const fetchInitialData = async () => {
-      const { data } = await supabase.from('market_data').select('*');
-      if (data) setQuotes(data);
-    };
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError('');
 
-    fetchInitialData();
-
-    // 2. Inscreve no canal Realtime
-    const channel = supabase
-      .channel('market_changes')
-      .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'market_data' }, 
-        (payload: RealtimePostgresChangesPayload<MarketQuote>) => {
-          if (!payload.new || !('symbol' in payload.new)) return;
-
-          setQuotes(current => {
-            const nextQuote = payload.new as MarketQuote;
-            const index = current.findIndex(q => q.symbol === nextQuote.symbol);
-            if (index > -1) {
-              const updated = [...current];
-              updated[index] = nextQuote;
-              return updated;
-            }
-            return [...current, nextQuote];
-          });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
-
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case 'quotes':
-        return (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 p-4">
-            {quotes.map((quote) => (
-              <motion.div
-                key={quote.symbol}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-gray-900/60 backdrop-blur-md border border-gray-800 rounded-xl p-5 hover:border-indigo-500/50 transition-all shadow-xl"
-              >
-                <div className="flex justify-between items-start mb-3">
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{quote.category || 'Ativo'}</span>
-                  {(quote.change_percent || 0) >= 0 ? 
-                    <TrendingUp className="text-emerald-400 w-4 h-4" /> : 
-                    <TrendingDown className="text-rose-400 w-4 h-4" />
-                  }
-                </div>
-                <h3 className="text-lg font-bold text-gray-100">{quote.symbol}</h3>
-                <div className="mt-2 flex items-baseline gap-2">
-                  <span className="text-2xl font-black text-white">
-                    {(quote.last_price || 0).toLocaleString('pt-BR', { minimumFractionDigits: (quote.last_price || 0) < 10 ? 4 : 2 })}
-                  </span>
-                  <span className={`text-sm font-bold ${(quote.change_percent || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {(quote.change_percent || 0) >= 0 ? '+' : ''}{(quote.change_percent || 0).toFixed(2)}%
-                  </span>
-                </div>
-                <div className="mt-4 h-16 w-full flex items-center justify-center border border-gray-800/30 rounded-lg bg-black/20">
-                   <span className="text-[10px] text-gray-600">LIVE FEED ACTIVE</span>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        );
-      case 'correlations':
-        return (
-          <div className="p-4 h-[500px] bg-gray-900/40 rounded-2xl border border-gray-800 m-4 flex items-center justify-center">
-            <div className="text-center">
-              <BarChart3 className="w-12 h-12 text-indigo-400 mx-auto mb-4 opacity-50" />
-              <p className="text-gray-400">Matriz de Correlação Intermercado</p>
-              <p className="text-xs text-gray-500 mt-2">Dados em tempo real via Supabase SDK</p>
-            </div>
-          </div>
-        );
-      default:
-        return <div className="p-10 text-center text-gray-500">Em desenvolvimento...</div>;
+    if (!supabase) {
+      setError('O serviço de autenticação não está configurado.');
+      return;
     }
+
+    let destination: URL;
+    try {
+      destination = new URL(streamlitUrl);
+      if (destination.protocol !== 'https:' && destination.hostname !== 'localhost') {
+        throw new Error('Invalid destination');
+      }
+    } catch {
+      setError('O endereço do terminal ainda não foi configurado.');
+      return;
+    }
+
+    setPending(true);
+    const { error: authError } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+
+    if (authError) {
+      setError('E-mail ou senha inválidos. Confira os dados e tente novamente.');
+      setPending(false);
+      return;
+    }
+
+    window.location.replace(destination.toString());
   };
 
   return (
-    <div className="min-h-screen text-gray-100 p-4 max-w-7xl mx-auto">
-      {/* Header */}
-      <header className="flex flex-col md:flex-row justify-between items-center py-8 border-b border-gray-800/50 mb-8">
-        <div className="flex items-center gap-3">
-          <div className="bg-indigo-600 p-2 rounded-lg shadow-lg shadow-indigo-500/20">
-            <LayoutDashboard className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-black bg-gradient-to-r from-indigo-400 via-purple-400 to-indigo-500 bg-clip-text text-transparent">
-              PROFIT DASHBOARD
-            </h1>
-            <p className="text-xs text-gray-500 font-medium">TERMINAL FINANCEIRO INSTITUCIONAL</p>
-          </div>
-        </div>
-
-        <nav className="flex bg-gray-900/80 backdrop-blur-sm p-1 rounded-xl border border-gray-800 mt-6 md:mt-0">
-          <button 
-            onClick={() => setActiveTab('quotes')}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === 'quotes' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-gray-400 hover:text-gray-200'}`}
-          >
-            Cotações
-          </button>
-          <button 
-            onClick={() => setActiveTab('correlations')}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === 'correlations' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-gray-400 hover:text-gray-200'}`}
-          >
-            Correlações
-          </button>
-          <button 
-            onClick={() => setActiveTab('news')}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === 'news' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-gray-400 hover:text-gray-200'}`}
-          >
-            Notícias
-          </button>
-        </nav>
+    <main className="login-page">
+      <header className="site-header">
+        <a className="brand" href="/" aria-label="Trading Strategy, início">
+          <img src="/trading-strategy-logo.png" alt="" />
+          <span>TRADING <b>STRATEGY</b></span>
+        </a>
+        <span className="secure-label"><LockKeyhole size={14} /> ÁREA DO ASSINANTE</span>
       </header>
 
-      {/* Main Content */}
-      <main>
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, x: -10 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 10 }}
-            transition={{ duration: 0.2 }}
-          >
-            {renderTabContent()}
-          </motion.div>
-        </AnimatePresence>
-      </main>
+      <section className="login-layout">
+        <div className="login-copy">
+          <div className="eyebrow"><span /> TERMINAL TTS</div>
+          <h1>Inteligência de mercado.<br /><em>Em um só lugar.</em></h1>
+          <p>Entre com sua conta para continuar ao terminal.</p>
+          <div className="market-line" aria-hidden="true">
+            <span /><span /><span /><span /><span /><span /><span /><span /><span />
+          </div>
+          <div className="copy-foot"><span>MACRO</span><i /> <span>FX</span><i /> <span>RISK</span></div>
+        </div>
 
-      {/* Footer / Status */}
-      <footer className="mt-12 pt-6 border-t border-gray-800/50 flex flex-col md:flex-row justify-between items-center text-[10px] text-gray-500 uppercase tracking-widest gap-4">
-        <div className="flex items-center gap-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-          Status: Sistema Operacional • Profit Bridge Ativo
-        </div>
-        <div>
-          Dados: Yahoo Finance & ProfitChart RTD • Atualização: 3s
-        </div>
-        <div className="flex items-center gap-4">
-          <Globe className="w-3 h-3" />
-          <Newspaper className="w-3 h-3" />
-          <CalendarIcon className="w-3 h-3" />
-        </div>
+        <section className="login-panel" aria-labelledby="login-title">
+          <div className="panel-mark"><LockKeyhole size={18} /></div>
+          <div className="panel-kicker">ACESSO DO ASSINANTE</div>
+          <h2 id="login-title">Bem-vindo de volta</h2>
+          <p className="panel-subtitle">Acesse seu terminal TTS</p>
+
+          <form onSubmit={handleSubmit}>
+            <label htmlFor="email">E-mail</label>
+            <div className="input-wrap">
+              <Mail size={17} aria-hidden="true" />
+              <input
+                id="email"
+                type="email"
+                autoComplete="username"
+                placeholder="voce@exemplo.com"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+              />
+            </div>
+
+            <div className="password-label">
+              <label htmlFor="password">Senha</label>
+            </div>
+            <div className="input-wrap">
+              <LockKeyhole size={17} aria-hidden="true" />
+              <input
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="current-password"
+                placeholder="Sua senha"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+              />
+              <button
+                className="visibility-button"
+                type="button"
+                onClick={() => setShowPassword((visible) => !visible)}
+                aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                title={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+              >
+                {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
+            </div>
+
+            {error && <div className="form-error" role="alert">{error}</div>}
+
+            <button className="submit-button" type="submit" disabled={pending}>
+              <span>{pending ? 'Validando acesso...' : 'Entrar no terminal'}</span>
+              {!pending && <ArrowRight size={17} />}
+            </button>
+          </form>
+
+          <div className="panel-footer"><span /> CONEXÃO SEGURA <b>·</b> SUPABASE AUTH</div>
+        </section>
+      </section>
+
+      <footer className="site-footer">
+        <span>© {new Date().getFullYear()} Trading Strategy</span>
+        <span>ANÁLISE · CONTEXTO · EXECUÇÃO</span>
       </footer>
-    </div>
+    </main>
   );
-};
+}
 
 export default App;
