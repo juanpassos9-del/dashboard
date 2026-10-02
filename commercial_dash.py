@@ -12489,12 +12489,19 @@ with st.sidebar:
     
     st.markdown("---")
     
-    tab1, tab2, tab3 = st.tabs(["🌍 MERCADOS", "📅 CALENDÁRIO", "NEWS"])
-    with tab1: sidebar_mercados()
-    with tab2: sidebar_calendario()
-    with tab3: sidebar_news()
-
-render_high_impact_news_ticker()
+    sidebar_panel = st.radio(
+        "Painel lateral",
+        ["Mercados", "Calendário", "News"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="sidebar_panel",
+    )
+    if sidebar_panel == "Mercados":
+        sidebar_mercados()
+    elif sidebar_panel == "Calendário":
+        sidebar_calendario()
+    else:
+        sidebar_news()
 
 # Roteamento de Páginas
 if page == "📉 Terminal de Trading":
@@ -12527,6 +12534,7 @@ elif page == "⚙️ Painel de Controle":
     pagina_painel_controle()
 
 stop_post_auth_loading(post_auth_loading_placeholder)
+render_high_impact_news_ticker()
 
 
 
