@@ -1,5 +1,5 @@
 .login-page {
-  width: min(1240px, 100%);
+  width: min(1360px, 100%);
   min-height: 100svh;
   margin: 0 auto;
   padding: 0 42px;
@@ -45,19 +45,19 @@
 .login-layout {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 410px);
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
   align-items: center;
-  gap: clamp(48px, 10vw, 150px);
-  padding: 56px 5.5%;
+  gap: clamp(56px, 8vw, 112px);
+  padding: 48px 5%;
 }
 
-.login-copy { max-width: 580px; }
+.login-copy { max-width: 620px; }
 
 .eyebrow {
   display: flex;
   align-items: center;
   gap: 9px;
-  margin-bottom: 22px;
+  margin-bottom: 18px;
   color: #9ca8b3;
   font: 750 11px "Roboto Mono", "SFMono-Regular", Consolas, monospace;
 }
@@ -74,7 +74,7 @@
 .login-copy h1 {
   margin: 0;
   color: #f1f4f6;
-  font-size: clamp(34px, 4vw, 52px);
+  font-size: clamp(38px, 3.7vw, 48px);
   font-weight: 720;
   line-height: 1.14;
 }
@@ -83,9 +83,9 @@
 
 .login-brand-image {
   position: relative;
-  width: min(100%, 340px);
+  width: min(100%, 300px);
   aspect-ratio: 1;
-  margin-top: 12px;
+  margin-top: 16px;
   overflow: hidden;
 }
 
@@ -100,11 +100,11 @@
 }
 
 .market-line {
-  height: 92px;
+  height: 66px;
   display: flex;
   align-items: center;
   gap: 9px;
-  margin-top: 32px;
+  margin-top: 22px;
   padding: 0 12px;
   border-top: 1px solid #252c34;
   border-bottom: 1px solid #252c34;
@@ -128,7 +128,7 @@
 .market-line span:nth-child(8) { --bar-height: 49px; --bar-color: #e8ad55; --bar-slope: -8deg; }
 .market-line span:nth-child(9) { --bar-height: 30px; --bar-color: #4da3ff; --bar-slope: 5deg; }
 
-.copy-foot { display: flex; align-items: center; gap: 11px; margin-top: 14px; }
+.copy-foot { display: flex; align-items: center; gap: 11px; margin-top: 12px; }
 .copy-foot i { width: 3px; height: 3px; border-radius: 50%; background: #58636e; }
 
 .login-panel {
@@ -238,11 +238,11 @@
   .login-page { padding: 0 20px; }
   .site-header { min-height: 66px; }
   .secure-label { font-size: 8px; }
-  .login-layout { grid-template-columns: 1fr; gap: 30px; padding: 44px 0 36px; }
+  .login-layout { grid-template-columns: 1fr; gap: 30px; padding: 40px 0 36px; }
   .login-copy { max-width: none; }
-  .login-copy h1 { font-size: 35px; }
-  .login-brand-image { width: min(100%, 280px); margin-top: 10px; }
-  .market-line { height: 62px; margin-top: 22px; }
+  .login-copy h1 { max-width: 580px; font-size: 40px; }
+  .login-brand-image { width: min(100%, 250px); margin-top: 12px; }
+  .market-line { height: 54px; margin-top: 18px; }
   .copy-foot { display: none; }
   .login-panel { max-width: 440px; justify-self: center; padding: 24px; }
   .site-footer { gap: 12px; font-size: 8px; }
