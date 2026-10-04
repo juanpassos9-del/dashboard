@@ -32,3 +32,19 @@ def decrypt_refresh_token(secret: str, encrypted_value: str, max_age: int) -> st
     if not isinstance(refresh_token, str) or not refresh_token:
         raise InvalidAuthCookie("The saved authentication cookie has an invalid payload")
     return refresh_token
+
+
+def read_browser_cookie(cookie_manager, cookie_name: str, initial_read: bool = False):
+    """Read the latest component value instead of a CookieManager's stale snapshot."""
+    try:
+        if initial_read:
+            return cookie_manager.get(cookie_name)
+        cookies = cookie_manager.get_all()
+        if isinstance(cookies, dict):
+            return cookies.get(cookie_name)
+    except Exception:
+        pass
+    try:
+        return cookie_manager.get(cookie_name)
+    except Exception:
+        return None

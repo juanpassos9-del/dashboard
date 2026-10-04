@@ -18,7 +18,7 @@ from html.parser import HTMLParser
 from typing import Any
 from zoneinfo import ZoneInfo
 from supabase import create_client, Client
-from execution.auth_cookie import InvalidAuthCookie, decrypt_refresh_token, encrypt_refresh_token
+from execution.auth_cookie import InvalidAuthCookie, decrypt_refresh_token, encrypt_refresh_token, read_browser_cookie
 
 try:
     from execution.source_health import get_source_health, mark_source
@@ -239,14 +239,13 @@ def _session_auth_client():
     return client
 
 
-_AUTH_COOKIE_MANAGER = None
-
-
 def _auth_cookie_manager():
-    global _AUTH_COOKIE_MANAGER
-    if _AUTH_COOKIE_MANAGER is None:
-        _AUTH_COOKIE_MANAGER = stx.CookieManager(key="tts_auth_cookie_manager")
-    return _AUTH_COOKIE_MANAGER
+    manager = st.session_state.get("_auth_cookie_manager")
+    is_initial_read = manager is None
+    if manager is None:
+        manager = stx.CookieManager(key="tts_auth_cookie_manager")
+        st.session_state["_auth_cookie_manager"] = manager
+    return manager, is_initial_read
 
 
 def _is_invalid_refresh_token_error(error) -> bool:
@@ -258,11 +257,14 @@ def _is_invalid_refresh_token_error(error) -> bool:
 
 def _read_auth_cookie():
     try:
-        return st.context.cookies.get(AUTH_COOKIE_NAME)
+        value = st.context.cookies.get(AUTH_COOKIE_NAME)
+        if value:
+            return value
     except Exception:
         pass
     try:
-        return _auth_cookie_manager().get(AUTH_COOKIE_NAME)
+        manager, is_initial_read = _auth_cookie_manager()
+        return read_browser_cookie(manager, AUTH_COOKIE_NAME, initial_read=is_initial_read)
     except Exception:
         return None
 
@@ -270,7 +272,8 @@ def _read_auth_cookie():
 def _delete_auth_cookie():
     st.session_state["auth_cookie_skip_restore"] = True
     try:
-        _auth_cookie_manager().delete(AUTH_COOKIE_NAME, key="tts_auth_cookie_delete")
+        manager, _ = _auth_cookie_manager()
+        manager.delete(AUTH_COOKIE_NAME, key="tts_auth_cookie_delete")
     except Exception:
         pass
 
@@ -287,7 +290,8 @@ def _persist_auth_refresh_token(session) -> bool:
     try:
         encrypted_value = encrypt_refresh_token(secret, refresh_token)
         expires_at = datetime.now() + timedelta(seconds=AUTH_COOKIE_MAX_AGE)
-        _auth_cookie_manager().set(
+        manager, _ = _auth_cookie_manager()
+        manager.set(
             AUTH_COOKIE_NAME,
             encrypted_value,
             key="tts_auth_cookie_set",
