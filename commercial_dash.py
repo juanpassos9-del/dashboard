@@ -1,5 +1,6 @@
 import streamlit as st
 import streamlit.components.v1 as components
+import extra_streamlit_components as stx
 
 import os
 import base64
@@ -17,6 +18,7 @@ from html.parser import HTMLParser
 from typing import Any
 from zoneinfo import ZoneInfo
 from supabase import create_client, Client
+from execution.auth_cookie import InvalidAuthCookie, decrypt_refresh_token, encrypt_refresh_token
 
 try:
     from execution.source_health import get_source_health, mark_source
@@ -60,6 +62,20 @@ def get_supabase_key_value() -> str:
     return ""
 
 
+def get_auth_cookie_secret() -> str:
+    for name in ("AUTH_COOKIE_SECRET", "SUPABASE_SERVICE_ROLE", "SUPABASE_SERVICE"):
+        try:
+            value = st.secrets.get(name, "")
+            if value:
+                return str(value)
+        except Exception:
+            pass
+        value = os.environ.get(name, "")
+        if value:
+            return value
+    return ""
+
+
 @st.cache_resource
 def init_supabase() -> Client:
     try:
@@ -80,6 +96,8 @@ LOCAL_TMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".tmp")
 
 
 AUTH_REQUIRED = True
+AUTH_COOKIE_NAME = "tts_auth_refresh_v1"
+AUTH_COOKIE_MAX_AGE = 30 * 24 * 60 * 60
 APP_STATE_ALLOWED_KEYS = {
     "ai_insight",
     "ai_insight_history",
@@ -221,10 +239,112 @@ def _session_auth_client():
     return client
 
 
+def _auth_cookie_manager():
+    return stx.CookieManager(key="tts_auth_cookie_manager")
+
+
+def _is_invalid_refresh_token_error(error) -> bool:
+    message = str(error).lower()
+    return "refresh token" in message and any(
+        word in message for word in ("invalid", "expired", "not found")
+    )
+
+
+def _read_auth_cookie():
+    try:
+        cookie_value = st.context.cookies.get(AUTH_COOKIE_NAME)
+        if cookie_value:
+            return str(cookie_value)
+    except Exception:
+        pass
+    try:
+        return _auth_cookie_manager().get(AUTH_COOKIE_NAME)
+    except Exception:
+        return None
+
+
+def _delete_auth_cookie():
+    st.session_state["auth_cookie_skip_restore"] = True
+    try:
+        _auth_cookie_manager().delete(AUTH_COOKIE_NAME, key="tts_auth_cookie_delete")
+    except Exception:
+        pass
+
+
+def _persist_auth_refresh_token(session) -> bool:
+    refresh_token = getattr(session, "refresh_token", None)
+    secret = get_auth_cookie_secret()
+    if not refresh_token or not secret:
+        return False
+    try:
+        encrypted_value = encrypt_refresh_token(secret, refresh_token)
+        expires_at = datetime.now() + timedelta(seconds=AUTH_COOKIE_MAX_AGE)
+        _auth_cookie_manager().set(
+            AUTH_COOKIE_NAME,
+            encrypted_value,
+            key="tts_auth_cookie_set",
+            path="/",
+            expires_at=expires_at,
+            max_age=AUTH_COOKIE_MAX_AGE,
+            secure=True,
+            same_site="strict",
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _restore_auth_session_from_cookie() -> bool:
+    if st.session_state.get("auth_cookie_skip_restore"):
+        return False
+    encrypted_value = _read_auth_cookie()
+    if not encrypted_value:
+        return False
+
+    secret = get_auth_cookie_secret()
+    if not secret:
+        _delete_auth_cookie()
+        st.session_state["auth_restore_error"] = "Sessao salva indisponivel. Entre novamente."
+        return False
+    try:
+        refresh_token = decrypt_refresh_token(secret, str(encrypted_value), AUTH_COOKIE_MAX_AGE)
+    except InvalidAuthCookie:
+        _delete_auth_cookie()
+        st.session_state["auth_restore_error"] = "Sua sessao expirou. Entre novamente."
+        return False
+    if not refresh_token:
+        _delete_auth_cookie()
+        st.session_state["auth_restore_error"] = "Sua sessao salva e invalida. Entre novamente."
+        return False
+
+    client = _session_auth_client()
+    if not client:
+        st.session_state["auth_restore_error"] = "Nao foi possivel conectar ao Supabase para restaurar a sessao."
+        return False
+    try:
+        response = client.auth.refresh_session(refresh_token)
+        user = getattr(response, "user", None)
+        session = getattr(response, "session", None)
+        error = _store_authenticated_session(user, session, client)
+        if error:
+            _delete_auth_cookie()
+            st.session_state["auth_restore_error"] = error
+            return False
+        return True
+    except Exception as e:
+        if _is_invalid_refresh_token_error(e):
+            _delete_auth_cookie()
+            st.session_state["auth_restore_error"] = "Sua sessao expirou. Entre novamente."
+        else:
+            st.session_state["auth_restore_error"] = "Nao foi possivel validar a sessao salva. Tente novamente."
+        return False
+
+
 def _clear_auth_session():
     for key in (
         "auth_user", "auth_session", "auth_role", "auth_client",
         "auth_validated_at", "auth_loading_message", "auth_loading_until",
+        "auth_persistence_warning",
     ):
         st.session_state.pop(key, None)
 
@@ -254,6 +374,15 @@ def _store_authenticated_session(user, session, client):
     st.session_state["auth_session"] = session
     st.session_state["auth_role"] = role
     st.session_state["auth_validated_at"] = time.time()
+    st.session_state["auth_cookie_skip_restore"] = False
+    st.session_state.pop("auth_restore_error", None)
+    if not _persist_auth_refresh_token(session):
+        st.session_state["auth_persistence_warning"] = (
+            "Este login nao sera lembrado apos atualizar. Configure AUTH_COOKIE_SECRET "
+            "ou a chave SUPABASE_SERVICE nas Secrets do Streamlit."
+        )
+    else:
+        st.session_state.pop("auth_persistence_warning", None)
     return None
 
 
@@ -582,6 +711,9 @@ def render_auth_screen():
         """.replace("__LOGO_HTML__", logo_html),
         unsafe_allow_html=True,
     )
+    restore_error = st.session_state.pop("auth_restore_error", None)
+    if restore_error:
+        st.warning(restore_error)
     with st.form("auth_login_form"):
         email = st.text_input("Email", key="auth_login_email").strip().lower()
         password = st.text_input("Senha", type="password", key="auth_login_password")
@@ -592,13 +724,11 @@ def render_auth_screen():
         else:
             render_auth_loading("Validando acesso...", "Conectando ao Supabase e preparando seu terminal.")
             with st.spinner("Abrindo dashboard..."):
-                warning, error = auth_sign_in(email, password)
+                _, error = auth_sign_in(email, password)
             if error:
                 st.session_state.pop("auth_loading_message", None)
                 st.error(error)
             else:
-                if warning:
-                    st.warning(warning)
                 st.session_state["auth_loading_message"] = "Carregando dashboard..."
                 st.session_state["auth_loading_until"] = time.time() + 8.0
                 _auth_rerun()
@@ -621,14 +751,27 @@ def require_authenticated_user():
                 if not refresh_token:
                     _clear_auth_session()
                     render_auth_screen()
-                refreshed = client.auth.refresh_session(refresh_token)
+                try:
+                    refreshed = client.auth.refresh_session(refresh_token)
+                except Exception as refresh_error:
+                    if _is_invalid_refresh_token_error(refresh_error):
+                        _delete_auth_cookie()
+                        _clear_auth_session()
+                        st.session_state["auth_restore_error"] = "Sua sessao expirou. Entre novamente."
+                        render_auth_screen()
+                    raise
                 session = getattr(refreshed, "session", None)
                 user = getattr(refreshed, "user", None)
                 if not session or not user:
+                    _delete_auth_cookie()
                     _clear_auth_session()
                     render_auth_screen()
-                st.session_state["auth_session"] = session
-                st.session_state["auth_user"] = user
+                error = _store_authenticated_session(user, session, client)
+                if error:
+                    _delete_auth_cookie()
+                    _clear_auth_session()
+                    st.session_state["auth_restore_error"] = error
+                    render_auth_screen()
 
             if time.time() - float(st.session_state.get("auth_validated_at", 0)) >= 60:
                 access_token = getattr(session, "access_token", None)
@@ -649,6 +792,8 @@ def require_authenticated_user():
         except Exception:
             st.error("Nao foi possivel validar seu acesso. O dashboard permanece bloqueado; tente novamente em instantes.")
             st.stop()
+    if _restore_auth_session_from_cookie():
+        return st.session_state.get("auth_user")
     render_auth_screen()
 
 
@@ -12323,6 +12468,9 @@ def sidebar_clock():
     )
 
 auth_user = require_authenticated_user()
+auth_persistence_warning = st.session_state.pop("auth_persistence_warning", None)
+if auth_persistence_warning:
+    st.warning(auth_persistence_warning)
 auth_role = st.session_state.get("auth_role", "member")
 auth_role_label = "Acesso publico" if not AUTH_REQUIRED else ("Administrador" if auth_role == "admin" else "Membro")
 post_auth_loading_placeholder = start_post_auth_loading()
@@ -12350,6 +12498,7 @@ with st.sidebar:
                 auth_client.auth.sign_out()
         except Exception:
             pass
+        _delete_auth_cookie()
         _clear_auth_session()
         _auth_rerun()
     st.markdown("### 🧭 Navegação")
