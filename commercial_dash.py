@@ -239,8 +239,14 @@ def _session_auth_client():
     return client
 
 
+_AUTH_COOKIE_MANAGER = None
+
+
 def _auth_cookie_manager():
-    return stx.CookieManager(key="tts_auth_cookie_manager")
+    global _AUTH_COOKIE_MANAGER
+    if _AUTH_COOKIE_MANAGER is None:
+        _AUTH_COOKIE_MANAGER = stx.CookieManager(key="tts_auth_cookie_manager")
+    return _AUTH_COOKIE_MANAGER
 
 
 def _is_invalid_refresh_token_error(error) -> bool:
@@ -252,9 +258,7 @@ def _is_invalid_refresh_token_error(error) -> bool:
 
 def _read_auth_cookie():
     try:
-        cookie_value = st.context.cookies.get(AUTH_COOKIE_NAME)
-        if cookie_value:
-            return str(cookie_value)
+        return st.context.cookies.get(AUTH_COOKIE_NAME)
     except Exception:
         pass
     try:
@@ -274,7 +278,11 @@ def _delete_auth_cookie():
 def _persist_auth_refresh_token(session) -> bool:
     refresh_token = getattr(session, "refresh_token", None)
     secret = get_auth_cookie_secret()
-    if not refresh_token or not secret:
+    if not refresh_token:
+        st.session_state["auth_persistence_error"] = "O Supabase nao retornou um refresh token."
+        return False
+    if not secret:
+        st.session_state["auth_persistence_error"] = "AUTH_COOKIE_SECRET ou chave de servico ausente nas Secrets."
         return False
     try:
         encrypted_value = encrypt_refresh_token(secret, refresh_token)
@@ -289,8 +297,12 @@ def _persist_auth_refresh_token(session) -> bool:
             secure=True,
             same_site="strict",
         )
+        st.session_state.pop("auth_persistence_error", None)
         return True
-    except Exception:
+    except Exception as error:
+        st.session_state["auth_persistence_error"] = (
+            f"Falha ao gravar o cookie ({type(error).__name__})."
+        )
         return False
 
 
@@ -344,7 +356,7 @@ def _clear_auth_session():
     for key in (
         "auth_user", "auth_session", "auth_role", "auth_client",
         "auth_validated_at", "auth_loading_message", "auth_loading_until",
-        "auth_persistence_warning",
+        "auth_persistence_warning", "auth_persistence_error",
     ):
         st.session_state.pop(key, None)
 
@@ -377,10 +389,8 @@ def _store_authenticated_session(user, session, client):
     st.session_state["auth_cookie_skip_restore"] = False
     st.session_state.pop("auth_restore_error", None)
     if not _persist_auth_refresh_token(session):
-        st.session_state["auth_persistence_warning"] = (
-            "Este login nao sera lembrado apos atualizar. Configure AUTH_COOKIE_SECRET "
-            "ou a chave SUPABASE_SERVICE nas Secrets do Streamlit."
-        )
+        details = st.session_state.get("auth_persistence_error")
+        st.session_state["auth_persistence_warning"] = f"Este login nao sera lembrado apos atualizar. {details or ''}"
     else:
         st.session_state.pop("auth_persistence_warning", None)
     return None
