@@ -7,10 +7,12 @@ and classifies impact, macro theme, affected assets and risk bias.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import os
 import re
 import time
+from urllib.parse import urlencode
 from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -24,6 +26,15 @@ BR_TZ = ZoneInfo("America/Sao_Paulo")
 CACHE_DIR = ".tmp"
 CACHE_FILE = os.path.join(CACHE_DIR, "news_macro_hub.json")
 GDELT_API_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
+GOOGLE_NEWS_RSS_URL = "https://news.google.com/rss/search"
+
+# Keep queries focused to avoid turning the macro hub into a general news feed.
+GOOGLE_NEWS_QUERIES = {
+    "Macro Global": ("nivel_2", '(Fed OR FOMC OR inflation OR Treasury OR yields OR central bank) markets'),
+    "Brasil Macro": ("nivel_2", '(Brasil OR Brazil) (BCB OR Copom OR Selic OR fiscal OR Ibovespa)'),
+    "Energia e Geopolítica": ("nivel_2", '(oil OR crude OR Brent OR OPEC OR sanctions OR geopolitical) markets'),
+    "China e Commodities": ("nivel_2", '(China OR PBOC) (economy OR commodities OR exports OR stimulus)'),
+}
 
 RSS_SOURCES = {
     "Bloomberg": ("nivel_1", "https://feeds.bloomberg.com/markets/news.rss"),
@@ -148,6 +159,18 @@ def _parse_rss_datetime(entry) -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _google_news_source(entry) -> str:
+    source_data = entry.get("source", "")
+    source = _clean_text(source_data.get("title", "") if hasattr(source_data, "get") else source_data)
+    if source:
+        return html.unescape(source)
+    title = _clean_text(entry.get("title", ""))
+    # Google News commonly appends the publisher after the headline separator.
+    if " - " in title:
+        return title.rsplit(" - ", 1)[-1].strip()
+    return "Veiculo nao identificado"
+
+
 def _source_weight(level: str) -> int:
     return {"nivel_1": 20, "nivel_2": 12, "nivel_3": 7}.get(level, 5)
 
@@ -191,7 +214,7 @@ def _fetch_rss(limit_per_source: int = 8) -> list[dict[str, Any]]:
         try:
             response = requests.get(url, headers=headers, timeout=8)
             response.raise_for_status()
-            feed = feedparser.parse(response.content)
+            feed = feedparser.parse(response.content, response_headers=response.headers)
         except Exception:
             continue
         for entry in feed.entries[:limit_per_source]:
@@ -251,6 +274,54 @@ def _fetch_gdelt(limit_per_source: int = 6, timespan: str = "12h") -> list[dict[
     return rows
 
 
+def _fetch_google_news(limit_per_query: int = 8) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; TTSMacroHub/1.0)"}
+    for topic, (level, query) in GOOGLE_NEWS_QUERIES.items():
+        params = {
+            "q": query,
+            "hl": "pt-BR",
+            "gl": "BR",
+            "ceid": "BR:pt-419",
+        }
+        try:
+            response = requests.get(
+                f"{GOOGLE_NEWS_RSS_URL}?{urlencode(params)}",
+                headers=headers,
+                timeout=8,
+            )
+            response.raise_for_status()
+            feed = feedparser.parse(response.content, response_headers=response.headers)
+        except Exception:
+            continue
+        for entry in feed.entries[:limit_per_query]:
+            raw_title = _clean_text(entry.get("title", ""))
+            if not raw_title:
+                continue
+            publisher = _google_news_source(entry)
+            # RSS titles often contain "headline - publisher"; keep the publisher
+            # as a separate field so it can be shown without duplicating the title.
+            title = raw_title
+            suffix = f" - {publisher}"
+            if publisher != "Veiculo nao identificado" and title.endswith(suffix):
+                title = title[: -len(suffix)].strip()
+            dt = _parse_rss_datetime(entry)
+            link = entry.get("link", "")
+            rows.append({
+                "id": _make_id(f"Google News:{publisher}", title, link),
+                "source": publisher,
+                "provider": "Google News RSS",
+                "collection_topic": topic,
+                "level": level,
+                "title": title,
+                "summary": _clean_text(entry.get("summary", entry.get("description", title)))[:260],
+                "link": link,
+                "timestamp": dt.timestamp(),
+                "published_str": dt.astimezone(BR_TZ).strftime("%d/%m %H:%M"),
+            })
+    return rows
+
+
 def build_macro_news_hub(limit: int = 24, max_age_hours: int = 24, force: bool = False) -> dict[str, Any]:
     cache = _load_cache()
     now_ts = time.time()
@@ -258,12 +329,13 @@ def build_macro_news_hub(limit: int = 24, max_age_hours: int = 24, force: bool =
         return cache
 
     rows = _fetch_rss()
+    rows.extend(_fetch_google_news())
     rows.extend(_fetch_gdelt())
     cutoff = now_ts - max_age_hours * 3600
     seen = set()
     classified = []
     for row in rows:
-        title_key = _clean_text(row.get("title", "")).lower()[:90]
+        title_key = re.sub(r"\W+", " ", _clean_text(row.get("title", "")).lower()).strip()[:120]
         if not title_key or title_key in seen or float(row.get("timestamp", 0)) < cutoff:
             continue
         seen.add(title_key)
