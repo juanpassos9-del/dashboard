@@ -10,6 +10,7 @@ import json
 import math
 import re
 import time
+import unicodedata
 import pandas as pd
 import textwrap
 import requests
@@ -1812,6 +1813,51 @@ def render_bloomberg_news_feed_fragment(compact: bool = False):
         title = item.get("title_en") or item.get("title") or item.get("title_pt") or ""
         return f"{title} {summary}".lower()
 
+    def normalize_name(value: str) -> str:
+        normalized = unicodedata.normalize("NFKD", str(value or ""))
+        return "".join(char for char in normalized if not unicodedata.combining(char)).casefold()
+
+    monitored_groups = {
+        "Brasil": {
+            "Lula": ("Lula", "Luiz Inacio Lula da Silva"),
+            "Haddad": ("Haddad", "Fernando Haddad"),
+            "Galipolo": ("Galipolo", "Gabriel Galipolo"),
+            "Tebet": ("Tebet", "Simone Tebet"),
+            "Lira": ("Lira", "Arthur Lira"),
+            "Pacheco": ("Pacheco", "Rodrigo Pacheco"),
+            "Bolsonaro": ("Bolsonaro", "Jair Bolsonaro"),
+        },
+        "EUA": {
+            "Trump": ("Trump", "Donald Trump"),
+            "Powell": ("Powell", "Jerome Powell"),
+            "Bessent": ("Bessent", "Scott Bessent"),
+            "Yellen": ("Yellen", "Janet Yellen"),
+        },
+        "Europa": {
+            "Lagarde": ("Lagarde", "Christine Lagarde"),
+            "Macron": ("Macron", "Emmanuel Macron"),
+            "Draghi": ("Draghi", "Mario Draghi"),
+            "Scholz": ("Scholz", "Olaf Scholz"),
+        },
+        "Asia": {"Xi Jinping": ("Xi Jinping",)},
+        "América Latina": {"Milei": ("Milei", "Javier Milei")},
+        "Outros": {"Xi": ("Xi",)},
+    }
+
+    def monitored_leader_matches(item, selected_names: set[str]) -> list[str]:
+        searchable = normalize_name(news_original_text(item))
+        matches = []
+        for group in monitored_groups.values():
+            for display_name, aliases in group.items():
+                if display_name not in selected_names:
+                    continue
+                if any(normalize_name(alias) in searchable for alias in aliases):
+                    matches.append(display_name)
+        # Xi Jinping also matches the shorter Xi alias; report the specific name once.
+        if "Xi Jinping" in matches and "Xi" in matches:
+            matches.remove("Xi")
+        return matches
+
     def infer_tags(item) -> list[str]:
         text = news_original_text(item)
         rules = [
@@ -1885,6 +1931,29 @@ def render_bloomberg_news_feed_fragment(compact: bool = False):
         key="bb_news_filter_fast",
     ).strip()
 
+    selected_leaders = set()
+    with st.expander("Discursos · Líderes monitorados", expanded=not compact):
+        leader_columns = st.columns(2)
+        for index, (region, leaders) in enumerate(monitored_groups.items()):
+            options = list(leaders)
+            state_key = f"bb_monitored_leaders_{normalize_name(region).replace(' ', '_')}"
+            if state_key not in st.session_state:
+                st.session_state[state_key] = options.copy()
+            with leader_columns[index % 2]:
+                st.markdown(f"**{region.upper()}**")
+                selected = st.multiselect(
+                    f"Líderes · {region}",
+                    options=options,
+                    key=state_key,
+                    label_visibility="collapsed",
+                    placeholder="Selecionar líderes",
+                )
+                selected_leaders.update(selected)
+        monitor_only = st.checkbox(
+            "Somente notícias de líderes monitorados",
+            key="bb_monitored_only_fast",
+        )
+
     news_list, news_sources, news_warnings, feed_loaded_at = load_bloomberg_news_feed(0)
     if news_list:
         st.session_state.bb_news_history = news_list[:10]
@@ -1912,6 +1981,13 @@ def render_bloomberg_news_feed_fragment(compact: bool = False):
         ]
     else:
         filtered_news = news_list
+
+    leader_match_by_item = {
+        id(item): monitored_leader_matches(item, selected_leaders)
+        for item in filtered_news
+    }
+    if monitor_only:
+        filtered_news = [item for item in filtered_news if leader_match_by_item.get(id(item))]
 
     impact_order = {"critical": 3, "high": 2, "medium": 1, "low": 0}
     ranking_now = datetime.now(timezone.utc).timestamp()
@@ -1964,6 +2040,13 @@ def render_bloomberg_news_feed_fragment(compact: bool = False):
         reason_tags = "".join(f'<span class="bb-news-tag">{esc(reason)}</span>' for reason in impact_reasons)
         featured_class = " bb-featured" if is_featured else ""
         impact_class = f" bb-impact-{impact_level}" if impact_level in ["critical", "high", "medium"] else ""
+        leader_matches = leader_match_by_item.get(id(item), [])
+        monitored_class = " bb-monitored" if leader_matches else ""
+        leader_badge = (
+            f'<span class="bb-watch-badge">LÍDER · {esc(", ".join(leader_matches))}</span>'
+            if leader_matches
+            else ""
+        )
         close_html = ""
         summary_html = (
             f'<div class="bb-news-summary">{summary}</div>'
@@ -1971,7 +2054,7 @@ def render_bloomberg_news_feed_fragment(compact: bool = False):
             else ""
         )
         cards.append(
-            f'<div class="bb-news-card{featured_class}{impact_class}">'
+            f'<div class="bb-news-card{featured_class}{impact_class}{monitored_class}">'
             f'{close_html}'
             f'<div class="bb-news-rail"></div>'
             f'<div class="bb-news-icon">{icon_text}</div>'
@@ -1979,7 +2062,7 @@ def render_bloomberg_news_feed_fragment(compact: bool = False):
             f'<div class="bb-news-title">{title}</div>'
             f'{summary_html}'
             f'<div class="bb-news-meta">'
-            f'<span>{published}</span>{age_html}<span>{source}</span>{impact_badge}{reason_tags}{tags_html}'
+            f'<span>{published}</span>{age_html}<span>{source}</span>{impact_badge}{leader_badge}{reason_tags}{tags_html}'
             f'</div>'
             f'</div>'
             f'<a class="bb-news-link" href="{link}" target="_blank" rel="noopener noreferrer">↗</a>'
@@ -6082,6 +6165,28 @@ def pagina_terminal_bloomberg():
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 0 0 1px rgba(255,153,0,0.14);
         }
 
+        .bb-news-card.bb-monitored {
+            outline: 1px solid rgba(37, 214, 220, 0.72);
+            outline-offset: -1px;
+        }
+
+        .bb-news-card.bb-monitored .bb-news-rail {
+            background: #19c9d2;
+        }
+
+        .bb-watch-badge {
+            display: inline-flex;
+            align-items: center;
+            border: 1px solid rgba(37, 214, 220, 0.55);
+            border-radius: 4px;
+            padding: 1px 5px;
+            background: rgba(8, 95, 105, 0.38);
+            color: #62f0ee;
+            font-size: 0.64rem;
+            font-weight: 900;
+            line-height: 1.4;
+        }
+
         .bb-news-card.bb-impact-critical .bb-news-rail {
             background: #ff1f1f;
         }
@@ -7341,6 +7446,8 @@ def render_terminal_global_news_styles():
           .tg-bloomberg-feed .bb-news-card.bb-impact-high { background:#2a181b; }
           .tg-bloomberg-feed .bb-news-card.bb-impact-critical { background:linear-gradient(90deg,#3a090b,#211216); }
           .tg-bloomberg-feed .bb-news-card.bb-impact-medium { background:#261f12; }
+          .tg-bloomberg-feed .bb-news-card.bb-monitored { outline:1px solid rgba(37,214,220,.72); outline-offset:-1px; }
+          .tg-bloomberg-feed .bb-news-card.bb-monitored .bb-news-rail { background:#19c9d2; }
           .tg-bloomberg-feed .bb-news-card.bb-impact-critical .bb-news-rail,
           .tg-bloomberg-feed .bb-news-card.bb-impact-high .bb-news-rail { background:#ff2d20; }
           .tg-bloomberg-feed .bb-news-card.bb-impact-medium .bb-news-rail { background:#ff9900; }
@@ -7359,6 +7466,7 @@ def render_terminal_global_news_styles():
           .tg-bloomberg-feed .bb-news-age { color:#cbd5e1; font-weight:700; }
           .tg-bloomberg-feed .bb-news-tag,
           .tg-bloomberg-feed .bb-impact-badge { display:inline-flex; align-items:center; border-radius:4px; padding:1px 5px; background:#303946; color:#b7c0ca; font-size:.58rem; line-height:1.4; }
+          .tg-bloomberg-feed .bb-watch-badge { display:inline-flex; align-items:center; border:1px solid rgba(37,214,220,.55); border-radius:4px; padding:1px 5px; background:rgba(8,95,105,.38); color:#62f0ee; font-size:.58rem; font-weight:900; line-height:1.4; }
           .tg-bloomberg-feed .bb-impact-badge { font-weight:900; }
           .tg-bloomberg-feed .bb-impact-badge.critical { background:#ff2d20; color:#fff; }
           .tg-bloomberg-feed .bb-impact-badge.high { background:#4a1111; color:#ff6b5f; }
