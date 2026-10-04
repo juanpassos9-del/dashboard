@@ -741,7 +741,7 @@ def render_auth_screen():
             else:
                 st.session_state["auth_loading_message"] = "Carregando dashboard..."
                 st.session_state["auth_loading_until"] = time.time() + 8.0
-                _auth_rerun()
+                # The cookie component reruns Streamlit after the browser stores the cookie.
     st.stop()
 
 
