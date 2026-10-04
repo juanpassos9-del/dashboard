@@ -387,88 +387,84 @@ def build_macro_news_hub(limit: int = 24, max_age_hours: int = 24, force: bool =
     return payload
 
 
-def generate_daily_macro_briefing(items: list[dict[str, Any]], api_key: str) -> dict[str, Any]:
-    """Create a sourced editorial digest from already-collected headlines/snippets."""
-    if not api_key:
-        raise ValueError("Configure GOOGLE_API_KEY ou GEMINI_API_KEY para gerar o briefing.")
-    if not items:
-        raise ValueError("Nao ha noticias para analisar.")
+def _local_news_summary(item: dict[str, Any]) -> str:
+    title = html.unescape(_clean_text(str(item.get("title", ""))))
+    snippet = html.unescape(_clean_text(str(item.get("summary", ""))))
+    if not snippet or snippet.casefold() == title.casefold() or len(snippet) < 45:
+        return "A fonte nao forneceu contexto suficiente no trecho do feed; consulte a materia original."
+    sentences = re.split(r"(?<=[.!?])\s+", snippet)
+    summary = " ".join(sentence for sentence in sentences[:2] if sentence)
+    return summary[:650].rstrip()
 
-    import google.generativeai as genai
 
-    source_items = []
-    valid_ids = set()
-    primary_ids = set()
+def _local_market_interpretation(item: dict[str, Any]) -> tuple[str, list[str]]:
+    themes = set(item.get("themes") or [])
+    assets = item.get("assets") or []
+    if "Política" in themes:
+        interpretation = "O desdobramento pode alterar expectativas fiscais, regulatórias ou comerciais. O efeito depende do conteúdo e da implementação; a manchete, por si só, não define direção."
+        channels = ["Ibov/USDBRL: possível repricing de risco local, condicionado aos detalhes"]
+    elif "Brasil" in themes:
+        interpretation = "A notícia pode influenciar expectativas sobre atividade, inflação, política monetária ou risco fiscal brasileiro. A direcao depende dos dados e da resposta dos ativos."
+        channels = ["DI/real/IBOV: acompanhar a transmissao para juros, cambio e acoes"]
+    elif "Fed/Juros EUA" in themes or "Inflação" in themes:
+        interpretation = "O tema pode alterar expectativas para a trajetoria de juros e rendimentos nos EUA. A leitura depende da surpresa frente ao esperado e da comunicacao oficial."
+        channels = ["Treasuries/DXY: sensiveis a expectativas de juros", "S&P/Nasdaq: sensiveis a juros de desconto"]
+    elif "Atividade" in themes:
+        interpretation = "Indicadores de atividade podem mudar a leitura de crescimento e a expectativa de juros. Sem comparacao com consenso e revisoes, nao e possivel inferir surpresa ou direcao."
+        channels = ["Treasuries/bolsas: reacao depende da surpresa e do regime macro"]
+    elif "Petróleo/Energia" in themes or "Geopolítica" in themes:
+        interpretation = "O evento pode afetar premio de risco, oferta de energia ou demanda por protecao. A magnitude depende da duracao e da confirmacao por dados de mercado."
+        channels = ["Petroleo/ouro: possivel sensibilidade a oferta e risco", "Inflacao/juros: eventual transmissao depende da persistencia"]
+    elif "China" in themes:
+        interpretation = "Noticias sobre a China podem alterar expectativas de demanda por commodities e crescimento global. A direcao depende das medidas efetivas e dos dados subsequentes."
+        channels = ["Commodities/BRL: possivel canal via demanda e comercio"]
+    elif "Crédito" in themes:
+        interpretation = "Mudancas nas condicoes de credito podem afetar custo de financiamento e apetite a risco. E necessario acompanhar spreads e precos para confirmar a transmissao."
+        channels = ["Spreads/bolsas: possivel canal via condicoes financeiras"]
+    elif "Cripto" in themes:
+        interpretation = "O tema pode afetar ativos digitais diretamente; a transmissao para outros mercados depende de liquidez, regulacao e apetite a risco."
+        channels = ["Cripto: efeito direto depende dos detalhes do evento"]
+    else:
+        interpretation = "O trecho disponivel nao permite estabelecer um canal macro especifico. Trate a relacao com os mercados como inconclusiva ate consultar a materia original."
+        channels = []
+
+    relevant_assets = [asset for asset in assets if asset not in {"Mercado Global", "Cripto"}]
+    if relevant_assets and channels:
+        channels[-1] += f"; ativos monitorados no feed: {', '.join(relevant_assets[:3])}"
+    return interpretation, channels[:3]
+
+
+def generate_daily_macro_briefing(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Create a deterministic, source-linked daily briefing without an AI API."""
+    stories = []
     for item in items[:12]:
         item_id = str(item.get("id", ""))
         if not item_id:
             continue
-        valid_ids.add(item_id)
-        if str(item.get("source", "")).strip().lower() in PRIMARY_SOURCE_NAMES:
-            primary_ids.add(item_id)
-        source_items.append({
-            "id": item_id,
-            "headline": str(item.get("title", ""))[:400],
-            "snippet": str(item.get("summary", ""))[:700],
-            "publisher": str(item.get("source", ""))[:120],
-            "published": str(item.get("published_str", "")),
-            "link": str(item.get("link", ""))[:500],
-            "themes": item.get("themes", [])[:4],
-            "assets": item.get("assets", [])[:5],
-            "sections": item.get("sections", [])[:4],
-            "breaking": bool(item.get("breaking")),
-            "bias_rule": item.get("bias", "Neutro"),
+        source = str(item.get("source", "")).strip().lower()
+        summary = _local_news_summary(item)
+        interpretation, channels = _local_market_interpretation(item)
+        has_context = not summary.startswith("A fonte nao forneceu")
+        primary_confirmation = source in PRIMARY_SOURCE_NAMES
+        confidence = "Alta" if has_context and primary_confirmation else ("Media" if has_context else "Baixa")
+        stories.append({
+            "headline": str(item.get("title", ""))[:240],
+            "summary": summary,
+            "interpretation": interpretation,
+            "market_channels": channels,
+            "confidence": confidence,
+            "sections": [str(value)[:40] for value in item.get("sections", [])[:4]],
+            "source_ids": [item_id],
+            "primary_confirmation": primary_confirmation,
+            "limitation": "Resumo local baseado somente no trecho do feed; a materia completa nao foi analisada.",
         })
-
-    prompt = f"""Voce e editor de um briefing macro diario para traders brasileiros.
-Use exclusivamente as manchetes e trechos fornecidos. Nao invente fatos, numeros, contexto, consenso, movimentos de preco ou causalidade. Se o trecho nao sustentar um resumo, diga isso explicitamente. Diferencie fato reportado de interpretacao. Os canais de mercado devem ser possibilidades condicionais, nunca previsoes, e devem indicar ativo/canal e racional curto. Nao trate classificacoes heuristicas como fatos.
-
-Retorne SOMENTE JSON valido com este formato:
-{{"stories":[{{"headline":"manchete editorial curta em pt-BR","summary":"resumo factual, 1-2 frases","interpretation":"por que pode importar, separando o que esta confirmado do que e inferencia","market_channels":["ativo/canal: mecanismo possivel"],"confidence":"Alta|Media|Baixa","source_ids":["id fornecido"],"limitation":"limite de evidencia, ou string vazia"}}]}}
-Selecione ate 5 historias distintas, buscando variedade entre Brasil, politica, macroeconomia mundial e breaking news. Dê destaque a breaking news apenas quando houver marcador claro de urgencia e publicacao recente. Agrupe cobertura do mesmo evento quando isso estiver evidente. Cada historia deve citar um ou mais source_ids existentes; nao crie ids. Limite a 3 canais por historia. Texto conciso, profissional, sem recomendacao de compra/venda.
-
-Noticias coletadas (JSON):
-{json.dumps(source_items, ensure_ascii=False)}"""
-
-    genai.configure(api_key=api_key)
-    model_name = os.getenv("MACRO_NEWS_GEMINI_MODEL", "gemini-2.0-flash")
-    response = genai.GenerativeModel(model_name).generate_content(
-        prompt,
-        generation_config={"temperature": 0.2, "response_mime_type": "application/json"},
-    )
-    text = (getattr(response, "text", "") or "").strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE)
-    result = json.loads(text)
-    stories = result.get("stories") if isinstance(result, dict) else None
-    if not isinstance(stories, list):
-        raise ValueError("A IA retornou um formato de briefing invalido.")
-
-    validated = []
-    for story in stories[:5]:
-        if not isinstance(story, dict):
-            continue
-        refs = [str(value) for value in story.get("source_ids", []) if str(value) in valid_ids]
-        if not refs:
-            continue
-        confirmed_by_primary = any(value in primary_ids for value in refs)
-        validated.append({
-            "headline": str(story.get("headline", ""))[:240],
-            "summary": str(story.get("summary", ""))[:900],
-            "interpretation": str(story.get("interpretation", ""))[:1000],
-            "market_channels": [str(value)[:240] for value in story.get("market_channels", [])[:3]],
-            "confidence": str(story.get("confidence", "Baixa"))[:20],
-            "sections": [str(value)[:40] for value in story.get("sections", [])[:4]],
-            "source_ids": refs,
-            "primary_confirmation": confirmed_by_primary,
-            "limitation": str(story.get("limitation", ""))[:500],
-        })
-    if not validated:
-        raise ValueError("A IA nao retornou historias com fontes verificaveis.")
+    if not stories:
+        raise ValueError("Nao ha noticias validas para montar o briefing.")
+    stories.sort(key=lambda story: (story["confidence"] == "Alta", story["confidence"] == "Media"), reverse=True)
     return {
         "generated_at": datetime.now(BR_TZ).strftime("%d/%m/%Y %H:%M:%S"),
-        "model": model_name,
-        "stories": validated,
+        "model": "Local deterministico",
+        "stories": stories[:5],
     }
 
 

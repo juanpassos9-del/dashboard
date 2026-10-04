@@ -1668,11 +1668,11 @@ def get_macro_news_hub_cached(schema_version="macro_news_hub_v1"):
     return build_macro_news_hub(limit=24)
 
 
-@st.cache_data(ttl=21600, show_spinner=False)
-def get_macro_news_briefing_cached(items_json: str, _api_key: str):
+@st.cache_data(ttl=900, show_spinner=False)
+def get_macro_news_briefing_cached(items_json: str):
     from execution.news_macro_hub import generate_daily_macro_briefing
 
-    return generate_daily_macro_briefing(json.loads(items_json), _api_key)
+    return generate_daily_macro_briefing(json.loads(items_json))
 
 
 def render_macro_news_hub():
@@ -1689,36 +1689,29 @@ def render_macro_news_hub():
 
     briefing_items = items[:12]
     briefing_json = json.dumps(briefing_items, ensure_ascii=False, sort_keys=True)
-    briefing_key = "|".join(str(item.get("id", "")) for item in briefing_items)
+    briefing_key = "local_v1|" + "|".join(str(item.get("id", "")) for item in briefing_items)
     left, right = st.columns([1, 3])
     with left:
         generate_briefing = st.button(
             "Gerar briefing do dia",
             key="macro_news_generate_daily_briefing",
-            help="Usa a API Gemini configurada no app; a resposta fica em cache por 6 horas.",
+            help="Gera resumo e interpretação locais, sem depender de API de IA.",
             use_container_width=True,
         )
     with right:
-        st.caption("Resumo editorial e leitura de mercado com fontes clicáveis. A análise é condicional, não uma confirmação de causalidade nem recomendação de operação.")
+        st.caption("Resumo do trecho publicado pela fonte e leitura macro local. Sem chamada a IA externa; canais de mercado são hipóteses, não recomendação de operação.")
 
     if generate_briefing:
-        api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
-        if not api_key:
-            try:
-                api_key = str(st.secrets.get("GOOGLE_API_KEY") or st.secrets.get("GEMINI_API_KEY") or "")
-            except Exception:
-                api_key = ""
         try:
-            with st.spinner("Preparando briefing com base nas fontes coletadas..."):
-                st.session_state["macro_news_briefing"] = get_macro_news_briefing_cached(briefing_json, api_key)
-                st.session_state["macro_news_briefing_key"] = briefing_key
+            st.session_state["macro_news_briefing"] = get_macro_news_briefing_cached(briefing_json)
+            st.session_state["macro_news_briefing_key"] = briefing_key
         except Exception as e:
             st.warning(f"Nao foi possivel gerar o briefing: {sanitize_text(str(e))}")
 
     briefing = st.session_state.get("macro_news_briefing")
     if briefing and st.session_state.get("macro_news_briefing_key") == briefing_key:
         st.markdown("#### Principais notícias do dia")
-        st.caption(f"Gerado em {briefing.get('generated_at', '---')} · Gemini · evidências limitadas ao título e trecho exibidos pelas fontes")
+        st.caption(f"Gerado em {briefing.get('generated_at', '---')} · {briefing.get('model', 'Local')} · sem chamada externa")
         for story in briefing.get("stories", []):
             with st.container():
                 st.text(f"{story.get('headline', '')} · Confiança {story.get('confidence', 'Baixa')}")
