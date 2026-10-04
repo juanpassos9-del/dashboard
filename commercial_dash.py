@@ -1668,6 +1668,13 @@ def get_macro_news_hub_cached(schema_version="macro_news_hub_v1"):
     return build_macro_news_hub(limit=24)
 
 
+@st.cache_data(ttl=21600, show_spinner=False)
+def get_macro_news_briefing_cached(items_json: str, _api_key: str):
+    from execution.news_macro_hub import generate_daily_macro_briefing
+
+    return generate_daily_macro_briefing(json.loads(items_json), _api_key)
+
+
 def render_macro_news_hub():
     try:
         hub = get_macro_news_hub_cached("macro_news_hub_v1")
@@ -1679,6 +1686,66 @@ def render_macro_news_hub():
     if not items:
         st.info("Hub de noticias macro aguardando manchetes relevantes das fontes prioritarias.")
         return
+
+    briefing_items = items[:12]
+    briefing_json = json.dumps(briefing_items, ensure_ascii=False, sort_keys=True)
+    briefing_key = "|".join(str(item.get("id", "")) for item in briefing_items)
+    left, right = st.columns([1, 3])
+    with left:
+        generate_briefing = st.button(
+            "Gerar briefing do dia",
+            key="macro_news_generate_daily_briefing",
+            help="Usa a API Gemini configurada no app; a resposta fica em cache por 6 horas.",
+            use_container_width=True,
+        )
+    with right:
+        st.caption("Resumo editorial e leitura de mercado com fontes clicáveis. A análise é condicional, não uma confirmação de causalidade nem recomendação de operação.")
+
+    if generate_briefing:
+        api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
+        if not api_key:
+            try:
+                api_key = str(st.secrets.get("GOOGLE_API_KEY") or st.secrets.get("GEMINI_API_KEY") or "")
+            except Exception:
+                api_key = ""
+        try:
+            with st.spinner("Preparando briefing com base nas fontes coletadas..."):
+                st.session_state["macro_news_briefing"] = get_macro_news_briefing_cached(briefing_json, api_key)
+                st.session_state["macro_news_briefing_key"] = briefing_key
+        except Exception as e:
+            st.warning(f"Nao foi possivel gerar o briefing: {sanitize_text(str(e))}")
+
+    briefing = st.session_state.get("macro_news_briefing")
+    if briefing and st.session_state.get("macro_news_briefing_key") == briefing_key:
+        st.markdown("#### Principais notícias do dia")
+        st.caption(f"Gerado em {briefing.get('generated_at', '---')} · Gemini · evidências limitadas ao título e trecho exibidos pelas fontes")
+        for story in briefing.get("stories", []):
+            with st.container():
+                st.text(f"{story.get('headline', '')} · Confiança {story.get('confidence', 'Baixa')}")
+                if story.get("primary_confirmation"):
+                    st.caption("Há fonte primária/oficial entre as referências coletadas.")
+                else:
+                    st.caption("Sem confirmação primária/oficial nesta amostra de fontes.")
+                st.markdown("**Resumo factual**")
+                st.text(str(story.get("summary", "")))
+                st.markdown("**Interpretação**")
+                st.text(str(story.get("interpretation", "")))
+                channels = story.get("market_channels") or []
+                if channels:
+                    st.markdown("**Possíveis canais de mercado**")
+                    st.text(" · ".join(str(value) for value in channels))
+                    st.caption("Canais hipotéticos; a reação dos preços não foi verificada por esta análise.")
+                if story.get("limitation"):
+                    st.text("Limite da evidência: " + str(story["limitation"]))
+                source_links = []
+                for item in briefing_items:
+                    if item.get("id") in story.get("source_ids", []):
+                        url = safe_external_url(item.get("link"))
+                        label = sanitize_text(f"{item.get('source', 'Fonte')} · {item.get('published_str', '')}")
+                        source_links.append(f"<a href=\"{url}\" target=\"_blank\" rel=\"noopener noreferrer\">{label}</a>")
+                if source_links:
+                    st.markdown("Fontes: " + " · ".join(source_links), unsafe_allow_html=True)
+        st.divider()
 
     def chip_list(values):
         return "".join(f"<span class='mnh-chip'>{sanitize_text(str(value))}</span>" for value in values[:4])

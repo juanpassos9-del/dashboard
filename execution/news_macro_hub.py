@@ -35,6 +35,15 @@ GOOGLE_NEWS_QUERIES = {
     "Energia e Geopolítica": ("nivel_2", '(oil OR crude OR Brent OR OPEC OR sanctions OR geopolitical) markets'),
     "China e Commodities": ("nivel_2", '(China OR PBOC) (economy OR commodities OR exports OR stimulus)'),
 }
+PRIMARY_SOURCE_NAMES = {
+    "federal reserve",
+    "ecb",
+    "banco central do brasil",
+    "bcb",
+    "u.s. treasury",
+    "imf",
+    "world bank",
+}
 
 RSS_SOURCES = {
     "Bloomberg": ("nivel_1", "https://feeds.bloomberg.com/markets/news.rss"),
@@ -362,6 +371,88 @@ def build_macro_news_hub(limit: int = 24, max_age_hours: int = 24, force: bool =
     }
     _save_cache(payload)
     return payload
+
+
+def generate_daily_macro_briefing(items: list[dict[str, Any]], api_key: str) -> dict[str, Any]:
+    """Create a sourced editorial digest from already-collected headlines/snippets."""
+    if not api_key:
+        raise ValueError("Configure GOOGLE_API_KEY ou GEMINI_API_KEY para gerar o briefing.")
+    if not items:
+        raise ValueError("Nao ha noticias para analisar.")
+
+    import google.generativeai as genai
+
+    source_items = []
+    valid_ids = set()
+    primary_ids = set()
+    for item in items[:12]:
+        item_id = str(item.get("id", ""))
+        if not item_id:
+            continue
+        valid_ids.add(item_id)
+        if str(item.get("source", "")).strip().lower() in PRIMARY_SOURCE_NAMES:
+            primary_ids.add(item_id)
+        source_items.append({
+            "id": item_id,
+            "headline": str(item.get("title", ""))[:400],
+            "snippet": str(item.get("summary", ""))[:700],
+            "publisher": str(item.get("source", ""))[:120],
+            "published": str(item.get("published_str", "")),
+            "link": str(item.get("link", ""))[:500],
+            "themes": item.get("themes", [])[:4],
+            "assets": item.get("assets", [])[:5],
+            "bias_rule": item.get("bias", "Neutro"),
+        })
+
+    prompt = f"""Voce e editor de um briefing macro diario para traders brasileiros.
+Use exclusivamente as manchetes e trechos fornecidos. Nao invente fatos, numeros, contexto, consenso, movimentos de preco ou causalidade. Se o trecho nao sustentar um resumo, diga isso explicitamente. Diferencie fato reportado de interpretacao. Os canais de mercado devem ser possibilidades condicionais, nunca previsoes, e devem indicar ativo/canal e racional curto. Nao trate classificacoes heuristicas como fatos.
+
+Retorne SOMENTE JSON valido com este formato:
+{{"stories":[{{"headline":"manchete editorial curta em pt-BR","summary":"resumo factual, 1-2 frases","interpretation":"por que pode importar, separando o que esta confirmado do que e inferencia","market_channels":["ativo/canal: mecanismo possivel"],"confidence":"Alta|Media|Baixa","source_ids":["id fornecido"],"limitation":"limite de evidencia, ou string vazia"}}]}}
+Selecione ate 5 historias distintas, priorizando impacto macro e atualidade. Agrupe cobertura do mesmo evento quando isso estiver evidente. Cada historia deve citar um ou mais source_ids existentes; nao crie ids. Limite a 3 canais por historia. Texto conciso, profissional, sem recomendacao de compra/venda.
+
+Noticias coletadas (JSON):
+{json.dumps(source_items, ensure_ascii=False)}"""
+
+    genai.configure(api_key=api_key)
+    model_name = os.getenv("MACRO_NEWS_GEMINI_MODEL", "gemini-2.0-flash")
+    response = genai.GenerativeModel(model_name).generate_content(
+        prompt,
+        generation_config={"temperature": 0.2, "response_mime_type": "application/json"},
+    )
+    text = (getattr(response, "text", "") or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE)
+    result = json.loads(text)
+    stories = result.get("stories") if isinstance(result, dict) else None
+    if not isinstance(stories, list):
+        raise ValueError("A IA retornou um formato de briefing invalido.")
+
+    validated = []
+    for story in stories[:5]:
+        if not isinstance(story, dict):
+            continue
+        refs = [str(value) for value in story.get("source_ids", []) if str(value) in valid_ids]
+        if not refs:
+            continue
+        confirmed_by_primary = any(value in primary_ids for value in refs)
+        validated.append({
+            "headline": str(story.get("headline", ""))[:240],
+            "summary": str(story.get("summary", ""))[:900],
+            "interpretation": str(story.get("interpretation", ""))[:1000],
+            "market_channels": [str(value)[:240] for value in story.get("market_channels", [])[:3]],
+            "confidence": str(story.get("confidence", "Baixa"))[:20],
+            "source_ids": refs,
+            "primary_confirmation": confirmed_by_primary,
+            "limitation": str(story.get("limitation", ""))[:500],
+        })
+    if not validated:
+        raise ValueError("A IA nao retornou historias com fontes verificaveis.")
+    return {
+        "generated_at": datetime.now(BR_TZ).strftime("%d/%m/%Y %H:%M:%S"),
+        "model": model_name,
+        "stories": validated,
+    }
 
 
 if __name__ == "__main__":
