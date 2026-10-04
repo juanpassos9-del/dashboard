@@ -1763,14 +1763,17 @@ def render_macro_news_hub():
         score = sanitize_text(str(item.get("score", "")))
         themes = chip_list(item.get("themes") or [])
         assets = chip_list(item.get("assets") or [])
+        sections = chip_list(item.get("sections") or [])
+        breaking = "<span class='mnh-breaking'>BREAKING</span>" if item.get("breaking") else ""
         cards.append(f"""
             <a class="mnh-card {impact_class}" href="{link}" target="_blank" rel="noopener noreferrer">
               <div class="mnh-top">
-                <span class="mnh-impact">{impact}</span>
+                <span>{breaking}<span class="mnh-impact">{impact}</span></span>
                 <span class="mnh-source">{source} · {provider} · {published}</span>
               </div>
               <div class="mnh-title">{title}</div>
               <div class="mnh-row"><b>Vies:</b> {bias} <b>Score:</b> {score}</div>
+              <div class="mnh-tags">{sections}</div>
               <div class="mnh-tags">{themes}{assets}</div>
             </a>
         """)
@@ -1789,6 +1792,7 @@ def render_macro_news_hub():
       .mnh-card.low{border-left-color:#38BDF8;}
       .mnh-top{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:7px;}
       .mnh-impact{font-size:.68rem;font-weight:950;color:#FFF;background:#263244;border-radius:999px;padding:3px 7px;}
+      .mnh-breaking{display:inline-block;margin-right:5px;font-size:.62rem;font-weight:950;color:#FFF;background:#DC2626;border-radius:3px;padding:3px 6px;}
       .mnh-card.high .mnh-impact{background:#B91C1C;}
       .mnh-card.medium .mnh-impact{background:#A16207;}
       .mnh-source{color:#94A3B8;font-size:.68rem;font-weight:800;text-align:right;}

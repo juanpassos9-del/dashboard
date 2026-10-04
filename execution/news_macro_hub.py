@@ -30,10 +30,10 @@ GOOGLE_NEWS_RSS_URL = "https://news.google.com/rss/search"
 
 # Keep queries focused to avoid turning the macro hub into a general news feed.
 GOOGLE_NEWS_QUERIES = {
-    "Macro Global": ("nivel_2", '(Fed OR FOMC OR inflation OR Treasury OR yields OR central bank) markets'),
-    "Brasil Macro": ("nivel_2", '(Brasil OR Brazil) (BCB OR Copom OR Selic OR fiscal OR Ibovespa)'),
-    "Energia e Geopolítica": ("nivel_2", '(oil OR crude OR Brent OR OPEC OR sanctions OR geopolitical) markets'),
-    "China e Commodities": ("nivel_2", '(China OR PBOC) (economy OR commodities OR exports OR stimulus)'),
+    "Brasil Macro": ("nivel_2", '(Brasil OR Brazil) (BCB OR Copom OR Selic OR fiscal OR Ibovespa OR PIB OR inflação)'),
+    "Política": ("nivel_2", '(política OR governo OR Congresso OR eleição OR Lula OR Câmara OR Senado OR STF) Brasil'),
+    "Macro Global": ("nivel_2", '(Fed OR FOMC OR inflation OR Treasury OR yields OR ECB OR central bank OR GDP) economy markets'),
+    "Breaking News": ("nivel_2", '("breaking news" OR "ultima hora" OR urgente OR "developing story") (markets OR economy OR Brazil OR Fed OR oil OR war)'),
 }
 PRIMARY_SOURCE_NAMES = {
     "federal reserve",
@@ -92,6 +92,8 @@ GDELT_QUERIES = {
 }
 
 THEME_RULES = [
+    ("Política", ["politics", "political", "politica", "política", "government", "governo", "congress", "congresso", "election", "eleição", "senado", "câmara", "stf", "parliament", "president", "presidente", "trump", "lula"]),
+    ("Breaking News", ["breaking", "ultima hora", "última hora", "urgent", "urgente", "just in", "developing story", "live updates"]),
     ("Fed/Juros EUA", ["fed", "fomc", "powell", "treasury", "yield", "rate cut", "rate hike", "bostic", "waller"]),
     ("Inflação", ["inflation", "cpi", "ppi", "pce", "prices", "breakeven", "inflação", "ipca"]),
     ("Atividade", ["payroll", "jobs", "unemployment", "pmi", "ism", "gdp", "retail sales", "industrial production"]),
@@ -118,6 +120,8 @@ HIGH_IMPACT_TERMS = [
     "rate cut", "rate hike", "oil", "opec", "war", "sanction", "tariff", "china",
     "brazil", "bcb", "copom", "selic", "fiscal", "bitcoin", "etf",
 ]
+
+BREAKING_TERMS = ["breaking", "ultima hora", "última hora", "urgent", "urgente", "just in", "developing story", "live updates"]
 
 NOISE_TERMS = [
     "sports", "celebrity", "movie", "music", "crime", "viral", "entertainment",
@@ -191,10 +195,11 @@ def _classify(item: dict[str, Any]) -> dict[str, Any] | None:
 
     themes = [name for name, terms in THEME_RULES if any(term in text for term in terms)]
     assets = [name for name, terms in ASSET_RULES if any(term in text for term in terms)]
-    keyword_score = sum(4 for term in HIGH_IMPACT_TERMS if term in text)
     recency_hours = max(0.0, (datetime.now(timezone.utc).timestamp() - float(item.get("timestamp", 0))) / 3600)
+    is_breaking = recency_hours <= 6 and any(term in text for term in BREAKING_TERMS)
+    keyword_score = sum(4 for term in HIGH_IMPACT_TERMS if term in text)
     recency_score = max(0, 12 - recency_hours * 1.5)
-    score = _source_weight(str(item.get("level", ""))) + keyword_score + recency_score + len(themes) * 2 + len(assets) * 2
+    score = _source_weight(str(item.get("level", ""))) + keyword_score + recency_score + len(themes) * 2 + len(assets) * 2 + (8 if is_breaking else 0)
     impact = "ALTO" if score >= 38 else ("MEDIO" if score >= 25 else "BAIXO")
 
     risk_off_terms = ["war", "sanction", "tariff", "inflation", "rate hike", "yield rise", "oil jumps", "default"]
@@ -213,6 +218,15 @@ def _classify(item: dict[str, Any]) -> dict[str, Any] | None:
         "themes": themes[:3] or ["Macro"],
         "assets": assets[:4] or ["Mercado Global"],
         "bias": bias,
+        "breaking": is_breaking,
+        "sections": [
+            section for section, matched in (
+                ("Brasil", "Brasil" in themes),
+                ("Política", "Política" in themes),
+                ("Macro global", any(theme in themes for theme in ("Fed/Juros EUA", "Inflação", "Atividade", "Petróleo/Energia", "China", "Crédito"))),
+                ("Breaking news", is_breaking),
+            ) if matched
+        ] or ["Mercados"],
     }
 
 
@@ -352,7 +366,7 @@ def build_macro_news_hub(limit: int = 24, max_age_hours: int = 24, force: bool =
         if item:
             classified.append(item)
 
-    classified.sort(key=lambda item: (item.get("impact") == "ALTO", item.get("score", 0), item.get("timestamp", 0)), reverse=True)
+    classified.sort(key=lambda item: (item.get("breaking", False), item.get("impact") == "ALTO", item.get("score", 0), item.get("timestamp", 0)), reverse=True)
     if not classified and cache.get("items"):
         cache["stale"] = True
         return cache
@@ -401,6 +415,8 @@ def generate_daily_macro_briefing(items: list[dict[str, Any]], api_key: str) -> 
             "link": str(item.get("link", ""))[:500],
             "themes": item.get("themes", [])[:4],
             "assets": item.get("assets", [])[:5],
+            "sections": item.get("sections", [])[:4],
+            "breaking": bool(item.get("breaking")),
             "bias_rule": item.get("bias", "Neutro"),
         })
 
@@ -409,7 +425,7 @@ Use exclusivamente as manchetes e trechos fornecidos. Nao invente fatos, numeros
 
 Retorne SOMENTE JSON valido com este formato:
 {{"stories":[{{"headline":"manchete editorial curta em pt-BR","summary":"resumo factual, 1-2 frases","interpretation":"por que pode importar, separando o que esta confirmado do que e inferencia","market_channels":["ativo/canal: mecanismo possivel"],"confidence":"Alta|Media|Baixa","source_ids":["id fornecido"],"limitation":"limite de evidencia, ou string vazia"}}]}}
-Selecione ate 5 historias distintas, priorizando impacto macro e atualidade. Agrupe cobertura do mesmo evento quando isso estiver evidente. Cada historia deve citar um ou mais source_ids existentes; nao crie ids. Limite a 3 canais por historia. Texto conciso, profissional, sem recomendacao de compra/venda.
+Selecione ate 5 historias distintas, buscando variedade entre Brasil, politica, macroeconomia mundial e breaking news. Dê destaque a breaking news apenas quando houver marcador claro de urgencia e publicacao recente. Agrupe cobertura do mesmo evento quando isso estiver evidente. Cada historia deve citar um ou mais source_ids existentes; nao crie ids. Limite a 3 canais por historia. Texto conciso, profissional, sem recomendacao de compra/venda.
 
 Noticias coletadas (JSON):
 {json.dumps(source_items, ensure_ascii=False)}"""
@@ -442,6 +458,7 @@ Noticias coletadas (JSON):
             "interpretation": str(story.get("interpretation", ""))[:1000],
             "market_channels": [str(value)[:240] for value in story.get("market_channels", [])[:3]],
             "confidence": str(story.get("confidence", "Baixa"))[:20],
+            "sections": [str(value)[:40] for value in story.get("sections", [])[:4]],
             "source_ids": refs,
             "primary_confirmation": confirmed_by_primary,
             "limitation": str(story.get("limitation", ""))[:500],

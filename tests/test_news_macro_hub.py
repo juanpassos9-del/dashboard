@@ -1,11 +1,29 @@
 import json
 from unittest.mock import patch
 
-from execution.news_macro_hub import _google_news_source, generate_daily_macro_briefing
+from datetime import datetime, timezone
+
+from execution.news_macro_hub import _classify, _google_news_source, generate_daily_macro_briefing
 
 
 def test_google_news_source_reads_structured_publisher():
     assert _google_news_source({"source": {"title": "Agência Brasil"}}) == "Agência Brasil"
+
+
+def test_classification_marks_brazil_politics_and_recent_breaking_news():
+    item = _classify({
+        "id": "news-breaking",
+        "title": "Última hora: Congresso aprova medida fiscal no Brasil",
+        "summary": "",
+        "source": "Agência Brasil",
+        "level": "nivel_2",
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+    })
+
+    assert item["breaking"] is True
+    assert "Política" in item["themes"]
+    assert "Brasil" in item["themes"]
+    assert {"Brasil", "Política", "Breaking news"}.issubset(item["sections"])
 
 
 def test_daily_briefing_keeps_only_known_source_references():
