@@ -12555,9 +12555,36 @@ def sidebar_news():
         st.caption(warning)
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def get_sidebar_clock_calendar_events():
+    calendar_data = fetch_app_state_cached("calendario_economico")
+    if not calendar_data:
+        for path in (
+            os.path.join(os.path.dirname(__file__), "calendario_economico.json"),
+            os.path.join(os.path.dirname(__file__), "execution", "calendario_economico.json"),
+        ):
+            try:
+                if os.path.exists(path):
+                    with open(path, "r", encoding="utf-8") as calendar_file:
+                        calendar_data = json.load(calendar_file)
+                    if calendar_data:
+                        break
+            except Exception:
+                continue
+    from execution.market_clock import select_upcoming_calendar_events
+
+    events = select_upcoming_calendar_events(calendar_data, limit=12)
+    for event in events:
+        event["event"] = html.escape(event["event"], quote=True)
+        event["icon"] = html.escape(event["icon"], quote=True)
+        event["impact_label"] = {"HIGH": "ALTO", "MEDIUM": "MÉDIO", "LOW": "BAIXO"}[event["impact"]]
+    return events
+
+
 def sidebar_clock():
-    components.html(
-        """
+    calendar_json = json.dumps(get_sidebar_clock_calendar_events(), ensure_ascii=False)
+    calendar_json = calendar_json.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    clock_html = """
         <div class="clock-card">
           <div class="clock-top">
             <span>Horario Brasilia</span>
@@ -12589,9 +12616,16 @@ def sidebar_clock():
           .clock-event-time { color:#F8FAFC; font-size:.76rem; font-weight:950; font-variant-numeric:tabular-nums; }
           .clock-event-label { color:#CBD5E1; font-size:.70rem; font-weight:800; margin-left:5px; }
           .clock-event-status { font-size:.60rem; font-weight:950; letter-spacing:.04em; }
+          .clock-calendar-head { color:#94A3B8; font-size:.58rem; font-weight:900; letter-spacing:.06em; margin:9px 2px 4px; text-transform:uppercase; }
+          .clock-calendar { display:flex; align-items:center; justify-content:space-between; gap:7px; border:1px solid rgba(56,189,248,.30); border-left:3px solid #38BDF8; border-radius:6px; padding:6px 7px; background:rgba(8,47,73,.24); }
+          .clock-calendar-main { min-width:0; flex:1; }
+          .clock-calendar-meta { color:#7DD3FC; font-size:.61rem; font-weight:900; margin-left:5px; }
+          .clock-calendar-name { display:block; color:#E2E8F0; font-size:.66rem; line-height:1.2; font-weight:750; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:3px; }
+          .clock-calendar-countdown { color:#38BDF8; font-size:.59rem; font-weight:950; white-space:nowrap; }
         </style>
         <script>
           const tz = "America/Sao_Paulo";
+          const calendarEvents = __CLOCK_CALENDAR_EVENTS__;
           const sessions = [
             { time: "09:00", label: "Abertura BR" },
             { time: "10:00", label: "Abertura acoes BR" },
@@ -12623,6 +12657,31 @@ def sidebar_clock():
             if (status === "HOJE") return { color:"#38BDF8", bg:"rgba(56,189,248,.08)", border:"rgba(56,189,248,.28)" };
             return { color:"#64748B", bg:"rgba(15,23,42,.45)", border:"rgba(51,65,85,.70)" };
           }
+          function renderNextCalendarEvent(now) {
+            const next = calendarEvents.find((item) => item.timestamp * 1000 >= now.getTime());
+            if (!next) return `<div class="clock-calendar"><span class="clock-calendar-name">Sem próximos eventos no calendário</span></div>`;
+            const eventDate = new Date(next.timestamp * 1000);
+            const diff = Math.max(0, eventDate.getTime() - now.getTime());
+            let countdown;
+            if (diff < 60000) countdown = "AGORA";
+            else if (diff < 3600000) countdown = `EM ${Math.ceil(diff / 60000)} MIN`;
+            else if (diff < 86400000) {
+              const hours = Math.floor(diff / 3600000);
+              const minutes = Math.floor((diff % 3600000) / 60000);
+              countdown = `EM ${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+            } else {
+              const dayMonth = new Intl.DateTimeFormat("pt-BR", { timeZone: tz, day: "2-digit", month: "2-digit" }).format(eventDate);
+              countdown = `${dayMonth} ${next.time}`;
+            }
+            const impactColor = next.impact === "HIGH" ? "#F87171" : (next.impact === "MEDIUM" ? "#FBBF24" : "#7DD3FC");
+            return `<div class="clock-calendar" style="border-left-color:${impactColor};">
+              <div class="clock-calendar-main">
+                <span class="clock-event-time">${next.time}</span><span class="clock-calendar-meta">${next.currency} · ${next.impact_label}</span>
+                <span class="clock-calendar-name">${next.icon ? next.icon + " " : ""}${next.event}</span>
+              </div>
+              <span class="clock-calendar-countdown" style="color:${impactColor};">${countdown}</span>
+            </div>`;
+          }
           function renderEvents(nowMin) {
             let nextIndex = sessions.findIndex((item) => minutesOf(item.time) > nowMin);
             return sessions.map((item, index) => {
@@ -12639,19 +12698,22 @@ def sidebar_clock():
               </div>`;
             }).join("");
           }
+          function renderClockEvents(nowMin, now) {
+            return renderEvents(nowMin) + `<div class="clock-calendar-head">Próximo evento econômico</div>` + renderNextCalendarEvent(now);
+          }
           function tickClock() {
             const now = new Date();
             const p = partsInSaoPaulo(now);
             document.getElementById("tts-clock-time").textContent = timeFmt.format(now);
             document.getElementById("tts-clock-date").textContent = dateFmt.format(now).replace(".", "");
-            document.getElementById("tts-clock-events").innerHTML = renderEvents(minutesNow(p));
+            document.getElementById("tts-clock-events").innerHTML = renderClockEvents(minutesNow(p), now);
           }
           tickClock();
           setInterval(tickClock, 1000);
         </script>
-        """,
-        height=226,
-    )
+        """
+    clock_html = clock_html.replace("__CLOCK_CALENDAR_EVENTS__", calendar_json)
+    components.html(clock_html, height=284)
 
 auth_user = require_authenticated_user()
 auth_persistence_warning = st.session_state.pop("auth_persistence_warning", None)
