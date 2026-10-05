@@ -12756,7 +12756,7 @@ def sidebar_clock():
         """
     clock_html = clock_html.replace("__CLOCK_CALENDAR_EVENTS__", calendar_json)
     clock_html = clock_html.replace("__MARKET_SESSION_SCHEDULES__", sessions_json)
-    components.html(clock_html, height=322)
+    components.html(clock_html, height=380)
 
 auth_user = require_authenticated_user()
 auth_persistence_warning = st.session_state.pop("auth_persistence_warning", None)
