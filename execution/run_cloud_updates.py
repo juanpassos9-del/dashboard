@@ -29,22 +29,7 @@ def sync_to_supabase(key, value):
 
 print("=== INICIANDO ATUALIZAÇÕES EM NUVEM ===")
 
-# 1. Mercados Globais
-try:
-    print("\n[1/4] Atualizando Mercados Globais...")
-    from fetch_global_markets import fetch_global_data
-    fetch_global_data()
-    # Tenta achar o arquivo na raiz ou na pasta de execução
-    paths = ["mercados_globais.json", "execution/mercados_globais.json"]
-    for p in paths:
-        if os.path.exists(p):
-            with open(p, "r") as f:
-                sync_to_supabase("mercados_globais", json.load(f))
-            break
-except Exception as e:
-    print(f"[!] Erro em Mercados Globais: {e}")
-
-# 2. IA Analista
+# 1. IA Analista
 try:
     print("\n[2/4] Atualizando IA Analista...")
     from ai_analyst import generate_macro_insight

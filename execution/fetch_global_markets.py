@@ -55,6 +55,8 @@ EXTENDED_HOURS_TICKERS = {
     "EEM", "EMB", "EWZ", "EWZS", "ILF", "PBR", "VALE", "ITUB", "BBD", "BDORY",
     "SPY", "XOP", "XLE", "XLK", "XLP", "XLB", "XLI", "XLV", "XLRE", "XBI", "XLY", "XLC",
 }
+PREMARKET_CHANGE_TICKERS = {"BBD", "BDORY", "ITUB", "VALE", "PBR", "EWZ", "EWZS", "EEM"}
+PREMARKET_CHANGE_CUTOFF = (10, 30)
 
 
 TWELVE_SYMBOL_MAP = {
@@ -225,7 +227,15 @@ def _round_price(value):
     return float(round(value, 2) if abs(value) > 10 else round(value, 4))
 
 
-def _extended_hours_snapshot(ticker_symbol, ticker_df):
+def _uses_premarket_change(ticker_symbol, now_br=None):
+    if ticker_symbol not in PREMARKET_CHANGE_TICKERS:
+        return False
+    now_br = now_br or datetime.now(timezone.utc).astimezone(BR_TZ)
+    cutoff_hour, cutoff_minute = PREMARKET_CHANGE_CUTOFF
+    return (now_br.hour, now_br.minute) < (cutoff_hour, cutoff_minute)
+
+
+def _extended_hours_snapshot(ticker_symbol, ticker_df, now_br=None):
     """Separa sessao regular de pre/pos-market para ativos listados nos EUA."""
     if ticker_symbol not in EXTENDED_HOURS_TICKERS or ticker_df is None or ticker_df.empty:
         return {}
@@ -254,7 +264,10 @@ def _extended_hours_snapshot(ticker_symbol, ticker_df):
         if not closes:
             return {}
 
-        now_ny = datetime.now(timezone.utc).astimezone(NY_TZ)
+        now_utc = datetime.now(timezone.utc)
+        now_br = now_br or now_utc.astimezone(BR_TZ)
+        now_br = now_br.astimezone(BR_TZ)
+        now_ny = now_br.astimezone(NY_TZ)
         session_date = now_ny.date()
         session_minutes = now_ny.hour * 60 + now_ny.minute
         is_weekday = now_ny.weekday() < 5
@@ -296,12 +309,31 @@ def _extended_hours_snapshot(ticker_symbol, ticker_df):
         }
         if market_state in {"PRE", "POST"} and not extended.empty:
             extended_price = float(extended["Close"].iloc[-1])
+            extended_timestamp = extended.index[-1].isoformat()
+            extended_change = (
+                ((extended_price - previous_regular_close) / previous_regular_close) * 100
+                if previous_regular_close > 0 else 0.0
+            )
             result.update({
                 "extended_price": _round_price(extended_price),
-                "extended_change": float(round(((extended_price - regular_price) / regular_price) * 100, 2)),
+                "extended_change": float(round(extended_change, 2)),
                 "extended_session": market_state,
-                "extended_timestamp": extended.index[-1].isoformat(),
+                "extended_timestamp": extended_timestamp,
             })
+            if _uses_premarket_change(ticker_symbol, now_br):
+                result.update({
+                    "price": _round_price(extended_price),
+                    "change": float(round(extended_change, 2)),
+                    "high": _round_price(max(float(regular_session["High"].max()), float(extended["High"].max()))),
+                    "low": _round_price(min(float(regular_session["Low"].min()), float(extended["Low"].min()))),
+                    "source_timestamp": extended_timestamp,
+                    "age_seconds": float(round(_age_seconds(_to_utc_timestamp(extended.index[-1])) or 0, 1)),
+                    "change_basis": "previous_close_including_premarket",
+                    "change_window": "before_10_30_sao_paulo",
+                })
+        if _uses_premarket_change(ticker_symbol, now_br) and market_state == "PRE" and extended.empty:
+            result["change_basis"] = "previous_close_waiting_for_premarket_quote"
+            result["change_window"] = "before_10_30_sao_paulo"
         return result
     except Exception as exc:
         print(f"[!] Erro ao separar pre/pos-market de {ticker_symbol}: {exc}")
@@ -384,11 +416,14 @@ def _candidate_from_frame(name, ticker_symbol, ticker_df, source="Yahoo Finance"
         extended_snapshot = _extended_hours_snapshot(ticker_symbol, ticker_df)
         if extended_snapshot:
             candidate.update(extended_snapshot)
-            candidate["price"] = extended_snapshot["regular_price"]
-            candidate["change"] = extended_snapshot["regular_change"]
+            premarket_change_active = bool(extended_snapshot.get("change_basis", "").startswith("previous_close"))
+            if not premarket_change_active:
+                candidate["price"] = extended_snapshot["regular_price"]
+                candidate["change"] = extended_snapshot["regular_change"]
             candidate["prev_close"] = extended_snapshot["regular_prev_close"]
-            candidate["high"] = extended_snapshot["regular_high"]
-            candidate["low"] = extended_snapshot["regular_low"]
+            if not premarket_change_active:
+                candidate["high"] = extended_snapshot["regular_high"]
+                candidate["low"] = extended_snapshot["regular_low"]
         return candidate
     except Exception as e:
         print(f"[!] Erro ao montar candidato {name} ({ticker_symbol}) via {source}: {e}")

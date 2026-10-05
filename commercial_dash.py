@@ -30,6 +30,8 @@ except Exception:
     def get_source_health(*args, **kwargs):
         return {}
 
+from execution.quote_freshness import quote_freshness_label
+
 
 # ── Configuração da Página ──────────────────────────────────────────────────
 st.set_page_config(page_title="Terminal TTS | Inteligência", layout="wide")
@@ -883,23 +885,6 @@ def fetch_app_state_cached(key: str):
     """Cache de fallback para evitar consultas repetidas ao Supabase."""
     return fetch_app_state(key)
 
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_live_global_markets():
-    """Busca cotacoes globais direto da fonte, no maximo uma vez a cada cinco minutos."""
-    try:
-        from execution.fetch_global_markets import fetch_global_data
-        data = fetch_global_data(save_file=False)
-        if data:
-            rows = sum(len(v) for v in (data.get("categories", data) or {}).values() if isinstance(v, list))
-            mark_source("Yahoo Finance", "ok", message="Mercados globais ao vivo.", rows=rows, source="execution.fetch_global_markets")
-        else:
-            mark_source("Yahoo Finance", "error", message="Mercados globais retornaram vazio.", source="execution.fetch_global_markets")
-        return data
-    except Exception as e:
-        print(f"[ERROR] Live global markets: {e}")
-        mark_source("Yahoo Finance", "error", message=str(e), source="execution.fetch_global_markets")
-        return None
-
 def _apply_lse_realtime_quotes(global_data):
     if not isinstance(global_data, dict):
         return global_data
@@ -959,35 +944,6 @@ def fetch_di_futuro_cached_for_ui():
         print(f"[WARN] DI Futuro UI fallback unavailable: {exc}")
         return None
 
-def _ensure_di_futuro_category(global_data):
-    """Completa caches antigos de mercados_globais com DI Futuro BR."""
-    if not isinstance(global_data, dict):
-        return global_data
-    categories = global_data.get("categories", global_data)
-    if not isinstance(categories, dict):
-        return global_data
-    if any("DI FUTURO" in str(key).upper() for key in categories.keys()):
-        return global_data
-
-    di_payload = fetch_di_futuro_cached_for_ui()
-    di_quotes = (di_payload or {}).get("principais") or []
-    if not di_quotes:
-        return global_data
-
-    data = json.loads(json.dumps(global_data))
-    if isinstance(data.get("categories"), dict):
-        data["categories"]["🇧🇷 DI FUTURO"] = di_quotes
-    else:
-        data["🇧🇷 DI FUTURO"] = di_quotes
-    data.setdefault("metadata", {})["di_futuro_ui_fallback"] = {
-        "updated_at": di_payload.get("updated_at"),
-        "source": di_payload.get("source"),
-        "contracts": len(di_quotes),
-    }
-    mark_source("DI Futuro BR", "ok", rows=len(di_quotes), message="DI Futuro aplicado ao cache de mercados_globais.", source=di_payload.get("source", "InfoMoney DI"))
-    return data
-
-
 def _global_market_payload_age_seconds(global_data) -> float | None:
     if not isinstance(global_data, dict):
         return None
@@ -1004,32 +960,22 @@ def _global_market_payload_age_seconds(global_data) -> float | None:
     except (TypeError, ValueError):
         return None
 
-def get_global_markets_data():
-    """Use fresh Supabase data, falling back to live collection when it is stale."""
-    cached_data = fetch_app_state_cached("mercados_globais")
-    if cached_data:
-        rows = sum(len(v) for v in (cached_data.get("categories", cached_data) or {}).values() if isinstance(v, list))
-        age_seconds = _global_market_payload_age_seconds(cached_data)
-        if age_seconds is not None and age_seconds <= 15 * 60:
-            mark_source("Mercados Globais Cache", "ok", message="Snapshot recente do Supabase.", rows=rows, source="Supabase app_state")
-            return _apply_lse_realtime_quotes(_ensure_di_futuro_category(cached_data))
 
+def get_global_markets_data():
+    """Read the shared quote snapshot; market pages never start provider downloads."""
+    cached_data = fetch_app_state_cached("mercados_globais")
+    if not cached_data:
+        mark_source("Mercados Globais Cache", "error", message="Snapshot ainda não publicado pelo coletor central.", source="Supabase app_state")
+        return None
+
+    rows = sum(len(v) for v in (cached_data.get("categories", cached_data) or {}).values() if isinstance(v, list))
+    age_seconds = _global_market_payload_age_seconds(cached_data)
+    if age_seconds is not None and age_seconds <= 15 * 60:
+        mark_source("Mercados Globais Cache", "ok", message="Snapshot central recente do Supabase.", rows=rows, source="Supabase app_state")
+    else:
         age_label = f"{int(age_seconds // 60)} min" if age_seconds is not None else "idade desconhecida"
-        mark_source("Mercados Globais Cache", "stale", message=f"Snapshot atrasado ({age_label}); tentando fontes ao vivo.", rows=rows, source="Supabase app_state")
-        live_data = fetch_live_global_markets()
-        if live_data:
-            live_data.setdefault("metadata", {})["stale_cache_replaced"] = {
-                "cache_age_seconds": round(age_seconds, 1) if age_seconds is not None else None,
-                "fallback": "live_collection",
-            }
-            return _apply_lse_realtime_quotes(_ensure_di_futuro_category(live_data))
-        mark_source("Mercados Globais Live", "error", message="Coleta ao vivo falhou; mantendo ultimo snapshot conhecido.", rows=rows, source="Supabase fallback")
-        return _apply_lse_realtime_quotes(_ensure_di_futuro_category(cached_data))
-    live_data = fetch_live_global_markets()
-    if live_data:
-        return _apply_lse_realtime_quotes(_ensure_di_futuro_category(live_data))
-    mark_source("Mercados Globais Cache", "error", message="Sem cache e sem fonte ao vivo.", source="Supabase/Yahoo")
-    return None
+        mark_source("Mercados Globais Cache", "stale", message=f"Snapshot central atrasado ({age_label}); exibindo último valor conhecido.", rows=rows, source="Supabase app_state")
+    return _apply_lse_realtime_quotes(cached_data)
 
 def _find_global_asset(global_data, names_or_symbols):
     if not isinstance(global_data, dict):
@@ -6091,6 +6037,27 @@ def pagina_terminal_bloomberg():
             text-shadow: 0 1px 1px rgba(0,0,0,0.25);
         }
 
+        .bb-quote-freshness {
+            margin-top: 3px;
+            color: rgba(255,255,255,0.82);
+            font-family: "Inter", "Segoe UI", Arial, sans-serif;
+            font-size: 0.58rem;
+            line-height: 1.15;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .bb-quote-card.stale {
+            border-color: #FBBF24;
+            box-shadow: inset 0 0 0 1px rgba(251,191,36,0.32);
+        }
+
+        .bb-quote-card.unknown-time .bb-quote-freshness {
+            color: #FDE68A;
+        }
+
         .bb-quote-price {
             font-size: 1.35rem;
             line-height: 1.05;
@@ -6527,6 +6494,8 @@ def pagina_terminal_bloomberg():
             for asset in assets:
                 name = esc(asset.get("name", "---"))
                 price = fmt_num(asset.get("price"))
+                freshness_label, freshness_state = quote_freshness_label(asset)
+                freshness_class = " stale" if freshness_state == "stale" else " unknown-time" if freshness_state == "unknown" else ""
                 try:
                     change_value = float(asset.get("change", 0))
                     change = f"{change_value:+.2f}%"
@@ -6537,8 +6506,9 @@ def pagina_terminal_bloomberg():
                 high = fmt_num(asset.get("high", asset.get("price")))
                 low = fmt_num(asset.get("low", asset.get("price")))
                 cards.append(
-                    f"<article class='bb-quote-card {change_class}'>"
+                    f"<article class='bb-quote-card {change_class}{freshness_class}'>"
                     f"<div class='bb-quote-symbol'>{name}</div>"
+                    f"<div class='bb-quote-freshness' title='{esc(freshness_label)}'>{esc(freshness_label)}</div>"
                     f"<div class='bb-quote-price'>{price}</div>"
                     f"<div class='bb-quote-range'>"
                     f"<div><div>H {high}</div><div class='bb-quote-low'>L {low}</div></div>"
@@ -11835,12 +11805,21 @@ def pagina_painel_controle():
                 st.error(f"Erro ao atualizar {name}: {e}")
 
     with c1:
-        if st.button("📊 Atualizar Mercados Globais", use_container_width=True, help="Baixa cotações do Yahoo Finance em lote e sincroniza com o banco de dados."):
-            import sys
-            exec_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'execution'))
-            if exec_path not in sys.path: sys.path.append(exec_path)
-            from fetch_global_markets import fetch_global_data
-            run_update_task("Mercados Globais", fetch_global_data, "mercados_globais", "✅ Mercados Globais atualizados com sucesso!")
+        if st.button("📊 Atualizar Mercados Globais", use_container_width=True, help="Executa o coletor central, valida as cotações e publica o snapshot compartilhado."):
+            with st.spinner("Coletando, validando e publicando o snapshot central..."):
+                try:
+                    from execution.market_data_engine import collect_and_publish_market_snapshot
+                    snapshot = collect_and_publish_market_snapshot(supabase)
+                    fetch_app_state_cached.clear()
+                    quality = snapshot.get("metadata", {}).get("quote_quality", {})
+                    st.success(
+                        "Snapshot central atualizado: "
+                        f"{quality.get('fresh', 0)} frescas, {quality.get('stale', 0)} atrasadas, "
+                        f"{quality.get('unknown', 0)} sem horário."
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Falha ao atualizar o snapshot de cotações: {exc}")
 
     with c2:
         if st.button("🤖 Atualizar IA & Market Report", use_container_width=True, help="Executa a análise macro da IA com Gemini e o Market Report de notícias diário."):
