@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from execution.market_clock import select_upcoming_calendar_events
+from execution.market_clock import active_market_sessions, select_upcoming_calendar_events
 
 
 def test_selects_only_future_market_events_in_time_order():
@@ -29,3 +29,19 @@ def test_accepts_wrapped_calendar_and_skips_invalid_records():
 
     assert len(events) == 1
     assert events[0]["event"] == "Valid"
+
+
+def test_reports_overlapping_new_york_europe_and_brazil_sessions():
+    now = datetime(2026, 10, 5, 11, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
+
+    sessions = active_market_sessions(now)
+
+    assert [session["region"] for session in sessions] == ["EUROPA", "NOVA YORK", "BRASIL"]
+
+
+def test_reports_asia_when_hong_kong_and_tokyo_are_open_and_ignores_weekend():
+    asia_morning = datetime(2026, 10, 5, 22, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
+    saturday = datetime(2026, 10, 10, 12, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
+
+    assert [session["region"] for session in active_market_sessions(asia_morning)] == ["ÁSIA"]
+    assert active_market_sessions(saturday) == []

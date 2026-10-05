@@ -9,6 +9,34 @@ from zoneinfo import ZoneInfo
 
 BR_TZ = ZoneInfo("America/Sao_Paulo")
 MARKET_CURRENCIES = {"USD", "BRL", "EUR", "GBP", "JPY", "CNY", "CAD", "AUD", "NZD", "CHF"}
+MARKET_SESSION_SCHEDULES = [
+    {"region": "ÁSIA", "market": "Sydney", "timezone": "Australia/Sydney", "open": "10:00", "close": "16:00"},
+    {"region": "ÁSIA", "market": "Tóquio", "timezone": "Asia/Tokyo", "open": "09:00", "close": "15:30"},
+    {"region": "ÁSIA", "market": "Hong Kong", "timezone": "Asia/Hong_Kong", "open": "09:30", "close": "16:00"},
+    {"region": "EUROPA", "market": "Londres", "timezone": "Europe/London", "open": "08:00", "close": "16:30"},
+    {"region": "NOVA YORK", "market": "NYSE/Nasdaq", "timezone": "America/New_York", "open": "09:30", "close": "16:00"},
+    {"region": "BRASIL", "market": "B3", "timezone": "America/Sao_Paulo", "open": "10:00", "close": "17:00"},
+]
+
+
+def active_market_sessions(now: datetime | None = None) -> list[dict[str, Any]]:
+    """Return indicative weekday sessions open at the given instant."""
+    current = now or datetime.now(BR_TZ)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=BR_TZ)
+
+    active: dict[str, list[str]] = {}
+    for schedule in MARKET_SESSION_SCHEDULES:
+        local = current.astimezone(ZoneInfo(schedule["timezone"]))
+        if local.weekday() >= 5:
+            continue
+        minute = local.hour * 60 + local.minute
+        start_hour, start_minute = map(int, schedule["open"].split(":"))
+        end_hour, end_minute = map(int, schedule["close"].split(":"))
+        if start_hour * 60 + start_minute <= minute < end_hour * 60 + end_minute:
+            active.setdefault(schedule["region"], []).append(schedule["market"])
+
+    return [{"region": region, "markets": markets} for region, markets in active.items()]
 
 
 def select_upcoming_calendar_events(

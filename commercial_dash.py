@@ -12582,8 +12582,11 @@ def get_sidebar_clock_calendar_events():
 
 
 def sidebar_clock():
+    from execution.market_clock import MARKET_SESSION_SCHEDULES
+
     calendar_json = json.dumps(get_sidebar_clock_calendar_events(), ensure_ascii=False)
     calendar_json = calendar_json.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    sessions_json = json.dumps(MARKET_SESSION_SCHEDULES, ensure_ascii=False)
     clock_html = """
         <div class="clock-card">
           <div class="clock-top">
@@ -12592,6 +12595,10 @@ def sidebar_clock():
           </div>
           <div id="tts-clock-time" class="clock-time">--:--:--</div>
           <div id="tts-clock-date" class="clock-date">--</div>
+          <div class="clock-session-wrap">
+            <div class="clock-session-label">Sessões agora</div>
+            <div id="tts-clock-sessions" class="clock-session-list"></div>
+          </div>
           <div id="tts-clock-events" class="clock-events"></div>
         </div>
         <style>
@@ -12610,6 +12617,12 @@ def sidebar_clock():
           .clock-top i { width:8px; height:8px; border-radius:999px; background:#22C55E; box-shadow:0 0 12px rgba(34,197,94,.9); display:inline-block; }
           .clock-time { color:#F8FAFC; font-size:2.28rem; line-height:.98; font-weight:950; letter-spacing:.02em; font-variant-numeric:tabular-nums; }
           .clock-date { color:#38BDF8; font-size:.78rem; font-weight:800; margin-top:7px; }
+          .clock-session-wrap { margin-top:8px; }
+          .clock-session-label { color:#94A3B8; font-size:.57rem; font-weight:900; letter-spacing:.06em; text-transform:uppercase; margin-bottom:4px; }
+          .clock-session-list { display:flex; flex-wrap:wrap; gap:4px; min-height:19px; }
+          .clock-session-pill { display:inline-flex; align-items:center; gap:4px; border:1px solid rgba(56,189,248,.34); border-radius:4px; padding:3px 5px; background:rgba(8,47,73,.34); color:#7DD3FC; font-size:.59rem; line-height:1; font-weight:900; white-space:nowrap; }
+          .clock-session-pill i { width:5px; height:5px; border-radius:50%; background:currentColor; display:inline-block; }
+          .clock-session-pill.empty { color:#94A3B8; border-color:rgba(100,116,139,.35); background:rgba(15,23,42,.45); }
           .clock-events { border-top:1px solid rgba(51,65,85,.80); margin-top:10px; padding-top:5px; }
           .clock-event { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 7px; border-radius:6px; margin-top:6px; border:1px solid rgba(51,65,85,.70); background:rgba(15,23,42,.45); }
           .clock-event-main { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
@@ -12626,6 +12639,7 @@ def sidebar_clock():
         <script>
           const tz = "America/Sao_Paulo";
           const calendarEvents = __CLOCK_CALENDAR_EVENTS__;
+          const marketSessions = __MARKET_SESSION_SCHEDULES__;
           const sessions = [
             { time: "09:00", label: "Abertura BR" },
             { time: "10:00", label: "Abertura acoes BR" },
@@ -12656,6 +12670,33 @@ def sidebar_clock():
             if (status === "PROX") return { color:"#F59E0B", bg:"rgba(245,158,11,.12)", border:"rgba(245,158,11,.45)" };
             if (status === "HOJE") return { color:"#38BDF8", bg:"rgba(56,189,248,.08)", border:"rgba(56,189,248,.28)" };
             return { color:"#64748B", bg:"rgba(15,23,42,.45)", border:"rgba(51,65,85,.70)" };
+          }
+          function getActiveMarketSessions(now) {
+            const active = new Map();
+            for (const session of marketSessions) {
+              const parts = new Intl.DateTimeFormat("en-GB", {
+                timeZone: session.timezone, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+              }).formatToParts(now).reduce((acc, part) => {
+                acc[part.type] = part.value;
+                return acc;
+              }, {});
+              if (parts.weekday === "Sat" || parts.weekday === "Sun") continue;
+              const minute = Number(parts.hour) * 60 + Number(parts.minute);
+              const [openHour, openMinute] = session.open.split(":").map(Number);
+              const [closeHour, closeMinute] = session.close.split(":").map(Number);
+              if (minute < openHour * 60 + openMinute || minute >= closeHour * 60 + closeMinute) continue;
+              if (!active.has(session.region)) active.set(session.region, []);
+              active.get(session.region).push(session.market);
+            }
+            return active;
+          }
+          function renderCurrentSessions(now) {
+            const active = getActiveMarketSessions(now);
+            if (!active.size) return `<span class="clock-session-pill empty">ENTRE SESSÕES</span>`;
+            const colors = { "ÁSIA":"#C084FC", "EUROPA":"#38BDF8", "NOVA YORK":"#34D399", "BRASIL":"#FBBF24" };
+            return Array.from(active.entries()).map(([region, markets]) =>
+              `<span class="clock-session-pill" style="color:${colors[region] || "#7DD3FC"};border-color:${colors[region] || "#7DD3FC"}66;" title="${markets.join(", ")} · janela regular, sem ajuste de feriados"><i></i>${region}</span>`
+            ).join("");
           }
           function renderNextCalendarEvent(now) {
             const next = calendarEvents.find((item) => item.timestamp * 1000 >= now.getTime());
@@ -12706,6 +12747,7 @@ def sidebar_clock():
             const p = partsInSaoPaulo(now);
             document.getElementById("tts-clock-time").textContent = timeFmt.format(now);
             document.getElementById("tts-clock-date").textContent = dateFmt.format(now).replace(".", "");
+            document.getElementById("tts-clock-sessions").innerHTML = renderCurrentSessions(now);
             document.getElementById("tts-clock-events").innerHTML = renderClockEvents(minutesNow(p), now);
           }
           tickClock();
@@ -12713,7 +12755,8 @@ def sidebar_clock():
         </script>
         """
     clock_html = clock_html.replace("__CLOCK_CALENDAR_EVENTS__", calendar_json)
-    components.html(clock_html, height=284)
+    clock_html = clock_html.replace("__MARKET_SESSION_SCHEDULES__", sessions_json)
+    components.html(clock_html, height=322)
 
 auth_user = require_authenticated_user()
 auth_persistence_warning = st.session_state.pop("auth_persistence_warning", None)
