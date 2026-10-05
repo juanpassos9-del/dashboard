@@ -41,14 +41,16 @@ def _finite_float(value: Any) -> float | None:
         return None
 
 
-def _market_delay_seconds(update_mode: Any) -> int:
-    text = str(update_mode or "")
+def _market_delay_seconds(update_mode: Any) -> int | None:
+    text = str(update_mode or "").lower()
     if text.startswith("delayed_streaming_"):
         try:
             return int(text.rsplit("_", 1)[1])
         except (TypeError, ValueError):
-            pass
-    return 0
+            return None
+    if text.startswith("streaming"):
+        return 0
+    return None
 
 
 def _tv_frame(method: str, params: list[Any]) -> str:
@@ -140,7 +142,7 @@ def _fetch_tvc_oil_quotes(timeout: int = 8) -> dict[str, dict[str, Any]]:
                     "source_symbol": symbol,
                     "source_timestamp": retrieved_at.isoformat(),
                     "timestamp_type": "retrieved_at",
-                    "age_seconds": 0.0,
+                    "age_seconds": _market_delay_seconds(update_mode),
                     "market_delay_seconds": _market_delay_seconds(update_mode),
                     "update_mode": update_mode,
                     "instrument_type": "derived_cfd",
@@ -202,7 +204,7 @@ def fetch_tradingview_commodity_futures(timeout: int = 8, refresh: bool = False)
             "source_symbol": symbol,
             "source_timestamp": retrieved_at.isoformat(),
             "timestamp_type": "retrieved_at",
-            "age_seconds": 0.0,
+            "age_seconds": _market_delay_seconds(update_mode),
             "market_delay_seconds": _market_delay_seconds(update_mode),
             "update_mode": update_mode,
             "contract_type": "continuous_front",

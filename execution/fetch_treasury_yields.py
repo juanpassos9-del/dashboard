@@ -26,6 +26,18 @@ _COLUMNS = ("close", "change", "change_abs", "high", "low", "open", "update_mode
 _CACHE: dict[str, dict[str, Any]] | None = None
 
 
+def _market_delay_seconds(update_mode: Any) -> int | None:
+    text = str(update_mode or "").lower()
+    if text.startswith("delayed_streaming_"):
+        try:
+            return int(text.rsplit("_", 1)[1])
+        except (TypeError, ValueError):
+            return None
+    if text.startswith("streaming"):
+        return 0
+    return None
+
+
 def _finite_float(value: Any) -> float | None:
     try:
         number = float(value)
@@ -73,7 +85,8 @@ def fetch_tradingview_treasury_yields(timeout: int = 8, refresh: bool = False) -
             "source_symbol": symbol,
             "source_timestamp": retrieved_at.isoformat(),
             "timestamp_type": "retrieved_at",
-            "age_seconds": 0.0,
+            "age_seconds": _market_delay_seconds(fields.get("update_mode")),
+            "market_delay_seconds": _market_delay_seconds(fields.get("update_mode")),
             "update_mode": fields.get("update_mode"),
         }
 

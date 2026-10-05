@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from execution.market_data_engine import normalize_market_snapshot
+from execution.market_data_engine import normalize_market_snapshot, quote_age_seconds
 
 
 NOW = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
@@ -58,3 +58,16 @@ def test_missing_timestamp_is_kept_but_explicitly_unknown():
 
     assert normalized["categories"]["📊 ÍNDICES"][0]["data_status"] == "unknown"
     assert normalized["metadata"]["quote_quality"]["unknown"] == 6
+
+
+def test_retrieval_timestamp_does_not_masquerade_as_market_timestamp():
+    quote = {
+        "source_timestamp": NOW.isoformat(),
+        "timestamp_type": "retrieved_at",
+        "age_seconds": 0,
+        "market_delay_seconds": None,
+    }
+
+    assert quote_age_seconds(quote, now=NOW) is None
+    quote["market_delay_seconds"] = 37
+    assert quote_age_seconds(quote, now=NOW) == 37

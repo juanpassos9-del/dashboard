@@ -3,26 +3,19 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from execution.market_data_engine import quote_age_seconds
+
 
 def quote_freshness_label(asset: dict[str, Any], now: datetime | None = None) -> tuple[str, str]:
     """Return a compact provider/freshness label without treating unknown time as fresh."""
     source = str(asset.get("source") or "Fonte indisponível").strip()
-    raw_timestamp = asset.get("source_timestamp") or asset.get("updated_at")
-    age_seconds = None
-    if raw_timestamp:
-        try:
-            source_time = datetime.fromisoformat(str(raw_timestamp).replace("Z", "+00:00"))
-            if source_time.tzinfo is None:
-                source_time = source_time.replace(tzinfo=timezone.utc)
-            reference = now or datetime.now(timezone.utc)
-            age_seconds = max(0, (reference - source_time.astimezone(timezone.utc)).total_seconds())
-        except (TypeError, ValueError):
-            pass
-    if age_seconds is None:
-        age_seconds = asset.get("age_seconds")
+    if asset.get("fallback_reason"):
+        reason = "fonte principal atrasada" if asset["fallback_reason"] == "primary_stale" else "fonte principal indisponível"
+        source = f"{source} · fallback ({reason})"
+    age_seconds = quote_age_seconds(asset, now=now or datetime.now(timezone.utc))
 
     if age_seconds is None:
-        freshness = "HORÁRIO INDISPONÍVEL"
+        freshness = "ATRASO DO MERCADO INDISPONÍVEL" if asset.get("timestamp_type") == "retrieved_at" else "HORÁRIO INDISPONÍVEL"
         state = "unknown"
     else:
         age_seconds = max(0, float(age_seconds))

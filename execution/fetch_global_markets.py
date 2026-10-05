@@ -9,6 +9,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import requests
+from execution.market_data_engine import FRESHNESS_LIMITS_SECONDS, quote_age_seconds
 
 try:
     from execution.lse_client import fetch_lse_quote
@@ -27,19 +28,21 @@ except Exception:
         build_di_futuro_payload = None
 
 try:
-    from execution.fetch_treasury_yields import fetch_tradingview_treasury_candidate
+    from execution.fetch_treasury_yields import TREASURY_SYMBOLS, fetch_tradingview_treasury_candidate
 except Exception:
     try:
-        from fetch_treasury_yields import fetch_tradingview_treasury_candidate
+        from fetch_treasury_yields import TREASURY_SYMBOLS, fetch_tradingview_treasury_candidate
     except Exception:
+        TREASURY_SYMBOLS = {}
         fetch_tradingview_treasury_candidate = None
 
 try:
-    from execution.fetch_commodity_futures import fetch_tradingview_commodity_candidate
+    from execution.fetch_commodity_futures import COMMODITY_FUTURES, fetch_tradingview_commodity_candidate
 except Exception:
     try:
-        from fetch_commodity_futures import fetch_tradingview_commodity_candidate
+        from fetch_commodity_futures import COMMODITY_FUTURES, fetch_tradingview_commodity_candidate
     except Exception:
+        COMMODITY_FUTURES = {}
         fetch_tradingview_commodity_candidate = None
 
 try:
@@ -675,36 +678,54 @@ def _fetch_us02y_yahoo_candidate(name, ticker_symbol):
 
 def _quote_candidates(name, ticker_symbol, yfinance_df=None):
     candidates = []
-    if fetch_tradingview_treasury_candidate is not None:
-        try:
-            treasury_candidate = fetch_tradingview_treasury_candidate(name, ticker_symbol)
-            if treasury_candidate:
-                return [treasury_candidate]
-        except Exception as e:
-            print(f"[!] TradingView OTC yields falhou para {ticker_symbol}: {e}")
-
-    if fetch_tradingview_commodity_candidate is not None:
-        try:
-            commodity_candidate = fetch_tradingview_commodity_candidate(name, ticker_symbol)
-            if commodity_candidate:
-                return [commodity_candidate]
-        except Exception as e:
-            print(f"[!] TradingView commodities falhou para {ticker_symbol}: {e}")
-
-    fred_candidate = _fetch_fred_yield_candidate(name, ticker_symbol)
-    if fred_candidate:
-        return [fred_candidate]
+    quote_class = None
+    if ticker_symbol in TREASURY_SYMBOLS:
+        quote_class = "treasury"
+    elif ticker_symbol in COMMODITY_FUTURES:
+        quote_class = "commodity"
+    max_age = FRESHNESS_LIMITS_SECONDS.get(quote_class or "other", FRESHNESS_LIMITS_SECONDS["other"])
 
     if yfinance_df is not None and not yfinance_df.empty:
         candidate = _candidate_from_frame(name, ticker_symbol, yfinance_df, source="Yahoo Finance")
         if candidate:
             candidates.append(candidate)
 
-    best_age = None
-    if candidates:
-        best_age = candidates[0].get("age_seconds")
-    if best_age is not None and best_age <= 120:
-        return candidates
+    fred_candidate = _fetch_fred_yield_candidate(name, ticker_symbol)
+    if fred_candidate:
+        candidates.append(fred_candidate)
+
+    best_primary = _select_best_candidate(candidates, max_age_seconds=max_age)
+    if best_primary and _candidate_is_fresh(best_primary, max_age):
+        return [best_primary]
+
+    tv_fetchers = []
+    if quote_class == "treasury" and fetch_tradingview_treasury_candidate is not None:
+        tv_fetchers.append(fetch_tradingview_treasury_candidate)
+    elif quote_class == "commodity" and fetch_tradingview_commodity_candidate is not None:
+        tv_fetchers.append(fetch_tradingview_commodity_candidate)
+
+    for fetcher in tv_fetchers:
+        try:
+            tv_candidate = fetcher(name, ticker_symbol)
+            if not tv_candidate:
+                continue
+            delay = quote_age_seconds(tv_candidate)
+            if delay is not None and delay > max_age:
+                tv_candidate = None
+                continue
+            tv_candidate = dict(tv_candidate)
+            tv_candidate.update({
+                "fallback_reason": "primary_stale" if best_primary else "primary_missing",
+                "fallback_for_source": best_primary.get("source") if best_primary else None,
+                "primary_age_seconds": quote_age_seconds(best_primary) if best_primary else None,
+                "fallback_priority": True,
+            })
+            candidates.append(tv_candidate)
+            # A verified-fresh TradingView quote is the configured preferred fallback.
+            if delay is not None:
+                return [tv_candidate]
+        except Exception as e:
+            print(f"[!] Fallback TradingView falhou para {ticker_symbol}: {e}")
 
     # Brapi, London e Twelve tendem a ser bons fallbacks para o painel.
     # Alpha entra por ultimo porque o plano gratuito e mais limitado.
@@ -712,22 +733,33 @@ def _quote_candidates(name, ticker_symbol, yfinance_df=None):
         candidate = fetcher(name, ticker_symbol)
         if candidate:
             candidates.append(candidate)
-            if candidate.get("age_seconds") is not None and candidate["age_seconds"] <= 120:
+            if _candidate_is_fresh(candidate, max_age):
                 break
     return candidates
 
 
-def _select_best_candidate(candidates):
+def _candidate_is_fresh(candidate, max_age_seconds):
+    age = quote_age_seconds(candidate)
+    return age is not None and age <= max_age_seconds
+
+
+def _select_best_candidate(candidates, max_age_seconds=None):
     valid = [item for item in candidates if _finite_float(item.get("price")) is not None]
     if not valid:
         return None
 
     def score(item):
-        age = item.get("age_seconds")
+        age = quote_age_seconds(item)
         if age is None:
             age = 10**9
         source_bonus = {"Brapi": -10, "London Strategic Edge": -8, "Twelve Data": -5, "Yahoo Finance": 0, "Alpha Vantage": 20}.get(item.get("source"), 0)
-        return (float(age) + source_bonus, item.get("source") != "Yahoo Finance")
+        if item.get("fallback_priority") and age >= 10**9:
+            freshness_rank = 1
+        elif max_age_seconds is not None and age > max_age_seconds:
+            freshness_rank = 2
+        else:
+            freshness_rank = 0
+        return (freshness_rank, float(age) + source_bonus, item.get("source") != "Yahoo Finance")
 
     return sorted(valid, key=score)[0]
 

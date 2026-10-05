@@ -50,6 +50,28 @@ def _timestamp_age(timestamp: Any, now: datetime) -> tuple[str | None, float | N
         return None, None
 
 
+def quote_age_seconds(asset: dict[str, Any], now: datetime | None = None) -> float | None:
+    """Estimate market-data age, not merely the time our collector fetched it."""
+    if asset.get("timestamp_type") == "retrieved_at":
+        delay = asset.get("market_delay_seconds")
+        try:
+            delay = float(delay)
+            return max(0.0, delay) if math.isfinite(delay) else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    _, age = _timestamp_age(asset.get("source_timestamp") or asset.get("updated_at"), now.astimezone(timezone.utc))
+    if age is not None:
+        return age
+    try:
+        age = float(asset.get("age_seconds"))
+        return max(0.0, age) if math.isfinite(age) else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def normalize_market_snapshot(payload: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
     if not isinstance(payload, dict) or not isinstance(payload.get("categories"), dict):
         raise ValueError("Coletor retornou snapshot sem categories.")
@@ -80,11 +102,7 @@ def normalize_market_snapshot(payload: dict[str, Any], now: datetime | None = No
             quote_class = _quote_class(str(category), item)
             raw_timestamp = item.get("source_timestamp") or item.get("updated_at")
             parsed_timestamp, computed_age = _timestamp_age(raw_timestamp, now)
-            age = computed_age if parsed_timestamp else item.get("age_seconds")
-            try:
-                age = max(0.0, float(age)) if age is not None and math.isfinite(float(age)) else None
-            except (TypeError, ValueError, OverflowError):
-                age = None
+            age = quote_age_seconds(item, now)
             if computed_age is None and raw_timestamp:
                 counts["rejected"] += 1
                 continue
