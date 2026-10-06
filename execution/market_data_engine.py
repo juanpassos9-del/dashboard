@@ -19,17 +19,32 @@ FRESHNESS_LIMITS_SECONDS = {
 
 
 def _quote_class(category: str, asset: dict[str, Any]) -> str:
-    text = f"{category} {asset.get('name', '')} {asset.get('symbol', '')}".upper()
+    category_text = str(category).upper()
+    asset_text = f"{asset.get('name', '')} {asset.get('symbol', '')}".upper()
+    text = f"{category_text} {asset_text}"
     if "DI FUTURO" in text or "(DI FUTURO)" in text:
         return "di"
     if "TREASUR" in text or "YIELD" in text:
         return "treasury"
     if "FOREX" in text or "MOEDAS" in text or any(pair in text for pair in ("EURUSD", "GBPUSD", "USDBRL", "BRLUSD", "USDJPY")):
         return "fx"
-    if "CRYPTO" in text or "CRIPTO" in text or "BITCOIN" in text or "ETHEREUM" in text or "SOLANA" in text:
-        return "crypto"
-    if "COMMODIT" in text or any(name in text for name in ("BRENT", "WTI", "GOLD", "SILVER", "COPPER", "NATURAL GAS")):
+
+    commodity_assets = ("BRENT", "WTI", "OIL", "NATURAL GAS", "COPPER", "GOLD", "SILVER", "PLATINUM", "PALLADIUM")
+    if any(name in asset_text for name in commodity_assets):
         return "commodity"
+
+    crypto_assets = ("CRYPTO", "CRIPTO", "BITCOIN", "ETHEREUM", "SOLANA")
+    crypto_symbols = {"BTC-USD", "ETH-USD", "SOL-USD", "BTCUSDT", "ETHUSDT", "SOLUSDT"}
+    symbol = str(asset.get("symbol", "")).upper()
+    if any(name in asset_text for name in crypto_assets) or symbol in crypto_symbols:
+        return "crypto"
+
+    category_has_commodity = "COMMODIT" in category_text
+    category_has_crypto = "CRYPTO" in category_text or "CRIPTO" in category_text
+    if category_has_commodity and not category_has_crypto:
+        return "commodity"
+    if category_has_crypto and not category_has_commodity:
+        return "crypto"
     if any(word in text for word in ("ÍNDICES", "INDICES", "ETF", "EMERGENTES", "BRASIL", "SECTORIAIS")):
         return "equity"
     return "other"

@@ -71,3 +71,25 @@ def test_retrieval_timestamp_does_not_masquerade_as_market_timestamp():
     assert quote_age_seconds(quote, now=NOW) is None
     quote["market_delay_seconds"] = 37
     assert quote_age_seconds(quote, now=NOW) == 37
+
+
+def test_mixed_commodity_crypto_category_classifies_by_asset():
+    timestamp = (NOW - timedelta(minutes=11)).isoformat()
+    payload = {"categories": {"🛢️ COMMODITIES & CRIPTO": [
+        {"symbol": "BZ=F", "name": "BRENT OIL", "price": 80, "source_timestamp": timestamp},
+        {"symbol": "GC=F", "name": "GOLD", "price": 2300, "source_timestamp": timestamp},
+        {"symbol": "BTC-USD", "name": "BITCOIN", "price": 60000, "source_timestamp": timestamp},
+        {"symbol": "CL=F", "name": "WTI OIL", "price": 75, "source_timestamp": timestamp},
+        {"symbol": "ETH-USD", "name": "ETHEREUM", "price": 3000, "source_timestamp": timestamp},
+        {"symbol": "SOL-USD", "name": "SOLANA", "price": 150, "source_timestamp": timestamp},
+    ]}}
+
+    normalized = normalize_market_snapshot(payload, now=NOW)
+    assets = {item["symbol"]: item for item in normalized["categories"]["🛢️ COMMODITIES & CRIPTO"]}
+
+    assert assets["BZ=F"]["quote_class"] == "commodity"
+    assert assets["BZ=F"]["max_age_seconds"] == 900
+    assert assets["BZ=F"]["data_status"] == "fresh"
+    assert assets["GC=F"]["quote_class"] == "commodity"
+    assert assets["BTC-USD"]["quote_class"] == "crypto"
+    assert assets["BTC-USD"]["data_status"] == "stale"

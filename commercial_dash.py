@@ -31,10 +31,13 @@ except Exception:
         return {}
 
 from execution.quote_freshness import quote_freshness_label
+from execution.market_quote_refresh import MarketQuoteRefreshCoordinator
 
 
 # ── Configuração da Página ──────────────────────────────────────────────────
 st.set_page_config(page_title="Terminal TTS | Inteligência", layout="wide")
+
+_market_quote_refresh_coordinator = MarketQuoteRefreshCoordinator()
 
 # ── Supabase ────────────────────────────────────────────────────────────────
 def get_supabase_url_value() -> str:
@@ -962,9 +965,12 @@ def _global_market_payload_age_seconds(global_data) -> float | None:
 
 
 def get_global_markets_data():
-    """Read the shared quote snapshot; market pages never start provider downloads."""
+    """Read the shared snapshot and request background recovery when it goes stale."""
     cached_data = fetch_app_state_cached("mercados_globais")
     if not cached_data:
+        _market_quote_refresh_coordinator.request_if_stale(
+            None, _refresh_global_market_snapshot
+        )
         mark_source("Mercados Globais Cache", "error", message="Snapshot ainda não publicado pelo coletor central.", source="Supabase app_state")
         return None
 
@@ -974,8 +980,32 @@ def get_global_markets_data():
         mark_source("Mercados Globais Cache", "ok", message="Snapshot central recente do Supabase.", rows=rows, source="Supabase app_state")
     else:
         age_label = f"{int(age_seconds // 60)} min" if age_seconds is not None else "idade desconhecida"
-        mark_source("Mercados Globais Cache", "stale", message=f"Snapshot central atrasado ({age_label}); exibindo último valor conhecido.", rows=rows, source="Supabase app_state")
+        refresh_started = _market_quote_refresh_coordinator.request_if_stale(
+            age_seconds, _refresh_global_market_snapshot
+        )
+        refresh_status = _market_quote_refresh_coordinator.status()
+        if refresh_started or refresh_status["running"]:
+            refresh_message = "iniciada coleta automatica de recuperacao"
+        elif refresh_status["last_error"]:
+            refresh_message = "ultima coleta automatica falhou; aguarde o intervalo de nova tentativa"
+        else:
+            refresh_message = "nova tentativa automatica sera feita em breve"
+        mark_source(
+            "Mercados Globais Cache",
+            "stale",
+            message=f"Snapshot central atrasado ({age_label}); {refresh_message}.",
+            rows=rows,
+            source="Supabase app_state",
+        )
     return _apply_lse_realtime_quotes(cached_data)
+
+
+def _refresh_global_market_snapshot():
+    """Recover missed scheduled collections without blocking a dashboard rerun."""
+    from execution.market_data_engine import collect_and_publish_market_snapshot
+
+    collect_and_publish_market_snapshot(supabase)
+    fetch_app_state_cached.clear()
 
 def _find_global_asset(global_data, names_or_symbols):
     if not isinstance(global_data, dict):
@@ -7893,8 +7923,26 @@ def sidebar_mercados():
         compact_symbol = compact_symbol.replace("-USD", "").replace(".SA", "")
         return compact_symbol or name or "---"
 
+    snapshot_age = _global_market_payload_age_seconds(global_data)
+    if snapshot_age is not None and snapshot_age > 15 * 60:
+        age_minutes = int(snapshot_age // 60)
+        age_text = f"{age_minutes // 60}h {age_minutes % 60}min" if age_minutes >= 60 else f"{age_minutes}min"
+        refresh_status = _market_quote_refresh_coordinator.status()
+        if refresh_status["running"]:
+            recovery_text = " · ATUALIZANDO"
+            update_color = "#FF9F43"
+        elif refresh_status["last_error"]:
+            recovery_text = " · FALHA NA COLETA"
+            update_color = "#FF5C70"
+        else:
+            recovery_text = " · AGUARDANDO RECUPERAÇÃO"
+            update_color = "#FF9F43"
+        freshness_text = f" · ATRASADO {age_text}{recovery_text}"
+    else:
+        update_color = "#64748B"
+        freshness_text = ""
     st.markdown(
-        f"<div style='text-align:right; font-size:0.62rem; color:#64748B; margin-bottom:6px;'>ATUALIZADO {html.escape(str(last_upd))}</div>",
+        f"<div style='text-align:right; font-size:0.62rem; color:{update_color}; margin-bottom:6px;'>ATUALIZADO {html.escape(str(last_upd))}{html.escape(freshness_text)}</div>",
         unsafe_allow_html=True,
     )
 
