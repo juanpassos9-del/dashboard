@@ -377,6 +377,12 @@ def build_monitor_br_payload(global_data: Any = None, focus: Any = None, di: Any
     current_selic = selic.get("value")
     front_di = _number(curve[0].get("rate", curve[0].get("price"))) if curve else None
     selic_di_spread = round(front_di - current_selic, 3) if front_di is not None and current_selic is not None else None
+    calendar_br = _br_calendar_snapshot(
+        [
+            *(calendar_events if isinstance(calendar_events, list) else []),
+            *(calendar_history.get("events", []) if isinstance(calendar_history, dict) else []),
+        ]
+    )
 
     payload = {
         "schema_version": "monitor_br_v1",
@@ -386,12 +392,7 @@ def build_monitor_br_payload(global_data: Any = None, focus: Any = None, di: Any
         "official_history": official_history,
         "focus": _focus_snapshot(focus),
         "foreign_flow": _flow_snapshot(flow),
-        "calendar_br": _br_calendar_snapshot(
-            [
-                *(calendar_events if isinstance(calendar_events, list) else []),
-                *(calendar_history.get("events", []) if isinstance(calendar_history, dict) else []),
-            ]
-        ),
+        "calendar_br": calendar_br,
         "calendar_history": {
             "updated_at": calendar_history.get("updated_at") if isinstance(calendar_history, dict) else None,
             "backfill_status": calendar_history.get("backfill_status") if isinstance(calendar_history, dict) else "not_available",

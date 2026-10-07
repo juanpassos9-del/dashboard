@@ -1,3 +1,4 @@
+from execution import monitor_br
 from execution.monitor_br import _br_calendar_snapshot, _calendar_event_reading, _flow_snapshot, _focus_snapshot, _market_asset, _series_reading
 
 
@@ -80,3 +81,20 @@ def test_market_asset_finds_symbol_across_categories():
     assert result["symbol"] == "^BVSP"
     assert result["price"] == 130000
     assert result["freshness"] == "sem horário"
+
+
+def test_monitor_payload_builds_calendar_before_history_metadata(monkeypatch):
+    monkeypatch.setattr(monitor_br, "_fetch_bcb_series", lambda series_id, count: [])
+    monkeypatch.setattr(monitor_br, "_fetch_ibge_ipca", lambda: None)
+    monkeypatch.setattr(
+        "execution.monitor_br_history.fetch_monitor_br_history",
+        lambda: {"series": [], "errors": []},
+    )
+
+    payload = monitor_br.build_monitor_br_payload(
+        calendar_events=[{"date": "2026-10-01", "currency": "BRL", "event": "IPCA mensal", "actual": "0,4%"}],
+        calendar_history={"event_count": 1, "ibge_calendar_status": "ok:1"},
+    )
+
+    assert payload["calendar_br"]["total_events"] == 1
+    assert payload["calendar_history"]["official_release_count"] == payload["calendar_br"]["official_release_count"]
