@@ -7388,6 +7388,7 @@ def pagina_monitor_br():
     st.caption("Brasil: dados oficiais do BCB e IBGE, expectativas Focus e leitura de mercado/curva DI.")
 
     from execution.monitor_br import build_monitor_br_payload, load_monitor_br_cache, save_monitor_br_cache
+    from execution.monitor_br_briefing import build_monitor_br_briefing
     from execution.monitor_br_vintages import (
         latest_monitor_br_revisions,
         load_monitor_br_vintages_cache,
@@ -7426,7 +7427,11 @@ def pagina_monitor_br():
             except Exception as exc:
                 st.error(f"Não foi possível atualizar o Monitor BR: {exc}")
     if not payload:
-        st.info("Ainda não há leitura em cache. Clique em Atualizar Monitor BR para consultar as séries oficiais.")
+        briefing = build_monitor_br_briefing({})
+        with st.container(border=True):
+            st.subheader(briefing["title"])
+            st.caption(briefing["intro"])
+            st.info(briefing["empty_message"])
         return
 
     def fmt(value, suffix="", digits=2):
@@ -7441,6 +7446,18 @@ def pagina_monitor_br():
     derived = payload.get("derived", {})
     updated = html.escape(str(payload.get("updated_at", "---")).replace("T", " ")[:19])
     st.caption(f"Leitura atualizada em {updated} (horário de Brasília). Frequências variam por indicador; consulte a data de referência em cada série.")
+
+    briefing = build_monitor_br_briefing(payload)
+    with st.container(border=True):
+        st.subheader(briefing["title"])
+        st.caption(briefing["intro"])
+        if briefing["points"]:
+            for point in briefing["points"]:
+                st.markdown(f"**{point['title']}.** {point['text']}")
+                st.caption(f"Referência: {point['reference']}")
+            st.caption("Leitura baseada nos últimos dados disponíveis; diferenças de período podem ocorrer entre fontes. É um resumo informativo, não uma recomendação de investimento.")
+        else:
+            st.info(briefing["empty_message"])
 
     st.markdown("### Política monetária · dados e comunicação oficial")
     policy = payload.get("monetary_policy") or {}
