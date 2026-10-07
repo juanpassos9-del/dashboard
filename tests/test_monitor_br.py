@@ -14,9 +14,10 @@ def test_series_reading_reports_latest_and_change():
 
 
 def test_focus_snapshot_uses_four_week_reference():
-    data = {"publish_date": "2026-10-05", "updated_at": "2026-10-05T12:00:00-03:00", "years": {"2026": {"IPCA": {"hoje": 4.2, "4_sem": 4.0}}}}
+    data = {"publish_date": "2026-10-05", "updated_at": "2026-10-05T12:00:00-03:00", "years": {"2026": {"IPCA": {"hoje": 4.2, "4_sem": 4.0}}, "2027": {"IPCA": {"hoje": 3.8, "4_sem": 3.9}}}}
     result = _focus_snapshot(data)
     assert result["indicators"]["IPCA"] == {"value": 4.2, "delta_4w": 0.2}
+    assert result["horizons"]["2027"]["IPCA"] == {"value": 3.8, "delta_4w": -0.1}
     assert result["indicators"]["Selic"]["value"] is None
     assert result["updated_at"] == data["updated_at"]
 
@@ -98,3 +99,19 @@ def test_monitor_payload_builds_calendar_before_history_metadata(monkeypatch):
 
     assert payload["calendar_br"]["total_events"] == 1
     assert payload["calendar_history"]["official_release_count"] == payload["calendar_br"]["official_release_count"]
+
+
+def test_monitor_payload_includes_monetary_policy_documents_and_horizon(monkeypatch):
+    monkeypatch.setattr(monitor_br, "_fetch_bcb_series", lambda series_id, count: [{"date": "01/10/2026", "value": 15.0}] if series_id == 432 else [])
+    monkeypatch.setattr(monitor_br, "_fetch_ibge_ipca", lambda: None)
+    monkeypatch.setattr("execution.monitor_br_history.fetch_monitor_br_history", lambda: {"series": [], "errors": []})
+    monkeypatch.setattr("execution.monetary_policy.fetch_copom_documents", lambda: [{"title": "Ata recente", "document_url": "https://www.bcb.gov.br/ata"}])
+
+    payload = monitor_br.build_monitor_br_payload(focus={
+        "publish_date": "2026-10-05",
+        "years": {"2026": {"IPCA": {"hoje": 4.3, "4_sem": 4.2}}},
+    })
+
+    assert payload["monetary_policy"]["selic"]["value"] == 15.0
+    assert payload["monetary_policy"]["focus_horizons"]["2026"]["IPCA"]["value"] == 4.3
+    assert payload["monetary_policy"]["documents"][0]["title"] == "Ata recente"

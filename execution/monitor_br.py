@@ -147,12 +147,26 @@ def _focus_snapshot(focus: Any) -> dict[str, Any]:
             "value": now,
             "delta_4w": round(now - four_weeks, 4) if now is not None and four_weeks is not None else None,
         }
+    horizons = {}
+    for forecast_year, year_values in years.items():
+        if not isinstance(year_values, dict):
+            continue
+        horizons[str(forecast_year)] = {}
+        for key in ("IPCA", "Selic", "PIB", "Cambio"):
+            node = year_values.get(key) or {}
+            current_value = _number(node.get("hoje"))
+            four_weeks = _number(node.get("4_sem"))
+            horizons[str(forecast_year)][key] = {
+                "value": current_value,
+                "delta_4w": round(current_value - four_weeks, 4) if current_value is not None and four_weeks is not None else None,
+            }
     return {
         "publish_date": focus.get("publish_date"),
         "updated_at": focus.get("updated_at"),
         "source": focus.get("source", "Banco Central do Brasil · Boletim Focus"),
         "year": year,
         "indicators": indicators,
+        "horizons": horizons,
     }
 
 
@@ -374,6 +388,12 @@ def build_monitor_br_payload(global_data: Any = None, focus: Any = None, di: Any
     selic = _series_reading(observations.get("selic", []), "selic")
     ipca = _series_reading(observations.get("ipca", []), "ipca")
     ibc_br = _series_reading(observations.get("ibc_br", []), "ibc_br")
+    try:
+        from execution.monetary_policy import build_monetary_policy_snapshot, fetch_copom_documents
+        copom_documents = fetch_copom_documents()
+    except Exception as exc:
+        copom_documents = []
+        errors.append(f"Publicações do Copom: {type(exc).__name__}: {exc}")
     current_selic = selic.get("value")
     front_di = _number(curve[0].get("rate", curve[0].get("price"))) if curve else None
     selic_di_spread = round(front_di - current_selic, 3) if front_di is not None and current_selic is not None else None
@@ -391,6 +411,7 @@ def build_monitor_br_payload(global_data: Any = None, focus: Any = None, di: Any
         "official": {"selic": selic, "ipca": ipca, "ibc_br": ibc_br, "ibge_ipca_monthly": ibge_ipca},
         "official_history": official_history,
         "focus": _focus_snapshot(focus),
+        "monetary_policy": build_monetary_policy_snapshot(selic, _focus_snapshot(focus), copom_documents),
         "foreign_flow": _flow_snapshot(flow),
         "calendar_br": calendar_br,
         "calendar_history": {

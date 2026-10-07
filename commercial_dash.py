@@ -7427,6 +7427,54 @@ def pagina_monitor_br():
     updated = html.escape(str(payload.get("updated_at", "---")).replace("T", " ")[:19])
     st.caption(f"Leitura atualizada em {updated} (horário de Brasília). Frequências variam por indicador; consulte a data de referência em cada série.")
 
+    st.markdown("### Política monetária · dados e comunicação oficial")
+    policy = payload.get("monetary_policy") or {}
+    policy_cols = st.columns(4)
+    policy_selic = policy.get("selic") or official.get("selic") or {}
+    next_meeting = policy.get("next_meeting") or {}
+    horizons = policy.get("focus_horizons") or {}
+    current_year = str(datetime.now(ZoneInfo("America/Sao_Paulo")).year)
+    next_year = str(int(current_year) + 1)
+    current_focus_ipca = (horizons.get(current_year) or {}).get("IPCA") or {}
+    next_focus_ipca = (horizons.get(next_year) or {}).get("IPCA") or {}
+    policy_metrics = [
+        ("Selic observada", fmt(policy_selic.get("value"), "% a.a."), policy_selic.get("date") or "BCB SGS 432"),
+        (f"Focus IPCA {current_year}", fmt(current_focus_ipca.get("value"), "%"), f"Publicação {policy.get('focus_publish_date') or 'indisponível'}"),
+        (f"Focus IPCA {next_year}", fmt(next_focus_ipca.get("value"), "%"), f"Publicação {policy.get('focus_publish_date') or 'indisponível'}"),
+        ("Próxima decisão do Copom", next_meeting.get("decision_date", "Sem calendário"), f"Reunião inicia {next_meeting.get('meeting_start', '---')}"),
+    ]
+    for col, (label, value, detail) in zip(policy_cols, policy_metrics):
+        with col:
+            st.metric(label, value)
+            st.caption(detail)
+    if next_meeting.get("source_url"):
+        st.markdown(f"[Calendário oficial do BCB]({next_meeting['source_url']})")
+    focus_table_rows = []
+    for year, values in sorted(horizons.items()):
+        row = {"Ano": year}
+        for key, label in (("IPCA", "IPCA (%)"), ("Selic", "Selic (%)"), ("PIB", "PIB (%)"), ("Cambio", "Câmbio (R$/US$)")):
+            item = values.get(key) or {}
+            row[label] = item.get("value")
+            row[f"Δ 4 sem. · {label}"] = item.get("delta_4w")
+        focus_table_rows.append(row)
+    if focus_table_rows:
+        with st.expander("Expectativas Focus por horizonte", expanded=False):
+            st.dataframe(pd.DataFrame(focus_table_rows), use_container_width=True, hide_index=True)
+            st.caption("Medianas do Focus e variação frente a quatro semanas; são expectativas reportadas ao BCB, não projeções do Copom.")
+    copom_documents = policy.get("documents") or []
+    if copom_documents:
+        with st.expander("Atas recentes do Copom", expanded=False):
+            for index, document in enumerate(copom_documents[:5]):
+                st.markdown(f"- [{document.get('title', 'Ata do Copom')}]({document.get('document_url')}) · {document.get('published_at', 'data não informada')}")
+                if index < 2 and document.get("sections"):
+                    with st.container(border=True):
+                        st.caption("Ata mais recente" if index == 0 else "Ata imediatamente anterior")
+                        for section in document["sections"]:
+                            st.markdown(f"**{section['section']}**  \n{section['excerpt']}")
+                elif index < 2 and document.get("text_error"):
+                    st.caption(f"Não foi possível extrair o texto desta ata: {document['text_error']}")
+            st.caption("Trechos extraídos do HTML oficial do BCB; use os links para consultar o documento integral. A extração organiza o texto, sem atribuir nota ou recomendação.")
+
     cols = st.columns(4)
     kpis = [
         ("Selic meta", official.get("selic", {}), "% a.a."),
