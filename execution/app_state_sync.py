@@ -31,6 +31,7 @@ APP_STATE_ALLOWED_KEYS = {
     "lse_diagnostics",
     "ewz_plotly_ohlcv",
     "market_news_feed",
+    "monitor_br_vintages",
     "risk_manual_trades",
 }
 

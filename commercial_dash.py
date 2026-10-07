@@ -121,6 +121,7 @@ APP_STATE_ALLOWED_KEYS = {
     "lse_diagnostics",
     "ewz_plotly_ohlcv",
     "market_news_feed",
+    "monitor_br_vintages",
     "regime_juros",
     "risk_manual_trades",
 }
@@ -7387,6 +7388,12 @@ def pagina_monitor_br():
     st.caption("Brasil: dados oficiais do BCB e IBGE, expectativas Focus e leitura de mercado/curva DI.")
 
     from execution.monitor_br import build_monitor_br_payload, load_monitor_br_cache, save_monitor_br_cache
+    from execution.monitor_br_vintages import (
+        latest_monitor_br_revisions,
+        load_monitor_br_vintages_cache,
+        merge_monitor_br_vintages,
+        save_monitor_br_vintages_cache,
+    )
 
     refresh = st.button("Atualizar Monitor BR", type="primary", use_container_width=True, key="monitor_br_refresh")
     payload = load_monitor_br_cache()
@@ -7408,6 +7415,14 @@ def pagina_monitor_br():
                 else:
                     payload = fresh
                     save_monitor_br_cache(payload)
+                    existing_vintages = fetch_app_state_cached("monitor_br_vintages") or load_monitor_br_vintages_cache() or {}
+                    vintages = merge_monitor_br_vintages(existing_vintages, payload.get("official_history"))
+                    save_monitor_br_vintages_cache(vintages)
+                    st.session_state["monitor_br_vintages"] = vintages
+                    saved, sync_warning = sync_app_state_value("monitor_br_vintages", vintages)
+                    if not saved:
+                        st.session_state["monitor_br_vintages_sync_warning"] = sync_warning
+                    fetch_app_state_cached.clear()
             except Exception as exc:
                 st.error(f"Não foi possível atualizar o Monitor BR: {exc}")
     if not payload:
@@ -7516,6 +7531,59 @@ def pagina_monitor_br():
         with st.expander("Fontes históricas indisponíveis"):
             for error in history_errors:
                 st.caption(str(error))
+
+    st.markdown("### Composição do IPCA · grupos e pesos")
+    ipca_groups = [item for item in history_series if str(item.get("key", "")).startswith("ipca_group_")]
+    ipca_group_rows = []
+    for item in ipca_groups:
+        observations = item.get("observations") or []
+        if not observations:
+            continue
+        latest = observations[-1]
+        previous = observations[-2] if len(observations) > 1 else {}
+        ipca_group_rows.append({
+            "Grupo": item.get("name"),
+            "Referência": latest.get("date"),
+            "Variação mensal (%)": latest.get("value"),
+            "Δ vs. mês anterior (p.p.)": round(latest["value"] - previous["value"], 3) if previous.get("value") is not None else None,
+            "Peso no IPCA (%)": latest.get("weight"),
+            "Contribuição aprox. (p.p.)": latest.get("contribution_pp_approx"),
+        })
+    if ipca_group_rows:
+        ipca_group_rows.sort(key=lambda row: abs(row.get("Contribuição aprox. (p.p.)") or 0), reverse=True)
+        st.dataframe(pd.DataFrame(ipca_group_rows), use_container_width=True, hide_index=True)
+        st.caption("Contribuição aproximada = variação mensal do grupo × peso mensal ÷ 100. Não substitui a contribuição oficial calculada pelo IBGE; pesos podem ser atualizados.")
+    else:
+        st.info("Componentes do IPCA indisponíveis nesta atualização; as demais séries continuam sendo exibidas.")
+
+    st.markdown("### Crédito · condições financeiras")
+    credit_series = [item for item in history_series if str(item.get("key", "")).startswith("credit_")]
+    if credit_series:
+        credit_cols = st.columns(min(4, len(credit_series)))
+        for col, item in zip(credit_cols, credit_series):
+            observations = item.get("observations") or []
+            latest = observations[-1] if observations else {}
+            previous = observations[-2] if len(observations) > 1 else {}
+            unit = item.get("unit", "")
+            with col:
+                change = latest.get("value") - previous.get("value") if latest.get("value") is not None and previous.get("value") is not None else None
+                st.metric(item.get("name", "Crédito"), fmt(latest.get("value"), f" {unit}"), delta=fmt(change, "", 3) if change is not None else None)
+                st.caption(f"{latest.get('date', 'sem referência')} · {item.get('source', 'BCB SGS')}")
+        st.caption("Saldo e concessões em R$ milhões; juros em % ao ano; inadimplência considera atrasos acima de 90 dias. A variação mostrada compara observações consecutivas da série.")
+    else:
+        st.info("Séries de crédito do BCB indisponíveis nesta atualização.")
+
+    vintages = st.session_state.get("monitor_br_vintages") or fetch_app_state_cached("monitor_br_vintages") or load_monitor_br_vintages_cache() or {}
+    revision_rows = latest_monitor_br_revisions(vintages)
+    vintage_warning = st.session_state.pop("monitor_br_vintages_sync_warning", "")
+    with st.expander(f"Histórico de vintages e revisões · {vintages.get('observation_count', 0)} observações arquivadas"):
+        st.caption(f"Arquivo atualizado em {vintages.get('updated_at', 'ainda não criado')}. Os valores são as versões vistas pelo Monitor BR em cada coleta; revisões anteriores à primeira coleta não são recuperadas retroativamente.")
+        if revision_rows:
+            st.dataframe(pd.DataFrame(revision_rows), use_container_width=True, hide_index=True)
+        else:
+            st.caption("Nenhuma revisão diferente foi observada até agora. A primeira atualização cria a linha de base do arquivo.")
+        if vintage_warning:
+            st.warning(f"Arquivo salvo localmente, mas não foi possível sincronizar no Supabase: {vintage_warning}")
 
     st.markdown("### Leitura do mercado brasileiro")
     market_cols = st.columns(3)
