@@ -7381,6 +7381,119 @@ def pagina_monitor_macro():
                 st.caption(str(err))
 
 
+def pagina_monitor_br():
+    """Painel deterministico de macroeconomia brasileira."""
+    st.title("MONITOR BR")
+    st.caption("Brasil: dados oficiais do BCB e IBGE, expectativas Focus e leitura de mercado/curva DI.")
+
+    from execution.monitor_br import build_monitor_br_payload, load_monitor_br_cache, save_monitor_br_cache
+
+    refresh = st.button("Atualizar Monitor BR", type="primary", use_container_width=True, key="monitor_br_refresh")
+    payload = load_monitor_br_cache()
+    if refresh:
+        with st.spinner("Consultando BCB e IBGE e atualizando a leitura brasileira..."):
+            try:
+                global_data = get_global_markets_data()
+                focus_data = fetch_app_state_cached("boletim_focus")
+                di_data = fetch_di_futuro_cached_for_ui()
+                fresh = build_monitor_br_payload(global_data, focus_data, di_data)
+                if not any(fresh.get("official", {}).get(key, {}).get("value") is not None for key in ("selic", "ipca", "ibc_br")):
+                    if payload:
+                        st.warning("As fontes oficiais falharam nesta tentativa; mantendo a última leitura salva.")
+                    else:
+                        payload = fresh
+                else:
+                    payload = fresh
+                    save_monitor_br_cache(payload)
+            except Exception as exc:
+                st.error(f"Não foi possível atualizar o Monitor BR: {exc}")
+    if not payload:
+        st.info("Ainda não há leitura em cache. Clique em Atualizar Monitor BR para consultar as séries oficiais.")
+        return
+
+    def fmt(value, suffix="", digits=2):
+        try:
+            return f"{float(value):,.{digits}f}{suffix}".replace(",", "X").replace(".", ",").replace("X", ".")
+        except (TypeError, ValueError):
+            return "---"
+
+    official = payload.get("official", {})
+    market = payload.get("market", {})
+    focus = payload.get("focus", {})
+    derived = payload.get("derived", {})
+    updated = html.escape(str(payload.get("updated_at", "---")).replace("T", " ")[:19])
+    st.caption(f"Leitura atualizada em {updated} (horário de Brasília). Frequências variam por indicador; consulte a data de referência em cada série.")
+
+    cols = st.columns(4)
+    kpis = [
+        ("Selic meta", official.get("selic", {}), "% a.a."),
+        ("IPCA mensal · BCB", official.get("ipca", {}), "% m/m"),
+        ("IPCA mensal · IBGE", official.get("ibge_ipca_monthly") or {}, "% m/m"),
+        ("IBC-Br dessazonalizado", official.get("ibc_br", {}), " índice"),
+    ]
+    for col, (label, item, unit) in zip(cols, kpis):
+        with col:
+            value = item.get("value")
+            st.metric(label, fmt(value, unit), delta=fmt(item.get("delta"), " p.p." if unit.startswith("%") else "", 3) if item.get("delta") is not None else None)
+            st.caption(f"{item.get('date', 'Sem referência')} · {item.get('source', 'BCB SGS')} · {item.get('frequency', 'mensal')}")
+
+    st.markdown("### Leitura do mercado brasileiro")
+    market_cols = st.columns(3)
+    for col, key, title in zip(market_cols, ("IBOV", "USD/BRL"), ("Ibovespa", "Dólar/real")):
+        item = market.get(key) or {}
+        with col:
+            st.metric(title, fmt(item.get("price")), delta=fmt(item.get("change"), "%") if item.get("change") is not None else None)
+            age = item.get("age_seconds")
+            freshness = item.get("freshness", "sem horário")
+            age_label = f" · {int(age // 60)} min" if isinstance(age, (int, float)) else ""
+            st.caption(f"Fonte: {item.get('source', 'snapshot central')} · {freshness}{age_label} · referência {item.get('source_timestamp') or item.get('updated_at') or 'não informada'}")
+
+    st.markdown("### Expectativas Focus · ano corrente")
+    focus_cols = st.columns(4)
+    focus_names = [("IPCA", "%"), ("Selic", "%"), ("PIB", "%"), ("Cambio", " R$/US$")]
+    for col, (key, suffix) in zip(focus_cols, focus_names):
+        item = (focus.get("indicators") or {}).get(key, {})
+        with col:
+            delta = item.get("delta_4w")
+            st.metric(key, fmt(item.get("value"), suffix), delta=fmt(delta, " p.p.", 2) if delta is not None else None)
+            st.caption(f"Boletim {focus.get('publish_date') or 'sem cache'} · {focus.get('year') or datetime.now().year}")
+
+    st.markdown("### Curva de juros futuros · DI")
+    curve = payload.get("di_curve") or []
+    if curve:
+        curve_rows = [{"Contrato": item.get("symbol"), "Taxa (%)": item.get("rate", item.get("price")), "Vencimento": item.get("maturity"), "Último negócio": item.get("last_trade"), "Fonte": item.get("source")} for item in curve]
+        st.dataframe(pd.DataFrame(curve_rows), use_container_width=True, hide_index=True)
+        spread = derived.get("selic_di_spread_pp")
+        if spread is not None:
+            st.caption(f"DI de vértice curto menos Selic meta: {fmt(spread, ' p.p.', 3)}. É diferença entre taxas, não previsão direta da próxima decisão do Copom.")
+    else:
+        st.info("Curva DI indisponível no snapshot atual.")
+
+    st.markdown("### Contexto e limitações")
+    ibc_delta = official.get("ibc_br", {}).get("delta")
+    ipca_delta = official.get("ipca", {}).get("delta")
+    observations = []
+    if ipca_delta is not None:
+        observations.append("A variação mensal mais recente do IPCA no BCB " + ("subiu" if ipca_delta > 0 else "caiu" if ipca_delta < 0 else "ficou estável") + f" em relação ao mês anterior ({fmt(ipca_delta, ' p.p.', 3)}).")
+    if ibc_delta is not None:
+        observations.append("O índice do IBC-Br " + ("avançou" if ibc_delta > 0 else "recuou" if ibc_delta < 0 else "ficou estável") + f" ante a leitura mensal anterior ({fmt(ibc_delta, '', 3)} ponto).")
+    if derived.get("selic_di_spread_pp") is not None:
+        spread = derived["selic_di_spread_pp"]
+        observations.append(f"O vértice DI curto está {fmt(abs(spread), ' p.p.', 3)} {'acima' if spread > 0 else 'abaixo'} da Selic meta observada.")
+    if observations:
+        for item in observations:
+            st.write(f"- {item}")
+    else:
+        st.info("Aguardando dados suficientes para uma leitura comparativa. Não inferimos tendência sem duas observações válidas.")
+    st.caption("Os números descrevem observações publicadas e cotações do snapshot. Esta página não representa recomendação de investimento.")
+
+    errors = payload.get("errors") or []
+    if errors:
+        with st.expander("Fontes indisponíveis ou avisos"):
+            for error in errors:
+                st.caption(error)
+
+
 @st.fragment(run_every=300)
 def render_terminal_global_latest_report():
     """Exibe no Terminal Global o mesmo ultimo report salvo no Market Report."""
@@ -12820,7 +12933,7 @@ with st.sidebar:
         _clear_auth_session()
         _auth_rerun()
     st.markdown("### 🧭 Navegação")
-    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "FX COMMAND CENTER", "MONITOR MACRO", "Crypto Terminal", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
+    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "FX COMMAND CENTER", "MONITOR MACRO", "🇧🇷 MONITOR BR", "Crypto Terminal", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
     sidebar_clock()
     
     st.markdown("---")
@@ -12848,6 +12961,8 @@ elif page == "FX COMMAND CENTER":
     render_fx_command_center()
 elif page == "MONITOR MACRO":
     pagina_monitor_macro()
+elif page == "🇧🇷 MONITOR BR":
+    pagina_monitor_br()
 elif page == "Crypto Terminal":
     pagina_crypto_terminal()
 elif page == "📺 Terminal Bloomberg":
