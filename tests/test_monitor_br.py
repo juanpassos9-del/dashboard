@@ -1,4 +1,4 @@
-from execution.monitor_br import _flow_snapshot, _focus_snapshot, _market_asset, _series_reading
+from execution.monitor_br import _br_calendar_snapshot, _flow_snapshot, _focus_snapshot, _market_asset, _series_reading
 
 
 def test_series_reading_reports_latest_and_change():
@@ -29,6 +29,28 @@ def test_flow_snapshot_summarizes_recent_trading_days():
     assert result["latest"] == {"date": "2026-10-02", "foreigners_thousands": 1500.0}
     assert result["sum_5d_thousands"] == 3000.0
     assert result["sum_20d_thousands"] == 3000.0
+
+
+def test_calendar_groups_brazilian_events_and_interprets_inflation_surprise():
+    result = _br_calendar_snapshot([
+        {"date": "2026-10-01", "currency": "BRL", "event": "IPCA (Mensal)", "actual": "0,50%", "forecast": "0,40%", "previous": "0,30%"},
+        {"date": "2026-10-01", "currency": "USD", "event": "CPI", "actual": "2%", "forecast": "2%"},
+    ])
+    event = result["groups"]["inflation"][0]
+    assert result["total_events"] == 1
+    assert event["comparison"] == "Surpresa inflacionária"
+    assert event["status"] == "divulgado"
+    assert event["movement_vs_previous"] == "Inflação acelerou vs. anterior"
+
+
+def test_calendar_inverts_unemployment_surprise_and_includes_fiscal_topic():
+    result = _br_calendar_snapshot([
+        {"date": "2026-10-02", "currency": "BRL", "event": "Taxa de desemprego", "actual": "6,0%", "forecast": "6,2%"},
+        {"date": "2026-10-03", "currency": "BRL", "event": "Resultado Primário", "actual": "-10B", "forecast": "-12B"},
+    ])
+    assert result["groups"]["labor"][0]["comparison"] == "Trabalho mais forte que o consenso"
+    assert result["groups"]["labor"][0]["movement_vs_previous"] == "Sem comparação com o anterior"
+    assert result["groups"]["fiscal"][0]["comparison"] == "Acima do consenso"
 
 
 def test_market_asset_finds_symbol_across_categories():

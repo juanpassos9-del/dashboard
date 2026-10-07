@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,24 @@ BCB_SERIES = {
     "ibc_br": {"id": 24363, "name": "IBC-Br dessazonalizado", "unit": "índice", "frequency": "mensal"},
 }
 SIDRA_URL = "https://servicodados.ibge.gov.br/api/v3/agregados/1737/periodos/{period}/variaveis/63?localidades=N1[all]"
+CALENDAR_TOPICS = {
+    "inflation": ("IPCA", "IPCA-15", "INPC", "IGP-M", "IGP M", "inflação", "inflacao", "preços ao consumidor"),
+    "consumption_activity": ("vendas no varejo", "vendas a retalho", "serviços", "servicos", "IBC-Br", "IBC Br", "PIB", "produção industrial", "producao industrial", "atividade econômica", "atividade economica", "consumo"),
+    "labor": ("desemprego", "desocupação", "desocupacao", "PNAD", "CAGED", "emprego", "criação de empregos", "criacao de empregos", "salários", "salarios", "mercado de trabalho"),
+    "monetary_policy": ("Copom", "Selic", "decisão da taxa de juros", "decisao da taxa de juros", "ata do Copom", "Relatório de Política Monetária"),
+    "credit": ("crédito", "credito", "inadimplência", "inadimplencia", "concessões", "concessoes"),
+    "external": ("balança comercial", "balanca comercial", "conta corrente", "transações correntes", "transacoes correntes", "investimento direto", "reservas internacionais", "exportações", "exportacoes", "importações", "importacoes"),
+    "fiscal": ("resultado primário", "resultado primario", "resultado fiscal", "dívida pública", "divida publica", "dívida bruta", "divida bruta", "receitas do governo", "arrecadação", "arrecadacao"),
+}
+CALENDAR_TOPIC_LABELS = {
+    "inflation": "Inflação",
+    "consumption_activity": "Consumo e atividade",
+    "labor": "Mercado de trabalho",
+    "monetary_policy": "Política monetária",
+    "credit": "Crédito",
+    "external": "Setor externo",
+    "fiscal": "Fiscal e dívida",
+}
 
 
 def _number(value: Any) -> float | None:
@@ -161,7 +180,129 @@ def _flow_snapshot(flow: Any) -> dict[str, Any]:
     }
 
 
-def build_monitor_br_payload(global_data: Any = None, focus: Any = None, di: Any = None, flow: Any = None) -> dict[str, Any]:
+def _calendar_number(value: Any) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip().replace("\u00a0", " ")
+    if text in {"", "---", "-", "N/A"}:
+        return None
+    multiplier = 1.0
+    suffix = text[-1:].upper()
+    if suffix in {"K", "M", "B"}:
+        multiplier = {"K": 1_000.0, "M": 1_000_000.0, "B": 1_000_000_000.0}[suffix]
+        text = text[:-1].strip()
+    text = text.replace("%", "").replace(" ", "")
+    if "," in text and "." in text:
+        text = text.replace(".", "").replace(",", ".")
+    else:
+        text = text.replace(",", ".")
+    value_number = _number(text)
+    return value_number * multiplier if value_number is not None else None
+
+
+def _classify_br_calendar_event(event: dict[str, Any]) -> str | None:
+    currency = str(event.get("currency") or event.get("País") or event.get("Pais") or "").upper()
+    country = str(event.get("country") or event.get("país") or event.get("pais") or "").lower()
+    title = str(event.get("event") or event.get("Evento") or "")
+    if currency not in {"BRL", "BR"} and not any(term in country for term in ("brasil", "brazil")):
+        return None
+    lowered = title.casefold()
+    for topic, keywords in CALENDAR_TOPICS.items():
+        if any(keyword.casefold() in lowered for keyword in keywords):
+            return topic
+    return None
+
+
+def _calendar_event_reading(event: dict[str, Any], topic: str) -> dict[str, Any]:
+    title = str(event.get("event") or event.get("Evento") or "Evento")
+    actual_raw = event.get("actual") or event.get("Atual")
+    forecast_raw = event.get("forecast") or event.get("Previsão") or event.get("Previsao")
+    previous_raw = event.get("previous") or event.get("Anterior")
+    actual, forecast, previous = map(_calendar_number, (actual_raw, forecast_raw, previous_raw))
+    surprise = actual - forecast if actual is not None and forecast is not None else None
+    lowered = title.casefold()
+    inverse_labor = topic == "labor" and any(term in lowered for term in ("desemprego", "desocupação", "desocupacao"))
+    movement = actual - previous if actual is not None and previous is not None else None
+    if movement is None:
+        movement_label = "Sem comparação com o anterior"
+    elif topic == "inflation":
+        movement_label = "Inflação acelerou vs. anterior" if movement > 0 else "Inflação desacelerou vs. anterior" if movement < 0 else "Estável vs. anterior"
+    elif topic == "consumption_activity":
+        movement_label = "Atividade avançou vs. anterior" if movement > 0 else "Atividade recuou vs. anterior" if movement < 0 else "Estável vs. anterior"
+    elif topic == "labor":
+        stronger = movement < 0 if inverse_labor else movement > 0
+        movement_label = ("Mercado de trabalho melhorou vs. anterior" if stronger else "Mercado de trabalho enfraqueceu vs. anterior") if movement != 0 else "Estável vs. anterior"
+    else:
+        movement_label = "Acima do dado anterior" if movement > 0 else "Abaixo do dado anterior" if movement < 0 else "Estável vs. anterior"
+
+    if surprise is not None:
+        if abs(surprise) < 1e-12:
+            comparison = "Em linha com o consenso"
+            tone = "neutro"
+        else:
+            if topic == "inflation":
+                adverse = surprise > 0
+                tone = "inflacionário" if adverse else "desinflacionário"
+                comparison = "Surpresa inflacionária" if adverse else "Surpresa desinflacionária"
+            elif topic == "labor":
+                stronger = surprise < 0 if inverse_labor else surprise > 0
+                tone = "mercado de trabalho mais forte" if stronger else "mercado de trabalho mais fraco"
+                comparison = "Trabalho mais forte que o consenso" if stronger else "Trabalho mais fraco que o consenso"
+            elif topic == "monetary_policy":
+                tone = "hawkish" if surprise > 0 else "dovish"
+                comparison = "Taxa acima do consenso · viés hawkish" if surprise > 0 else "Taxa abaixo do consenso · viés dovish"
+            elif topic == "credit" and any(term in lowered for term in ("inadimpl", "atraso")):
+                tone = "crédito mais arriscado" if surprise > 0 else "crédito menos arriscado"
+                comparison = "Inadimplência acima do consenso" if surprise > 0 else "Inadimplência abaixo do consenso"
+            elif topic in {"consumption_activity", "external", "credit", "fiscal"}:
+                tone = "acima" if surprise > 0 else "abaixo"
+                comparison = "Acima do consenso" if surprise > 0 else "Abaixo do consenso"
+            else:
+                tone = "acima" if surprise > 0 else "abaixo"
+                comparison = "Acima do consenso" if surprise > 0 else "Abaixo do consenso"
+    elif actual is not None:
+        comparison = "Divulgado; sem consenso para comparar"
+        tone = "sem referência"
+    else:
+        comparison = "Aguardando divulgação"
+        tone = "pendente"
+
+    return {
+        "date": str(event.get("date") or event.get("Data") or ""),
+        "time": str(event.get("time") or event.get("Horário") or event.get("Horario") or ""),
+        "topic": topic,
+        "topic_label": CALENDAR_TOPIC_LABELS[topic],
+        "event": title,
+        "actual": actual_raw or "---",
+        "forecast": forecast_raw or "---",
+        "previous": previous_raw or "---",
+        "comparison": comparison,
+        "movement_vs_previous": movement_label,
+        "tone": tone,
+        "status": "divulgado" if actual is not None else "aguardando",
+        "source": event.get("source") or "Calendário econômico integrado",
+    }
+
+
+def _br_calendar_snapshot(events: Any) -> dict[str, Any]:
+    grouped: dict[str, list[dict[str, Any]]] = {topic: [] for topic in CALENDAR_TOPICS}
+    for event in events if isinstance(events, list) else []:
+        if not isinstance(event, dict):
+            continue
+        topic = _classify_br_calendar_event(event)
+        if topic:
+            grouped[topic].append(_calendar_event_reading(event, topic))
+    for items in grouped.values():
+        items.sort(key=lambda item: (item["date"], item["time"]), reverse=True)
+    return {
+        "groups": grouped,
+        "total_events": sum(len(items) for items in grouped.values()),
+        "latest_date": max((item["date"] for items in grouped.values() for item in items), default=None),
+        "source": "Calendário econômico integrado; cobertura brasileira filtrada por moeda/país e palavras-chave",
+    }
+
+
+def build_monitor_br_payload(global_data: Any = None, focus: Any = None, di: Any = None, flow: Any = None, calendar_events: Any = None) -> dict[str, Any]:
     """Build a payload from official series and existing market snapshots."""
     errors: list[str] = []
     observations: dict[str, list[dict[str, Any]]] = {}
@@ -205,6 +346,7 @@ def build_monitor_br_payload(global_data: Any = None, focus: Any = None, di: Any
         "official": {"selic": selic, "ipca": ipca, "ibc_br": ibc_br, "ibge_ipca_monthly": ibge_ipca},
         "focus": _focus_snapshot(focus),
         "foreign_flow": _flow_snapshot(flow),
+        "calendar_br": _br_calendar_snapshot(calendar_events),
         "market": market,
         "di_curve": curve,
         "derived": {"front_di": front_di, "selic_di_spread_pp": selic_di_spread},

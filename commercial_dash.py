@@ -7396,8 +7396,9 @@ def pagina_monitor_br():
                 global_data = get_global_markets_data()
                 focus_data = fetch_app_state_cached("boletim_focus")
                 flow_data = fetch_app_state_cached("fluxo_estrangeiro_b3")
+                calendar_data = get_calendar_data() or []
                 di_data = fetch_di_futuro_cached_for_ui()
-                fresh = build_monitor_br_payload(global_data, focus_data, di_data, flow_data)
+                fresh = build_monitor_br_payload(global_data, focus_data, di_data, flow_data, calendar_data)
                 if not any(fresh.get("official", {}).get(key, {}).get("value") is not None for key in ("selic", "ipca", "ibc_br")):
                     if payload:
                         st.warning("As fontes oficiais falharam nesta tentativa; mantendo a última leitura salva.")
@@ -7494,6 +7495,34 @@ def pagina_monitor_br():
         st.caption(f"Janela mais recente disponível: {len(flow_records[:20])} registros de pregão, do {flow_frame['date'].iloc[0]} ao {flow_frame['date'].iloc[-1]}. Saldo positivo indica entrada líquida; negativo, saída líquida.")
     else:
         st.info("Fluxo estrangeiro ainda não disponível no estado compartilhado. A atualização depende do coletor agendado.")
+
+    st.markdown("### Calendário macroeconômico brasileiro")
+    calendar_br = payload.get("calendar_br") or {}
+    st.caption(f"{calendar_br.get('source', 'Calendário econômico integrado')} · último evento classificado: {calendar_br.get('latest_date') or 'sem dados'}")
+    try:
+        calendar_latest = datetime.strptime(str(calendar_br.get("latest_date")), "%Y-%m-%d").date()
+        if (datetime.now(ZoneInfo("America/Sao_Paulo")).date() - calendar_latest).days > 7:
+            st.warning("O calendário não contém evento brasileiro recente (mais de 7 dias). As leituras abaixo representam apenas o histórico disponível.")
+    except (TypeError, ValueError):
+        st.info("Não há eventos brasileiros classificados no calendário atual. Confira se a fonte está atualizada e se os eventos usam moeda BRL.")
+
+    topic_groups = calendar_br.get("groups") or {}
+    for topic, label in (
+        ("inflation", "Inflação"),
+        ("consumption_activity", "Consumo e atividade"),
+        ("labor", "Mercado de trabalho"),
+        ("monetary_policy", "Política monetária"),
+        ("credit", "Crédito"),
+        ("external", "Setor externo"),
+        ("fiscal", "Fiscal e dívida"),
+    ):
+        events = topic_groups.get(topic) or []
+        with st.expander(f"{label} · {len(events)} eventos", expanded=topic in {"inflation", "consumption_activity", "labor"}):
+            if events:
+                st.dataframe(pd.DataFrame(events[:8])["date time event actual forecast previous movement_vs_previous comparison source".split()], use_container_width=True, hide_index=True)
+                st.caption("‘Movimento vs. anterior’ compara o realizado com o valor anterior informado pelo calendário. ‘Comparação’ mede a surpresa contra o consenso; nenhuma das duas substitui uma série histórica oficial.")
+            else:
+                st.caption("Nenhum evento deste tema encontrado no calendário disponível.")
 
     st.markdown("### Curva de juros futuros · DI")
     curve = payload.get("di_curve") or []
