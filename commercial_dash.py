@@ -7397,8 +7397,9 @@ def pagina_monitor_br():
                 focus_data = fetch_app_state_cached("boletim_focus")
                 flow_data = fetch_app_state_cached("fluxo_estrangeiro_b3")
                 calendar_data = get_calendar_data() or []
+                calendar_history = fetch_app_state_cached("calendario_economico_historico")
                 di_data = fetch_di_futuro_cached_for_ui()
-                fresh = build_monitor_br_payload(global_data, focus_data, di_data, flow_data, calendar_data)
+                fresh = build_monitor_br_payload(global_data, focus_data, di_data, flow_data, calendar_data, calendar_history)
                 if not any(fresh.get("official", {}).get(key, {}).get("value") is not None for key in ("selic", "ipca", "ibc_br")):
                     if payload:
                         st.warning("As fontes oficiais falharam nesta tentativa; mantendo a última leitura salva.")
@@ -7498,13 +7499,18 @@ def pagina_monitor_br():
 
     st.markdown("### Calendário macroeconômico brasileiro")
     calendar_br = payload.get("calendar_br") or {}
-    st.caption(f"{calendar_br.get('source', 'Calendário econômico integrado')} · último evento classificado: {calendar_br.get('latest_date') or 'sem dados'}")
+    history_meta = payload.get("calendar_history") or {}
+    st.caption(f"Calendário de mercado + IBGE oficial · {history_meta.get('event_count', 0)} eventos arquivados, {history_meta.get('official_release_count', 0)} datas IBGE · cobertura {calendar_br.get('earliest_date') or '---'} a {calendar_br.get('latest_date') or '---'} · arquivo atualizado {history_meta.get('updated_at') or 'não disponível'}")
+    if str(history_meta.get("ibge_calendar_status", "")).startswith("unavailable"):
+        st.warning("A API oficial de calendário do IBGE não respondeu na última tentativa; as datas IBGE em cache foram preservadas.")
     try:
-        calendar_latest = datetime.strptime(str(calendar_br.get("latest_date")), "%Y-%m-%d").date()
+        calendar_latest = datetime.strptime(str(calendar_br.get("latest_released_date")), "%Y-%m-%d").date()
         if (datetime.now(ZoneInfo("America/Sao_Paulo")).date() - calendar_latest).days > 7:
-            st.warning("O calendário não contém evento brasileiro recente (mais de 7 dias). As leituras abaixo representam apenas o histórico disponível.")
+            st.warning("O último evento brasileiro divulgado tem mais de 7 dias. A leitura representa apenas o histórico disponível, não o cenário de hoje.")
     except (TypeError, ValueError):
         st.info("Não há eventos brasileiros classificados no calendário atual. Confira se a fonte está atualizada e se os eventos usam moeda BRL.")
+    if str(history_meta.get("backfill_status", "")).startswith(("unavailable", "empty_response")):
+        st.warning("O backfill histórico do Investing está indisponível. O calendário oficial do IBGE fornece datas de divulgação e referência; consenso/realizado do provedor de mercado só ficam históricos à medida que são arquivados.")
 
     topic_groups = calendar_br.get("groups") or {}
     for topic, label in (
@@ -7519,7 +7525,7 @@ def pagina_monitor_br():
         events = topic_groups.get(topic) or []
         with st.expander(f"{label} · {len(events)} eventos", expanded=topic in {"inflation", "consumption_activity", "labor"}):
             if events:
-                st.dataframe(pd.DataFrame(events[:8])["date time event actual forecast previous movement_vs_previous comparison source".split()], use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(events[:8])["date time event reference_period actual forecast previous movement_vs_previous comparison status source".split()], use_container_width=True, hide_index=True)
                 st.caption("‘Movimento vs. anterior’ compara o realizado com o valor anterior informado pelo calendário. ‘Comparação’ mede a surpresa contra o consenso; nenhuma das duas substitui uma série histórica oficial.")
             else:
                 st.caption("Nenhum evento deste tema encontrado no calendário disponível.")

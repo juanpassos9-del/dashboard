@@ -24,7 +24,7 @@ BCB_SERIES = {
 SIDRA_URL = "https://servicodados.ibge.gov.br/api/v3/agregados/1737/periodos/{period}/variaveis/63?localidades=N1[all]"
 CALENDAR_TOPICS = {
     "inflation": ("IPCA", "IPCA-15", "INPC", "IGP-M", "IGP M", "inflação", "inflacao", "preços ao consumidor"),
-    "consumption_activity": ("vendas no varejo", "vendas a retalho", "serviços", "servicos", "IBC-Br", "IBC Br", "PIB", "produção industrial", "producao industrial", "atividade econômica", "atividade economica", "consumo"),
+    "consumption_activity": ("vendas no varejo", "vendas a retalho", "pesquisa mensal de comércio", "pesquisa mensal de comercio", "pesquisa mensal de serviços", "pesquisa mensal de servicos", "PIM-PF", "produção industrial", "producao industrial", "serviços", "servicos", "IBC-Br", "IBC Br", "PIB", "contas nacionais trimestrais", "atividade econômica", "atividade economica", "consumo"),
     "labor": ("desemprego", "desocupação", "desocupacao", "PNAD", "CAGED", "emprego", "criação de empregos", "criacao de empregos", "salários", "salarios", "mercado de trabalho"),
     "monetary_policy": ("Copom", "Selic", "decisão da taxa de juros", "decisao da taxa de juros", "ata do Copom", "Relatório de Política Monetária"),
     "credit": ("crédito", "credito", "inadimplência", "inadimplencia", "concessões", "concessoes"),
@@ -203,8 +203,8 @@ def _calendar_number(value: Any) -> float | None:
 def _classify_br_calendar_event(event: dict[str, Any]) -> str | None:
     currency = str(event.get("currency") or event.get("País") or event.get("Pais") or "").upper()
     country = str(event.get("country") or event.get("país") or event.get("pais") or "").lower()
-    title = str(event.get("event") or event.get("Evento") or "")
-    if currency not in {"BRL", "BR"} and not any(term in country for term in ("brasil", "brazil")):
+    title = " ".join(str(event.get(key) or "") for key in ("event", "Evento", "research", "nome_produto"))
+    if currency not in {"BRL", "BR", "BRAZIL", "BRASIL"} and not any(term in country for term in ("brasil", "brazil")):
         return None
     lowered = title.casefold()
     for topic, keywords in CALENDAR_TOPICS.items():
@@ -219,6 +219,8 @@ def _calendar_event_reading(event: dict[str, Any], topic: str) -> dict[str, Any]
     forecast_raw = event.get("forecast") or event.get("Previsão") or event.get("Previsao")
     previous_raw = event.get("previous") or event.get("Anterior")
     actual, forecast, previous = map(_calendar_number, (actual_raw, forecast_raw, previous_raw))
+    event_date = str(event.get("date") or event.get("Data") or "")
+    status = "divulgado" if actual is not None else "aguardando"
     surprise = actual - forecast if actual is not None and forecast is not None else None
     lowered = title.casefold()
     inverse_labor = topic == "labor" and any(term in lowered for term in ("desemprego", "desocupação", "desocupacao"))
@@ -263,6 +265,14 @@ def _calendar_event_reading(event: dict[str, Any], topic: str) -> dict[str, Any]
     elif actual is not None:
         comparison = "Divulgado; sem consenso para comparar"
         tone = "sem referência"
+    elif event.get("official_release") and event_date <= datetime.now(BR_TZ).date().isoformat():
+        comparison = "Data oficial de divulgação; valor/consenso indisponível nesta fonte"
+        tone = "sem valor"
+        status = "data divulgada"
+    elif event.get("official_release"):
+        comparison = "Divulgação prevista pelo calendário oficial do IBGE"
+        tone = "agenda oficial"
+        status = "agendado"
     else:
         comparison = "Aguardando divulgação"
         tone = "pendente"
@@ -279,30 +289,52 @@ def _calendar_event_reading(event: dict[str, Any], topic: str) -> dict[str, Any]
         "comparison": comparison,
         "movement_vs_previous": movement_label,
         "tone": tone,
-        "status": "divulgado" if actual is not None else "aguardando",
+        "status": status,
         "source": event.get("source") or "Calendário econômico integrado",
+        "reference_period": event.get("reference_period", ""),
     }
 
 
 def _br_calendar_snapshot(events: Any) -> dict[str, Any]:
     grouped: dict[str, list[dict[str, Any]]] = {topic: [] for topic in CALENDAR_TOPICS}
+    deduplicated = {}
     for event in events if isinstance(events, list) else []:
         if not isinstance(event, dict):
             continue
         topic = _classify_br_calendar_event(event)
         if topic:
+            key = (
+                str(event.get("date") or event.get("Data") or ""),
+                str(event.get("time") or event.get("Horário") or event.get("Horario") or ""),
+                str(event.get("currency") or event.get("País") or event.get("Pais") or "").casefold(),
+                " ".join(str(event.get("event") or event.get("Evento") or "").casefold().split()),
+            )
+            existing = deduplicated.get(key, {})
+            deduplicated[key] = {**event, **existing, **{k: v for k, v in event.items() if _has_calendar_value(v)}}
+    for event in deduplicated.values():
+        topic = _classify_br_calendar_event(event)
+        if topic:
             grouped[topic].append(_calendar_event_reading(event, topic))
     for items in grouped.values():
         items.sort(key=lambda item: (item["date"], item["time"]), reverse=True)
+    all_events = [item for items in grouped.values() for item in items]
+    released = [item for item in all_events if item["status"] in {"divulgado", "data divulgada"}]
     return {
         "groups": grouped,
-        "total_events": sum(len(items) for items in grouped.values()),
-        "latest_date": max((item["date"] for items in grouped.values() for item in items), default=None),
+        "total_events": len(all_events),
+        "latest_date": max((item["date"] for item in all_events), default=None),
+        "latest_released_date": max((item["date"] for item in released), default=None),
+        "earliest_date": min((item["date"] for item in all_events), default=None),
+        "official_release_count": sum(1 for item in all_events if str(item.get("source", "")).startswith("IBGE")),
         "source": "Calendário econômico integrado; cobertura brasileira filtrada por moeda/país e palavras-chave",
     }
 
 
-def build_monitor_br_payload(global_data: Any = None, focus: Any = None, di: Any = None, flow: Any = None, calendar_events: Any = None) -> dict[str, Any]:
+def _has_calendar_value(value: Any) -> bool:
+    return value is not None and str(value).strip().casefold() not in {"", "---", "-", "n/a", "none"}
+
+
+def build_monitor_br_payload(global_data: Any = None, focus: Any = None, di: Any = None, flow: Any = None, calendar_events: Any = None, calendar_history: Any = None) -> dict[str, Any]:
     """Build a payload from official series and existing market snapshots."""
     errors: list[str] = []
     observations: dict[str, list[dict[str, Any]]] = {}
@@ -346,7 +378,21 @@ def build_monitor_br_payload(global_data: Any = None, focus: Any = None, di: Any
         "official": {"selic": selic, "ipca": ipca, "ibc_br": ibc_br, "ibge_ipca_monthly": ibge_ipca},
         "focus": _focus_snapshot(focus),
         "foreign_flow": _flow_snapshot(flow),
-        "calendar_br": _br_calendar_snapshot(calendar_events),
+        "calendar_br": _br_calendar_snapshot(
+            [
+                *(calendar_events if isinstance(calendar_events, list) else []),
+                *(calendar_history.get("events", []) if isinstance(calendar_history, dict) else []),
+            ]
+        ),
+        "calendar_history": {
+            "updated_at": calendar_history.get("updated_at") if isinstance(calendar_history, dict) else None,
+            "backfill_status": calendar_history.get("backfill_status") if isinstance(calendar_history, dict) else "not_available",
+            "event_count": calendar_history.get("event_count", 0) if isinstance(calendar_history, dict) else 0,
+            "retention_days": calendar_history.get("retention_days") if isinstance(calendar_history, dict) else None,
+            "ibge_calendar_updated_at": calendar_history.get("ibge_calendar_updated_at") if isinstance(calendar_history, dict) else None,
+            "ibge_calendar_status": calendar_history.get("ibge_calendar_status") if isinstance(calendar_history, dict) else "not_available",
+            "official_release_count": calendar_br.get("official_release_count", 0),
+        },
         "market": market,
         "di_curve": curve,
         "derived": {"front_di": front_di, "selic_di_spread_pp": selic_di_spread},

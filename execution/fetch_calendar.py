@@ -78,7 +78,7 @@ def _impact_icon(impact):
     return "⚪"
 
 
-def _investing_request(base_url, language="pt-BR"):
+def _investing_request(base_url, language="pt-BR", date_from=None, date_to=None, country_ids=None):
     url = f"{base_url}/economic-calendar/Service/getCalendarFilteredData"
     session = requests.Session()
     user_agent = (
@@ -104,49 +104,33 @@ def _investing_request(base_url, language="pt-BR"):
         "Referer": f"{base_url}/economic-calendar/",
     }
     payload = {
-        "country[]": ["5", "4", "17", "72", "35", "25", "6", "12", "37", "26", "10", "14", "48"],
+        "country[]": country_ids or ["5", "4", "17", "72", "35", "25", "6", "12", "37", "26", "10", "14", "48", "32"],
         "importance[]": ["1", "2", "3"],
         "timeZone": "12",
         "timeFilter": "timeOnly",
-        "currentTab": "today",
+        "currentTab": "custom" if date_from and date_to else "today",
         "limit_from": "0",
     }
+    if date_from and date_to:
+        payload["dateFrom"] = str(date_from)
+        payload["dateTo"] = str(date_to)
 
     response = session.post(url, headers=headers, data=payload, timeout=20)
     response.raise_for_status()
     return response.json()
 
 
-def _fetch_investing_calendar():
-    """Busca calendario no Investing.com, que inclui Atual/Projecao/Anterior."""
-    last_error = None
-    payload_json = None
-    for base_url, language in [
-        ("https://br.investing.com", "pt-BR"),
-        ("https://www.investing.com", "en-US"),
-    ]:
-        try:
-            payload_json = _investing_request(base_url, language)
-            break
-        except Exception as e:
-            last_error = e
-    if payload_json is None:
-        raise last_error or RuntimeError("Investing.com indisponivel.")
-
+def _parse_investing_calendar(payload_json):
     soup = BeautifulSoup(payload_json.get("data", ""), "html.parser")
-
     events = []
     for row in soup.select("tr.js-event-item"):
         cols = [cell.get_text(" ", strip=True) for cell in row.select("td")]
         if len(cols) < 7:
             continue
-
         event_datetime = row.get("data-event-datetime", "")
         date_part = event_datetime[:10].replace("/", "-") if event_datetime else ""
         time_part = cols[0] or (event_datetime[11:16] if len(event_datetime) >= 16 else "")
-        impact_cell = row.select_one("td.sentiment")
-        impact, bull_count = _impact_from_investing_cell(impact_cell)
-
+        impact, bull_count = _impact_from_investing_cell(row.select_one("td.sentiment"))
         events.append({
             "date": date_part,
             "time": time_part,
@@ -161,9 +145,32 @@ def _fetch_investing_calendar():
             "previous": cols[6].strip() or "---",
             "source": "Investing.com",
         })
-
-    events.sort(key=lambda x: (x["date"], x["time"]))
+    events.sort(key=lambda item: (item["date"], item["time"]))
     return events
+
+
+def _fetch_investing_calendar(date_from=None, date_to=None, country_ids=None):
+    """Busca calendario no Investing.com, que inclui Atual/Projecao/Anterior."""
+    last_error = None
+    payload_json = None
+    for base_url, language in [
+        ("https://br.investing.com", "pt-BR"),
+        ("https://www.investing.com", "en-US"),
+    ]:
+        try:
+            payload_json = _investing_request(base_url, language, date_from, date_to, country_ids)
+            break
+        except Exception as e:
+            last_error = e
+    if payload_json is None:
+        raise last_error or RuntimeError("Investing.com indisponivel.")
+
+    return _parse_investing_calendar(payload_json)
+
+
+def fetch_investing_calendar_range(date_from, date_to):
+    """Fetches past economic-calendar rows for one bounded date interval."""
+    return _fetch_investing_calendar(date_from=date_from, date_to=date_to, country_ids=["32"])
 
 
 def _fetch_faireconomy_calendar():

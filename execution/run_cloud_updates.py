@@ -90,13 +90,81 @@ except Exception as e:
 try:
     print("\n[4/5] Atualizando Calendário Econômico...")
     from fetch_calendar import fetch_economic_calendar
+    from economic_calendar_history import merge_calendar_history
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    now_br = datetime.now(ZoneInfo("America/Sao_Paulo"))
     fetch_economic_calendar()
     paths = ["calendario_economico.json", "execution/calendario_economico.json"]
+    current_events = []
     for p in paths:
         if os.path.exists(p):
             with open(p, "r", encoding="utf-8") as f:
-                sync_to_supabase("calendario_economico", json.load(f))
+                current_events = json.load(f)
+                sync_to_supabase("calendario_economico", current_events)
             break
+
+    history_row = supabase.table("app_state").select("value").eq("key", "calendario_economico_historico").execute()
+    history = history_row.data[0]["value"] if history_row.data else None
+    incoming_batches = [current_events] if isinstance(current_events, list) else []
+    ibge_calendar_status = history.get("ibge_calendar_status", "not_attempted") if isinstance(history, dict) else "not_attempted"
+    ibge_calendar_updated_at = history.get("ibge_calendar_updated_at") if isinstance(history, dict) else None
+    refresh_ibge_calendar = not ibge_calendar_updated_at
+    if ibge_calendar_updated_at:
+        try:
+            last_ibge_refresh = datetime.fromisoformat(str(ibge_calendar_updated_at))
+            if last_ibge_refresh.tzinfo is None:
+                last_ibge_refresh = last_ibge_refresh.replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+            refresh_ibge_calendar = now_br - last_ibge_refresh >= timedelta(hours=24)
+        except ValueError:
+            refresh_ibge_calendar = True
+    if refresh_ibge_calendar:
+        try:
+            from ibge_release_calendar import fetch_ibge_release_calendar
+            ibge_releases = fetch_ibge_release_calendar(today=now_br.date())
+            incoming_batches.append(ibge_releases)
+            ibge_calendar_status = f"ok:{len(ibge_releases)}"
+            ibge_calendar_updated_at = now_br.isoformat(timespec="seconds")
+        except Exception as ibge_error:
+            ibge_calendar_status = f"unavailable:{type(ibge_error).__name__}"
+            ibge_calendar_updated_at = now_br.isoformat(timespec="seconds")
+            print(f"[!] Calendário oficial IBGE indisponível: {ibge_error}")
+    backfill_status = None
+    retry_after = None
+    try:
+        retry_after = datetime.fromisoformat(str(history.get("backfill_retry_after"))) if isinstance(history, dict) else None
+        if retry_after and retry_after.tzinfo is None:
+            retry_after = retry_after.replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+    except ValueError:
+        retry_after = None
+    prior_status = str(history.get("backfill_status", "")) if isinstance(history, dict) else ""
+    should_backfill = not isinstance(history, dict) or prior_status in {"", "not_attempted"} or (
+        prior_status.startswith(("unavailable", "empty_response")) and (retry_after is None or retry_after <= now_br)
+    )
+    if should_backfill:
+        try:
+            from fetch_calendar import fetch_investing_calendar_range
+            today = now_br.date()
+            start = today - timedelta(days=90)
+            backfill_rows = fetch_investing_calendar_range(start.isoformat(), today.isoformat())
+            if backfill_rows:
+                incoming_batches.append(backfill_rows)
+                backfill_status = f"completed:{start.isoformat()}:{today.isoformat()}"
+            else:
+                backfill_status = "empty_response"
+        except Exception as backfill_error:
+            backfill_status = f"unavailable:{type(backfill_error).__name__}"
+            print(f"[!] Backfill histórico do calendário indisponível: {backfill_error}")
+
+    history_payload = merge_calendar_history(history, incoming_batches, backfill_status=backfill_status)
+    history_payload["ibge_calendar_status"] = ibge_calendar_status
+    if ibge_calendar_updated_at:
+        history_payload["ibge_calendar_updated_at"] = ibge_calendar_updated_at
+    if backfill_status and backfill_status.startswith(("unavailable", "empty_response")):
+        history_payload["backfill_retry_after"] = (now_br + timedelta(days=1)).isoformat(timespec="seconds")
+    elif backfill_status and backfill_status.startswith("completed"):
+        history_payload["backfill_retry_after"] = None
+    sync_to_supabase("calendario_economico_historico", history_payload)
 except Exception as e:
     print(f"[!] Erro em Calendário Econômico: {e}")
 

@@ -19,6 +19,7 @@ APP_STATE_ALLOWED_KEYS = {
     "boletim_focus",
     "b3_settlements",
     "calendario_economico",
+    "calendario_economico_historico",
     "dados_mercado",
     "financial_juice_news",
     "fluxo_estrangeiro_b3",

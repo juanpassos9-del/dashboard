@@ -1,4 +1,4 @@
-from execution.monitor_br import _br_calendar_snapshot, _flow_snapshot, _focus_snapshot, _market_asset, _series_reading
+from execution.monitor_br import _br_calendar_snapshot, _calendar_event_reading, _flow_snapshot, _focus_snapshot, _market_asset, _series_reading
 
 
 def test_series_reading_reports_latest_and_change():
@@ -34,6 +34,7 @@ def test_flow_snapshot_summarizes_recent_trading_days():
 def test_calendar_groups_brazilian_events_and_interprets_inflation_surprise():
     result = _br_calendar_snapshot([
         {"date": "2026-10-01", "currency": "BRL", "event": "IPCA (Mensal)", "actual": "0,50%", "forecast": "0,40%", "previous": "0,30%"},
+        {"date": "2026-10-01", "currency": "BRL", "event": "IPCA (Mensal)", "actual": "---", "forecast": "---", "previous": "---"},
         {"date": "2026-10-01", "currency": "USD", "event": "CPI", "actual": "2%", "forecast": "2%"},
     ])
     event = result["groups"]["inflation"][0]
@@ -51,6 +52,26 @@ def test_calendar_inverts_unemployment_surprise_and_includes_fiscal_topic():
     assert result["groups"]["labor"][0]["comparison"] == "Trabalho mais forte que o consenso"
     assert result["groups"]["labor"][0]["movement_vs_previous"] == "Sem comparação com o anterior"
     assert result["groups"]["fiscal"][0]["comparison"] == "Acima do consenso"
+
+
+def test_calendar_accepts_brazil_country_name_from_fallback_source():
+    result = _br_calendar_snapshot([
+        {"date": "2026-10-01", "currency": "Brazil", "event": "Vendas no Varejo", "actual": "1,2%", "forecast": "0,5%", "previous": "0,8%"},
+    ])
+    assert result["groups"]["consumption_activity"][0]["movement_vs_previous"] == "Atividade avançou vs. anterior"
+    assert result["latest_released_date"] == "2026-10-01"
+
+
+def test_official_ibge_release_is_not_mislabeled_as_an_actual_value():
+    event = _calendar_event_reading({
+        "date": "2026-10-01", "time": "09:00", "currency": "BRL", "event": "Índice Nacional de Preços ao Consumidor Amplo",
+        "actual": "---", "forecast": "---", "previous": "---", "official_release": True,
+        "source": "IBGE · API oficial", "reference_period": "2026-08",
+    }, "inflation")
+    assert event["status"] == "data divulgada"
+    assert event["actual"] == "---"
+    assert "indisponível nesta fonte" in event["comparison"]
+    assert event["reference_period"] == "2026-08"
 
 
 def test_market_asset_finds_symbol_across_categories():
