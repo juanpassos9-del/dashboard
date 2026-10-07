@@ -7440,6 +7440,35 @@ def pagina_monitor_br():
             st.metric(label, fmt(value, unit), delta=fmt(item.get("delta"), " p.p." if unit.startswith("%") else "", 3) if item.get("delta") is not None else None)
             st.caption(f"{item.get('date', 'Sem referência')} · {item.get('source', 'BCB SGS')} · {item.get('frequency', 'mensal')}")
 
+    st.markdown("### Histórico de indicadores oficiais")
+    st.caption("Valores observados publicados por BCB/IBGE. São séries estatísticas, não consenso de mercado nem histórico de revisões do calendário econômico.")
+    official_history = payload.get("official_history") or {}
+    history_series = official_history.get("series") or []
+    if history_series:
+        labels = {item["name"]: item for item in history_series}
+        selected_history_name = st.selectbox(
+            "Indicador",
+            list(labels),
+            key="monitor_br_history_indicator",
+        )
+        selected_history = labels[selected_history_name]
+        history_rows = selected_history.get("observations") or []
+        history_frame = pd.DataFrame(history_rows)
+        if not history_frame.empty:
+            history_frame["date"] = history_frame["date"].astype(str)
+            history_frame = history_frame.sort_values("date")
+            st.caption(f"{selected_history.get('topic')} · {selected_history.get('source')} · {len(history_rows)} observações · {history_rows[0]['date']} a {history_rows[-1]['date']}")
+            st.line_chart(history_frame.set_index("date")[["value"]], y_label=selected_history.get("unit"), use_container_width=True)
+            display_history = history_frame.sort_values("date", ascending=False).head(12).rename(columns={"date": "Período", "value": f"Valor ({selected_history.get('unit')})"})
+            st.dataframe(display_history[["Período", f"Valor ({selected_history.get('unit')})"]], use_container_width=True, hide_index=True)
+    else:
+        st.info("Histórico oficial indisponível nesta atualização. Use Atualizar Monitor BR para tentar novamente.")
+    history_errors = official_history.get("errors") or []
+    if history_errors:
+        with st.expander("Fontes históricas indisponíveis"):
+            for error in history_errors:
+                st.caption(str(error))
+
     st.markdown("### Leitura do mercado brasileiro")
     market_cols = st.columns(3)
     for col, key, title in zip(market_cols, ("IBOV", "USD/BRL"), ("Ibovespa", "Dólar/real")):

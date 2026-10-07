@@ -337,6 +337,13 @@ def _has_calendar_value(value: Any) -> bool:
 def build_monitor_br_payload(global_data: Any = None, focus: Any = None, di: Any = None, flow: Any = None, calendar_events: Any = None, calendar_history: Any = None) -> dict[str, Any]:
     """Build a payload from official series and existing market snapshots."""
     errors: list[str] = []
+    try:
+        from execution.monitor_br_history import fetch_monitor_br_history
+        official_history = fetch_monitor_br_history()
+        errors.extend(official_history.get("errors", []))
+    except Exception as exc:
+        official_history = {"series": [], "errors": [f"Histórico oficial: {type(exc).__name__}: {exc}"]}
+        errors.extend(official_history["errors"])
     observations: dict[str, list[dict[str, Any]]] = {}
     for key, spec in BCB_SERIES.items():
         try:
@@ -376,6 +383,7 @@ def build_monitor_br_payload(global_data: Any = None, focus: Any = None, di: Any
         "updated_at": datetime.now(BR_TZ).isoformat(timespec="seconds"),
         "sources": {"official": "BCB SGS + IBGE SIDRA", "market": "Snapshot central do dashboard", "curve": (di or {}).get("source") if isinstance(di, dict) else None},
         "official": {"selic": selic, "ipca": ipca, "ibc_br": ibc_br, "ibge_ipca_monthly": ibge_ipca},
+        "official_history": official_history,
         "focus": _focus_snapshot(focus),
         "foreign_flow": _flow_snapshot(flow),
         "calendar_br": _br_calendar_snapshot(
