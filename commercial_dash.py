@@ -7395,8 +7395,9 @@ def pagina_monitor_br():
             try:
                 global_data = get_global_markets_data()
                 focus_data = fetch_app_state_cached("boletim_focus")
+                flow_data = fetch_app_state_cached("fluxo_estrangeiro_b3")
                 di_data = fetch_di_futuro_cached_for_ui()
-                fresh = build_monitor_br_payload(global_data, focus_data, di_data)
+                fresh = build_monitor_br_payload(global_data, focus_data, di_data, flow_data)
                 if not any(fresh.get("official", {}).get(key, {}).get("value") is not None for key in ("selic", "ipca", "ibc_br")):
                     if payload:
                         st.warning("As fontes oficiais falharam nesta tentativa; mantendo a última leitura salva.")
@@ -7449,6 +7450,13 @@ def pagina_monitor_br():
             st.caption(f"Fonte: {item.get('source', 'snapshot central')} · {freshness}{age_label} · referência {item.get('source_timestamp') or item.get('updated_at') or 'não informada'}")
 
     st.markdown("### Expectativas Focus · ano corrente")
+    st.caption(f"Fonte: {focus.get('source', 'Banco Central do Brasil · Boletim Focus')} · publicação {focus.get('publish_date') or 'não disponível'} · recebido {focus.get('updated_at') or 'horário não informado'}")
+    try:
+        focus_date = datetime.strptime(str(focus.get("publish_date")), "%Y-%m-%d").date()
+        if (datetime.now(ZoneInfo("America/Sao_Paulo")).date() - focus_date).days > 7:
+            st.warning("Boletim Focus em cache há mais de 7 dias; as expectativas exibidas podem estar desatualizadas.")
+    except (TypeError, ValueError):
+        st.warning("Data de publicação do Boletim Focus não disponível no cache.")
     focus_cols = st.columns(4)
     focus_names = [("IPCA", "%"), ("Selic", "%"), ("PIB", "%"), ("Cambio", " R$/US$")]
     for col, (key, suffix) in zip(focus_cols, focus_names):
@@ -7457,6 +7465,35 @@ def pagina_monitor_br():
             delta = item.get("delta_4w")
             st.metric(key, fmt(item.get("value"), suffix), delta=fmt(delta, " p.p.", 2) if delta is not None else None)
             st.caption(f"Boletim {focus.get('publish_date') or 'sem cache'} · {focus.get('year') or datetime.now().year}")
+
+    st.markdown("### Fluxo estrangeiro na B3")
+    flow = payload.get("foreign_flow") or {}
+    st.caption(f"Fonte: {flow.get('source') or 'Dados de Mercado'} · atualizado {flow.get('updated_at') or 'sem horário informado'} · valores originais em R$ mil, exibidos em R$ milhões.")
+    latest_flow = flow.get("latest") or {}
+    try:
+        flow_date = datetime.strptime(str(latest_flow.get("date")), "%Y-%m-%d").date()
+        if (datetime.now(ZoneInfo("America/Sao_Paulo")).date() - flow_date).days > 7:
+            st.warning("O último registro de fluxo tem mais de 7 dias corridos. Os acumulados refletem somente os pregões disponíveis no cache.")
+    except (TypeError, ValueError):
+        pass
+    flow_cols = st.columns(3)
+    flow_metrics = [
+        ("Último pregão · " + str(latest_flow.get("date") or "sem dado"), latest_flow.get("foreigners_thousands")),
+        ("Acumulado · 5 pregões", flow.get("sum_5d_thousands")),
+        ("Acumulado · 20 pregões", flow.get("sum_20d_thousands")),
+    ]
+    for col, (label, value) in zip(flow_cols, flow_metrics):
+        with col:
+            amount_millions = float(value) / 1000 if value is not None else None
+            st.metric(label, f"R$ {fmt(amount_millions, ' mi', 2)}" if amount_millions is not None else "---")
+    flow_records = flow.get("records") or []
+    if flow_records:
+        flow_frame = pd.DataFrame(flow_records[:20]).sort_values("date")
+        flow_frame["Fluxo estrangeiro (R$ mi)"] = flow_frame["foreigners_thousands"] / 1000
+        st.bar_chart(flow_frame.set_index("date")[["Fluxo estrangeiro (R$ mi)"]], use_container_width=True)
+        st.caption(f"Janela mais recente disponível: {len(flow_records[:20])} registros de pregão, do {flow_frame['date'].iloc[0]} ao {flow_frame['date'].iloc[-1]}. Saldo positivo indica entrada líquida; negativo, saída líquida.")
+    else:
+        st.info("Fluxo estrangeiro ainda não disponível no estado compartilhado. A atualização depende do coletor agendado.")
 
     st.markdown("### Curva de juros futuros · DI")
     curve = payload.get("di_curve") or []

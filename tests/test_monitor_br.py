@@ -1,4 +1,4 @@
-from execution.monitor_br import _focus_snapshot, _market_asset, _series_reading
+from execution.monitor_br import _flow_snapshot, _focus_snapshot, _market_asset, _series_reading
 
 
 def test_series_reading_reports_latest_and_change():
@@ -13,10 +13,22 @@ def test_series_reading_reports_latest_and_change():
 
 
 def test_focus_snapshot_uses_four_week_reference():
-    data = {"publish_date": "2026-10-05", "years": {"2026": {"IPCA": {"hoje": 4.2, "4_sem": 4.0}}}}
+    data = {"publish_date": "2026-10-05", "updated_at": "2026-10-05T12:00:00-03:00", "years": {"2026": {"IPCA": {"hoje": 4.2, "4_sem": 4.0}}}}
     result = _focus_snapshot(data)
     assert result["indicators"]["IPCA"] == {"value": 4.2, "delta_4w": 0.2}
     assert result["indicators"]["Selic"]["value"] is None
+    assert result["updated_at"] == data["updated_at"]
+
+
+def test_flow_snapshot_summarizes_recent_trading_days():
+    result = _flow_snapshot({"source": "Dados de Mercado", "records": [
+        {"date": "2026-10-02", "foreigners": 1500},
+        {"date": "2026-10-01", "foreigners": -500},
+        {"date": "2026-09-30", "foreigners": 2000},
+    ]})
+    assert result["latest"] == {"date": "2026-10-02", "foreigners_thousands": 1500.0}
+    assert result["sum_5d_thousands"] == 3000.0
+    assert result["sum_20d_thousands"] == 3000.0
 
 
 def test_market_asset_finds_symbol_across_categories():

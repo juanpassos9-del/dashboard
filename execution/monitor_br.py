@@ -128,10 +128,40 @@ def _focus_snapshot(focus: Any) -> dict[str, Any]:
             "value": now,
             "delta_4w": round(now - four_weeks, 4) if now is not None and four_weeks is not None else None,
         }
-    return {"publish_date": focus.get("publish_date"), "year": year, "indicators": indicators}
+    return {
+        "publish_date": focus.get("publish_date"),
+        "updated_at": focus.get("updated_at"),
+        "source": focus.get("source", "Banco Central do Brasil · Boletim Focus"),
+        "year": year,
+        "indicators": indicators,
+    }
 
 
-def build_monitor_br_payload(global_data: Any = None, focus: Any = None, di: Any = None) -> dict[str, Any]:
+def _flow_snapshot(flow: Any) -> dict[str, Any]:
+    """Summarize investor flow; source records are in R$ thousands."""
+    if not isinstance(flow, dict):
+        return {"records": [], "source": None, "updated_at": None}
+    records = []
+    for item in flow.get("records", []):
+        if not isinstance(item, dict) or not item.get("date"):
+            continue
+        value = _number(item.get("foreigners"))
+        if value is None:
+            continue
+        records.append({"date": str(item["date"]), "foreigners_thousands": value})
+    records.sort(key=lambda item: item["date"], reverse=True)
+    return {
+        "latest": records[0] if records else None,
+        "sum_5d_thousands": round(sum(row["foreigners_thousands"] for row in records[:5]), 2),
+        "sum_20d_thousands": round(sum(row["foreigners_thousands"] for row in records[:20]), 2),
+        "records": records[:60],
+        "source": flow.get("source", "Dados de Mercado · fluxo por investidor"),
+        "updated_at": flow.get("updated_at"),
+        "total_records": len(records),
+    }
+
+
+def build_monitor_br_payload(global_data: Any = None, focus: Any = None, di: Any = None, flow: Any = None) -> dict[str, Any]:
     """Build a payload from official series and existing market snapshots."""
     errors: list[str] = []
     observations: dict[str, list[dict[str, Any]]] = {}
@@ -174,6 +204,7 @@ def build_monitor_br_payload(global_data: Any = None, focus: Any = None, di: Any
         "sources": {"official": "BCB SGS + IBGE SIDRA", "market": "Snapshot central do dashboard", "curve": (di or {}).get("source") if isinstance(di, dict) else None},
         "official": {"selic": selic, "ipca": ipca, "ibc_br": ibc_br, "ibge_ipca_monthly": ibge_ipca},
         "focus": _focus_snapshot(focus),
+        "foreign_flow": _flow_snapshot(flow),
         "market": market,
         "di_curve": curve,
         "derived": {"front_di": front_di, "selic_di_spread_pp": selic_di_spread},
