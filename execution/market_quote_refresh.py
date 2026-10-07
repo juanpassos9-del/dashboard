@@ -24,10 +24,11 @@ class MarketQuoteRefreshCoordinator:
         *,
         stale_after_seconds: float = 600,
         cooldown_seconds: float = 300,
+        force: bool = False,
         thread_factory: Callable[..., threading.Thread] = threading.Thread,
     ) -> bool:
-        """Start one daemon refresh if the shared snapshot is stale enough."""
-        if snapshot_age_seconds is not None and snapshot_age_seconds < stale_after_seconds:
+        """Start one daemon refresh when stale, or immediately when explicitly forced."""
+        if not force and snapshot_age_seconds is not None and snapshot_age_seconds < stale_after_seconds:
             return False
 
         with self._lock:

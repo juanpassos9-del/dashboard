@@ -8141,7 +8141,41 @@ def pagina_terminal_global():
 @st.fragment(run_every=30)
 def sidebar_mercados():
     global_data = get_global_markets_data()
-    if not global_data: 
+    if st.button(
+        "Atualizar cotações",
+        icon=":material/refresh:",
+        use_container_width=True,
+        key="sidebar_quotes_manual_refresh",
+    ):
+        started = _market_quote_refresh_coordinator.request_if_stale(
+            _global_market_payload_age_seconds(global_data),
+            _refresh_global_market_snapshot,
+            cooldown_seconds=30,
+            force=True,
+        )
+        refresh_status = _market_quote_refresh_coordinator.status()
+        if started:
+            st.session_state["sidebar_quotes_manual_attempt"] = refresh_status["last_attempt"]
+        elif refresh_status["running"]:
+            st.session_state["sidebar_quotes_manual_attempt"] = refresh_status["last_attempt"]
+        elif time.monotonic() - refresh_status["last_attempt"] < 30:
+            st.info("Aguarde alguns segundos antes de solicitar outra atualização.")
+        else:
+            st.error("Não foi possível iniciar a coleta manual.")
+
+    manual_attempt = st.session_state.get("sidebar_quotes_manual_attempt")
+    if manual_attempt is not None:
+        refresh_status = _market_quote_refresh_coordinator.status()
+        if refresh_status["last_attempt"] >= manual_attempt and refresh_status["running"]:
+            st.caption("Atualizando cotações nos provedores...")
+        elif refresh_status["last_success"] is not None and refresh_status["last_success"] >= manual_attempt:
+            st.success("Snapshot atualizado. Os dados podem ter atraso conforme cada provedor.")
+            st.session_state.pop("sidebar_quotes_manual_attempt", None)
+        elif refresh_status["last_error"] and refresh_status["last_attempt"] >= manual_attempt:
+            st.error(f"Falha ao atualizar cotações: {refresh_status['last_error']}")
+            st.session_state.pop("sidebar_quotes_manual_attempt", None)
+
+    if not global_data:
         st.info("Carregando mercados...")
         return
     

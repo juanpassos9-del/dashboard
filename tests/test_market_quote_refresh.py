@@ -27,6 +27,26 @@ def test_fresh_snapshot_does_not_start_refresh():
     assert calls == []
 
 
+def test_manual_refresh_forces_a_fresh_snapshot_but_respects_short_cooldown():
+    clock = FakeClock()
+    coordinator = MarketQuoteRefreshCoordinator(clock=clock)
+    calls = []
+
+    assert coordinator.request_if_stale(
+        5, lambda: calls.append(True), force=True, cooldown_seconds=30, thread_factory=InlineThread
+    )
+    assert calls == [True]
+    assert not coordinator.request_if_stale(
+        5, lambda: calls.append(True), force=True, cooldown_seconds=30, thread_factory=InlineThread
+    )
+
+    clock.now += 31
+    assert coordinator.request_if_stale(
+        5, lambda: calls.append(True), force=True, cooldown_seconds=30, thread_factory=InlineThread
+    )
+    assert calls == [True, True]
+
+
 def test_stale_snapshot_starts_one_refresh_and_respects_cooldown():
     clock = FakeClock()
     coordinator = MarketQuoteRefreshCoordinator(clock=clock)
