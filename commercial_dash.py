@@ -862,6 +862,18 @@ def fetch_app_state(key: str):
     return None
 
 
+def fetch_app_state_record(key: str):
+    """Return one app_state value and its database update timestamp."""
+    if key not in APP_STATE_ALLOWED_KEYS or not supabase:
+        return None
+    try:
+        response = supabase.table("app_state").select("value,updated_at").eq("key", key).limit(1).execute()
+        return response.data[0] if response.data else None
+    except Exception as e:
+        print(f"[ERROR] Fetch metadata {key}: {e}")
+        return None
+
+
 def has_supabase_service_role() -> bool:
     return bool(get_supabase_key_value())
 
@@ -4955,34 +4967,45 @@ def painel_topo_rtd():
 def secao_ia_fragment():
     """Seção de IA isolada para evitar atualizações constantes (60s)."""
     st.markdown("---")
+    from execution.ai_insight_history import format_history_time, freshness_minutes
     
     # Histórico da IA (Tendência)
     history_data = fetch_app_state("ai_insight_history")
     if history_data:
-        st.markdown("<div style='font-size: 0.7rem; color: #666; margin-bottom: 8px; font-weight: bold; letter-spacing: 1px;'>⏳ HISTÓRICO DE DIREÇÃO (ÚLTIMAS 5)</div>", unsafe_allow_html=True)
+        st.markdown("<div style='font-size: 0.7rem; color: #8AA0BF; margin-bottom: 8px; font-weight: bold; letter-spacing: 1px;'>⏳ HISTÓRICO DE REGIME · ÚLTIMAS 5 LEITURAS SIGNIFICATIVAS</div>", unsafe_allow_html=True)
         cols_h = st.columns(5)
         for i in range(5):
             with cols_h[i]:
                 if i < len(history_data):
                     h = history_data[i]
                     h_sent = h.get('sentiment', 'NEUTRO')
-                    h_time = h.get('updated_at', '')
+                    h_time = format_history_time(h.get('updated_at'))
                     if h_sent == "COMPRA":   h_color, h_bg = "#00FFA3", "#002611"
                     elif h_sent == "VENDA":  h_color, h_bg = "#FF4B4B", "#400000"
                     else:                  h_color, h_bg = "#E0E0E0", "#111"
                     
                     st.markdown(f"""
-                        <div style="background:{h_bg}; border: 1px solid {h_color}44; border-radius: 4px; padding: 4px; text-align: center; height: 45px; display: flex; flex-direction: column; justify-content: center;">
-                            <div style="font-size: 0.6rem; color: #888;">{h_time}</div>
-                            <div style="font-size: 0.7rem; font-weight: bold; color: {h_color};">{h_sent}</div>
+                        <div style="background:{h_bg}; border: 1px solid {h_color}44; border-radius: 4px; padding: 4px; text-align: center; min-height: 58px; display: flex; flex-direction: column; justify-content: center;">
+                            <div style="font-size: 0.6rem; color: #AAB4C2;">{sanitize_text(h_time)}</div>
+                            <div style="font-size: 0.7rem; font-weight: bold; color: {h_color};">{sanitize_text(h_sent)}</div>
+                            <div style="font-size: 0.56rem; color:#AAB4C2;">{sanitize_text(str(h.get('macro_regime') or 'Regime indisponível'))} · score {sanitize_text(str(h.get('macro_score', '—')))}</div>
                         </div>
                     """, unsafe_allow_html=True)
                 else:
                     st.markdown('<div style="background:#050505; border: 1px dashed #222; border-radius: 4px; height: 45px;"></div>', unsafe_allow_html=True)
         st.markdown("<div style='margin-bottom:15px;'></div>", unsafe_allow_html=True)
 
-    ai_data = fetch_app_state("ai_insight")
+    ai_record = fetch_app_state_record("ai_insight")
+    ai_data = ai_record.get("value") if ai_record else None
     if ai_data:
+        observed_at = ai_record.get("updated_at") or ai_data.get("updated_at")
+        age_minutes = freshness_minutes(observed_at)
+        if age_minutes is None:
+            st.warning("A análise não tem data completa de geração; atualize o Analista IA para validar a atualidade.")
+        elif age_minutes > 20:
+            st.warning(f"Análise macro desatualizada: última gravação há {age_minutes / 60:.1f} h. A direção exibida pode não refletir o mercado atual.")
+        else:
+            st.caption(f"Análise atualizada há {age_minutes:.0f} min · {sanitize_text(format_history_time(observed_at))}")
         sent = ai_data.get('sentiment', 'NEUTRO')
         ibg, itext = ("#002611", "#00FFA3") if sent == "COMPRA" else (("#400000", "#FF4B4B") if sent == "VENDA" else ("#111", "#E0E0E0"))
         
@@ -4990,7 +5013,7 @@ def secao_ia_fragment():
             <div style="background:{ibg}; border: 1px solid {itext}44; padding: 20px; border-radius: 8px; border-left: 8px solid {itext}; margin-bottom: 25px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                     <b style="color:{itext}; font-size: 1rem;">🤖 ANALISTA IA: {sent}</b>
-                    <span style="color: #666; font-size: 0.75rem;">{ai_data.get('updated_at', '')}</span>
+                    <span style="color: #AAB4C2; font-size: 0.75rem;">{sanitize_text(format_history_time(observed_at))}</span>
                 </div>
                 <div style="color: #E0E0E0; font-size: 0.95rem; line-height: 1.5;">{sanitize_text(ai_data.get('insight', '')).replace(chr(10), '<br>')}</div>
             </div>
@@ -4999,6 +5022,8 @@ def secao_ia_fragment():
 @st.fragment(run_every=300)
 def secao_market_report_fragment():
     """Renderiza o Market Report com os tres registros do dia."""
+    from execution.ai_insight_history import format_history_time
+
     daily_data = fetch_app_state("market_report_daily")
     latest_report = fetch_app_state("market_report")
     reports = []
@@ -5105,24 +5130,15 @@ def secao_market_report_fragment():
                     if warning:
                         ai_warnings.append(f"ai_insight: {warning}")
                     try:
+                        from execution.ai_insight_history import append_direction_history
+
                         history = fetch_app_state("ai_insight_history") or []
-                        if not isinstance(history, list):
-                            history = []
-                        history.append({
-                            "sentiment": new_insight.get("sentiment", "NEUTRO"),
-                            "updated_at": new_insight.get("updated_at", ""),
-                            "insight": new_insight.get("insight", ""),
-                            "macro_regime": new_insight.get("macro_regime", ""),
-                            "confidence": new_insight.get("confidence", ""),
-                            "macro_score": new_insight.get("macro_score", 0),
-                            "curve_regime": new_insight.get("curve_regime", ""),
-                            "curve_bias": new_insight.get("curve_bias", ""),
-                            "id": int(time.time()),
-                        })
-                        ok, warning = sync_app_state_value("ai_insight_history", history[-5:])
-                        saved_online = saved_online or ok
-                        if warning:
-                            ai_warnings.append(f"ai_insight_history: {warning}")
+                        updated_history, added = append_direction_history(history, new_insight)
+                        if added or updated_history != history:
+                            ok, warning = sync_app_state_value("ai_insight_history", updated_history)
+                            saved_online = saved_online or ok
+                            if warning:
+                                ai_warnings.append(f"ai_insight_history: {warning}")
                     except Exception as hist_error:
                         ai_warnings.append(f"ai_insight_history: {hist_error}")
 
@@ -5174,7 +5190,7 @@ def secao_market_report_fragment():
             if idx < len(ai_history):
                 item = ai_history[idx]
                 h_sent = sanitize_text(str(item.get("sentiment", "NEUTRO")))
-                h_time = sanitize_text(str(item.get("updated_at", "---")))
+                h_time = sanitize_text(format_history_time(item.get("updated_at")))
                 h_regime = sanitize_text(str(item.get("macro_regime", "")))
                 h_color = "#00FFA3" if h_sent == "COMPRA" else ("#FF4B4B" if h_sent == "VENDA" else "#FFD166")
                 display_regime = h_regime or ("Risk-on" if h_sent == "COMPRA" else ("Risk-off" if h_sent == "VENDA" else "Neutro"))
@@ -12838,25 +12854,15 @@ def pagina_painel_controle():
                                     return
                                 
                                 try:
+                                    from execution.ai_insight_history import append_direction_history
+
                                     res = supabase.table("app_state").select("value").eq("key", "ai_insight_history").execute()
                                     history = res.data[0]["value"] if res.data else []
-                                    if not isinstance(history, list): history = []
-                                    
-                                    history.append({
-                                        "sentiment": new_insight.get("sentiment", "NEUTRO"),
-                                        "updated_at": new_insight.get("updated_at", ""),
-                                        "insight": new_insight.get("insight", ""),
-                                        "macro_regime": new_insight.get("macro_regime", ""),
-                                        "confidence": new_insight.get("confidence", ""),
-                                        "macro_score": new_insight.get("macro_score", 0),
-                                        "curve_regime": new_insight.get("curve_regime", ""),
-                                        "curve_bias": new_insight.get("curve_bias", ""),
-                                        "id": int(time.time())
-                                    })
-                                    history = history[-5:]
-                                    ok, warning = sync_app_state_value("ai_insight_history", history)
-                                    if not ok and warning:
-                                        print(f"[WARN] ai_insight_history sync: {warning}")
+                                    updated_history, added = append_direction_history(history, new_insight)
+                                    if added or updated_history != history:
+                                        ok, warning = sync_app_state_value("ai_insight_history", updated_history)
+                                        if not ok and warning:
+                                            print(f"[WARN] ai_insight_history sync: {warning}")
                                 except Exception as he:
                                     print(f"Erro histórico: {he}")
                             break
@@ -12929,6 +12935,7 @@ def pagina_painel_controle():
             exec_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'execution'))
             if exec_path not in sys.path: sys.path.append(exec_path)
             from ai_analyst import generate_macro_insight
+            from ai_insight_history import append_direction_history
             from market_report import generate_market_report
             
             with st.spinner("Atualizando IA Analista..."):
@@ -12947,23 +12954,11 @@ def pagina_painel_controle():
                                 try:
                                     res = supabase.table("app_state").select("value").eq("key", "ai_insight_history").execute()
                                     history = res.data[0]["value"] if res.data else []
-                                    if not isinstance(history, list): history = []
-                                    
-                                    history.append({
-                                        "sentiment": new_insight.get("sentiment", "NEUTRO"),
-                                        "updated_at": new_insight.get("updated_at", ""),
-                                        "insight": new_insight.get("insight", ""),
-                                        "macro_regime": new_insight.get("macro_regime", ""),
-                                        "confidence": new_insight.get("confidence", ""),
-                                        "macro_score": new_insight.get("macro_score", 0),
-                                        "curve_regime": new_insight.get("curve_regime", ""),
-                                        "curve_bias": new_insight.get("curve_bias", ""),
-                                        "id": int(time.time())
-                                    })
-                                    history = history[-5:]
-                                    ok, warning = sync_app_state_value("ai_insight_history", history)
-                                    if not ok and warning:
-                                        print(f"[WARN] ai_insight_history sync: {warning}")
+                                    updated_history, added = append_direction_history(history, new_insight)
+                                    if added or updated_history != history:
+                                        ok, warning = sync_app_state_value("ai_insight_history", updated_history)
+                                        if not ok and warning:
+                                            print(f"[WARN] ai_insight_history sync: {warning}")
                                 except Exception as he:
                                     print(f"Erro histórico: {he}")
                             break

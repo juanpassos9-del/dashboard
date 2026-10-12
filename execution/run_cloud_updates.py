@@ -43,23 +43,13 @@ try:
                 
                 # Atualiza Histórico
                 try:
+                    from ai_insight_history import append_direction_history
+
                     res = supabase.table("app_state").select("value").eq("key", "ai_insight_history").execute()
                     history = res.data[0]["value"] if res.data else []
-                    if not isinstance(history, list): history = []
-                    
-                    history.append({
-                        "sentiment": new_insight.get("sentiment", "NEUTRO"),
-                        "updated_at": new_insight.get("updated_at", ""),
-                        "insight": new_insight.get("insight", ""),
-                        "macro_regime": new_insight.get("macro_regime", ""),
-                        "confidence": new_insight.get("confidence", ""),
-                        "macro_score": new_insight.get("macro_score", 0),
-                        "curve_regime": new_insight.get("curve_regime", ""),
-                        "curve_bias": new_insight.get("curve_bias", ""),
-                        "id": int(time.time())
-                    })
-                    history = history[-5:]
-                    sync_to_supabase("ai_insight_history", history)
+                    updated_history, added = append_direction_history(history, new_insight)
+                    if added or updated_history != history:
+                        sync_to_supabase("ai_insight_history", updated_history)
                 except Exception as he:
                     print(f"[!] Erro ao atualizar histórico da IA: {he}")
             break

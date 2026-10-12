@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -342,7 +343,7 @@ REGRAS:
             clean_text = _clean_verdict(full_text)
             provider = f"Gemini/{os.getenv('AI_ANALYST_GEMINI_MODEL', 'gemini-flash-latest')} + macro_regime_engine"
 
-        updated_at = datetime.now().strftime("%H:%M:%S")
+        updated_at = datetime.now(ZoneInfo("America/Sao_Paulo")).isoformat(timespec="seconds")
         payload = {
             "insight": clean_text,
             "sentiment": sentiment,
