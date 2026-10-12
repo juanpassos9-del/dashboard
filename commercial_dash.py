@@ -31,6 +31,7 @@ except Exception:
         return {}
 
 from execution.quote_freshness import quote_freshness_label
+from execution.page_access import enforce_page_access, pages_for_user
 from execution.market_quote_refresh import MarketQuoteRefreshCoordinator
 from execution.terminal_market_intelligence import (
     age_seconds_since,
@@ -13873,7 +13874,17 @@ with st.sidebar:
         _clear_auth_session()
         _auth_rerun()
     st.markdown("### 🧭 Navegação")
-    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🇧🇷 Terminal B3", "🌎 Terminal Global", "FX COMMAND CENTER", "MONITOR MACRO", "🇧🇷 MONITOR BR", "RENDAFIXABR", "Crypto Terminal", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=2, label_visibility="collapsed")
+    all_pages = ["📉 Terminal de Trading", "🇧🇷 Terminal B3", "🌎 Terminal Global", "FX COMMAND CENTER", "MONITOR MACRO", "🇧🇷 MONITOR BR", "RENDAFIXABR", "Crypto Terminal", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"]
+    allowed_pages = pages_for_user(_auth_user_email(auth_user), all_pages)
+    default_page = "🌎 Terminal Global" if "🌎 Terminal Global" in allowed_pages else allowed_pages[0]
+    nav_key = "main_page_navigation"
+    if st.session_state.get(nav_key) not in allowed_pages:
+        st.session_state.pop(nav_key, None)
+    page = st.radio(
+        "Ir para:", allowed_pages, index=allowed_pages.index(default_page),
+        label_visibility="collapsed", key=nav_key,
+    )
+    page = enforce_page_access(page, _auth_user_email(auth_user), all_pages, default_page)
     sidebar_clock()
     
     st.markdown("---")
