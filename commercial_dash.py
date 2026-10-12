@@ -9677,7 +9677,7 @@ def _fetch_terminal_b3_report_cached():
 
 def pagina_terminal_b3():
     """Radar setorial de ações, ETFs e BDRs listados na B3."""
-    from execution.terminal_b3 import ASSET_UNIVERSE, market_read
+    from execution.terminal_b3 import ASSET_UNIVERSE, build_macro_context, market_read
 
     st.title("Terminal B3")
     st.caption("Ações, ETFs e BDRs negociados na B3 · desempenho por pregões, força relativa e amplitude de mercado")
@@ -9715,6 +9715,53 @@ def pagina_terminal_b3():
     for sentence in market_read(report):
         st.markdown(f"- {sentence}")
 
+    try:
+        macro_snapshot = get_global_markets_data()
+        macro_context = build_macro_context(
+            macro_snapshot,
+            build_di_brasil_regime(macro_snapshot),
+            fetch_app_state_cached("fluxo_estrangeiro_b3"),
+        )
+    except Exception:
+        macro_snapshot = None
+        macro_context = build_macro_context(None, None, None)
+    st.markdown("### Contexto dos fatores")
+    macro_age_seconds = _global_market_payload_age_seconds(macro_snapshot)
+    macro_age = format_age(macro_age_seconds) if macro_age_seconds is not None else "idade desconhecida"
+    st.caption(f"Snapshot global: {macro_age}. Leitura contextual, não causal: cotações e fluxo podem ter horários diferentes dos fechamentos usados no ranking.")
+    if macro_age_seconds is not None and macro_age_seconds > 15 * 60:
+        st.warning("O snapshot global tem mais de 15 minutos; use os fatores macro apenas como contexto atrasado.")
+    factor_rows = []
+    for label, quote in macro_context["quotes"].items():
+        if quote:
+            factor_rows.append({
+                "Fator": label,
+                "Variação informada": f"{quote['change']:+.2f}%",
+                "Fonte": quote.get("source") or "Mercados Globais",
+                "Base": quote.get("change_basis") or "base não informada",
+                "Observado": quote.get("source_timestamp") or quote.get("updated_at") or "horário não informado",
+            })
+    if macro_context.get("di_regime"):
+        factor_rows.append({
+            "Fator": "Curva DI",
+            "Variação informada": str(macro_context["di_regime"]),
+            "Fonte": "Snapshot global",
+            "Base": "movimento informado da curva DI",
+            "Observado": "mesma data-base do snapshot global",
+        })
+    if macro_context.get("flow_5d_millions") is not None:
+        factor_rows.append({
+            "Fator": f"Fluxo estrangeiro · {macro_context['flow_observations']} observações até {macro_context.get('flow_latest_date') or 'data indisponível'}",
+            "Variação informada": f"R$ {macro_context['flow_5d_millions']:+.1f} mi acumulados",
+            "Fonte": "Fluxo estrangeiro B3",
+            "Base": "soma das observações mais recentes disponíveis",
+            "Observado": "série diária, não intradiária",
+        })
+    if factor_rows:
+        st.dataframe(pd.DataFrame(factor_rows), hide_index=True, use_container_width=True)
+    else:
+        st.info("DI, dólar, Brent e fluxo ainda não têm observações suficientes no snapshot compartilhado.")
+
     sector_rows = report.get("sectors") or []
     asset_rows = report.get("rows") or []
     if sector_rows:
@@ -9723,12 +9770,17 @@ def pagina_terminal_b3():
             "Setor": row["sector"], "Ativos": row["assets"],
             "Média 5 pregões": f"{row['weekly']:+.2f}%" if row["weekly"] is not None else "—",
             "Média 21 pregões": f"{row['monthly']:+.2f}%" if row["monthly"] is not None else "—",
+            "Rel. BOVA 5d": f"{row['weekly_relative']:+.2f} p.p." if row["weekly_relative"] is not None else "—",
+            "Rel. BOVA 21d": f"{row['monthly_relative']:+.2f} p.p." if row["monthly_relative"] is not None else "—",
             "Amplitude 5d (%)": round(row["weekly_breadth"]) if row["weekly_breadth"] is not None else None,
             "Amplitude 21d (%)": round(row["monthly_breadth"]) if row["monthly_breadth"] is not None else None,
+            "Concentração top 2 ganhos (%)": round(row["weekly_leader_share"]) if row["weekly_leader_share"] is not None else None,
+            "Regime": row["regime"],
         } for row in sector_rows])
         st.dataframe(sectors_df, hide_index=True, use_container_width=True, column_config={
             "Amplitude 5d (%)": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%d%%"),
             "Amplitude 21d (%)": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%d%%"),
+            "Concentração top 2 ganhos (%)": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%d%%"),
         })
 
     st.markdown("### Destaques por ativo")
@@ -9750,16 +9802,18 @@ def pagina_terminal_b3():
         for col, heading, rows in ((left, f"Maiores altas · {label}", leaders), (right, f"Maiores quedas · {label}", laggards)):
             with col:
                 st.markdown(f"**{heading}**")
-                table = pd.DataFrame([{"Ativo": r["symbol"], "Nome": r["name"], "Classe": r["class"], "Setor": r["sector"], "Variação": f"{r[period]:+.2f}%", "vs BOVA11": f"{r['relative_5d' if period == 'return_5d' else 'relative_21d']:+.2f} p.p." if r["relative_5d" if period == "return_5d" else "relative_21d"] is not None else "—", "Vol. vs mediana 20d": f"{r['volume_ratio']:.2f}x" if r["volume_ratio"] is not None else "—"} for r in rows])
+                table = pd.DataFrame([{"Ativo": r["symbol"], "Nome": r["name"], "Classe": r["class"], "Setor": r["sector"], "Variação": f"{r[period]:+.2f}%", "vs BOVA11": f"{r['relative_5d' if period == 'return_5d' else 'relative_21d']:+.2f} p.p." if r["relative_5d" if period == "return_5d" else "relative_21d"] is not None else "—", "Tendência 20/50": r["trend"], "Volume na última sessão": r["volume_signal"], "Vol. / mediana 20d": f"{r['volume_ratio']:.2f}x" if r["volume_ratio"] is not None else "—"} for r in rows])
                 st.dataframe(table, hide_index=True, use_container_width=True, column_config={
                     "Variação": st.column_config.TextColumn(),
                     "vs BOVA11": st.column_config.TextColumn(),
-                    "Vol. vs mediana 20d": st.column_config.TextColumn(),
+                    "Tendência 20/50": st.column_config.TextColumn(),
+                    "Volume na última sessão": st.column_config.TextColumn(),
+                    "Vol. / mediana 20d": st.column_config.TextColumn(),
                 })
 
     render_b3_rank("return_5d", "5 pregões")
     render_b3_rank("return_21d", "21 pregões")
-    st.caption("Leitura quantitativa descritiva, não recomendação. Força relativa = retorno do ativo menos retorno do BOVA11 no mesmo número de pregões. Volume relativo compara o último volume diário com a mediana dos 20 pregões anteriores.")
+    st.caption("Leitura quantitativa descritiva, não recomendação. Força relativa = retorno do ativo menos retorno do BOVA11. Regime setorial compara o sinal das médias de 5 e 21 pregões. Concentração top 2 = parcela dos ganhos positivos atribuída às duas maiores altas da amostra. Tendência exige preço e médias de 20/50 alinhados; confirmação de volume exige volume diário ≥1,5x a mediana anterior e retorno positivo/negativo na última sessão.")
 
 
 @st.cache_data(ttl=900, show_spinner=False)
