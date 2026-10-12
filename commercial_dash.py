@@ -32,6 +32,14 @@ except Exception:
 
 from execution.quote_freshness import quote_freshness_label
 from execution.market_quote_refresh import MarketQuoteRefreshCoordinator
+from execution.terminal_market_intelligence import (
+    age_seconds_since,
+    audit_rtd_payload,
+    build_terminal_market_brief,
+    format_age,
+    rtd_number,
+    rtd_text,
+)
 
 
 # ── Configuração da Página ──────────────────────────────────────────────────
@@ -2363,6 +2371,57 @@ def painel_tickers_topo():
                         </div>
                     """, unsafe_allow_html=True)
 
+    with st.expander("Fontes, horários e base das cotações", expanded=False):
+        provenance_rows = []
+        for key in target_keys:
+            asset = found_assets.get(key)
+            if not asset:
+                provenance_rows.append({"Ativo": key, "Fonte": "indisponível", "Observação": "sem cotação", "Variação baseada em": "---", "Estado": "sem dado"})
+                continue
+            freshness, state = quote_freshness_label(asset)
+            basis = asset.get("change_basis") or "base não informada pela fonte"
+            observed = asset.get("source_timestamp") or asset.get("updated_at") or "horário não informado"
+            provenance_rows.append({
+                "Ativo": key,
+                "Fonte": asset.get("source") or "fonte não identificada",
+                "Observação": observed,
+                "Variação baseada em": basis,
+                "Estado": freshness,
+            })
+        st.dataframe(pd.DataFrame(provenance_rows), use_container_width=True, hide_index=True)
+
+
+def render_terminal_market_brief(global_data=None, rtd_payload=None):
+    """Show a sourced, deterministic reading without making a trade recommendation."""
+    global_data = global_data or get_global_markets_data()
+    di_regime = build_di_brasil_regime(global_data)
+    rtd_payload = rtd_payload if rtd_payload is not None else fetch_app_state_fast("dados_mercado")
+    rtd_audit = audit_rtd_payload(rtd_payload)
+    flow_data = fetch_app_state_cached("fluxo_estrangeiro_b3")
+    brief = build_terminal_market_brief(global_data, di_regime, rtd_audit, flow_data)
+
+    st.markdown("#### LEITURA INTEGRADA DO PREGÃO")
+    st.markdown(f"**{html.escape(brief['headline'])}**")
+    if brief.get("evidence"):
+        st.markdown("**O que está acontecendo**")
+        for item in brief["evidence"]:
+            st.markdown(f"- {html.escape(item)}")
+    if brief.get("confirms"):
+        st.markdown("**O que confirma**")
+        for item in brief["confirms"]:
+            st.markdown(f"- {html.escape(item)}")
+    if brief.get("divergences"):
+        st.markdown("**O que diverge**")
+        for item in brief["divergences"]:
+            st.markdown(f"- {html.escape(item)}")
+    for note in brief.get("quality_notes", []):
+        st.caption(f"Qualidade/alinhamento: {html.escape(note)}")
+    global_timestamp = ((global_data or {}).get("metadata") or {}).get("generated_at_utc") or ((global_data or {}).get("metadata") or {}).get("full_timestamp")
+    global_age = format_age(_global_market_payload_age_seconds(global_data)) if global_data else "sem snapshot"
+    st.caption(f"Snapshot global: {global_age} · observação do snapshot: {global_timestamp or 'não informada'} · {brief.get('caveat', 'Sem dados suficientes; não é gerado sinal.')}")
+    if rtd_audit.get("warnings"):
+        st.caption("Qualidade RTD: " + " ".join(rtd_audit["warnings"]))
+
 
 BR_TOP_MOVERS_TICKERS = {
     "PETR4": "PETR4.SA",
@@ -4689,39 +4748,52 @@ def painel_topo_rtd():
         return
 
     data = dados[0] if isinstance(dados, list) else dados
+    audit = audit_rtd_payload(data)
+    values = audit.get("valid_values") or {}
 
     def safe_fmt(v):
-        try: return f"{float(v):.2f}" if v is not None else "---"
-        except: return str(v)
+        number = rtd_number(v)
+        return f"{number:.2f}" if number is not None else "---"
 
 
     # 1. Cabeçalho
-    bridge_time = data.get('updated_at', '')[-8:] or "---"
-    st.markdown(f"### 📡 {data['symbol']} | <span style='color:#888;'>{bridge_time}</span>", unsafe_allow_html=True)
+    bridge_time = (audit.get("received_at") or "")[-8:] or "---"
+    st.markdown(f"### 📡 {html.escape(audit.get('symbol', '---'))} | <span style='color:#888;'>{bridge_time}</span>", unsafe_allow_html=True)
+    bridge_age = format_age(audit.get("bridge_age_seconds"))
+    st.caption(f"Recebido pelo bridge: {bridge_age} atrás · fonte {audit.get('source')} · horário do negócio: {audit.get('market_timestamp') or 'não informado'} · variação: {audit.get('change_basis')}")
+    if audit.get("bridge_age_seconds") is not None and audit["bridge_age_seconds"] > 15:
+        st.warning("Bridge RTD atrasado. Os valores não devem ser tratados como cotação ao vivo.")
+    if audit.get("invalid_fields"):
+        st.error("O Excel enviou valores inválidos; campos afetados foram removidos da leitura.")
+    elif audit.get("state") == "unknown":
+        st.warning("Não foi possível confirmar quando o bridge atualizou este dado.")
+    if audit.get("market_timestamp") is None:
+        st.caption("O horário do último negócio não vem no payload; a idade de mercado permanece desconhecida.")
 
     # 2. Preços
     c1, c2, c3 = st.columns([2, 1, 1])
-    change_val = data['change_percent']
-    change_str = f"{change_val:.2%}" if isinstance(change_val, float) else str(change_val)
+    change_val = values.get("change_percent")
+    change_str = f"{change_val:.2%}" if change_val is not None else "---"
     color_hex  = '#00FFA3' if (isinstance(change_val, float) and change_val >= 0) else '#FF4B4B'
 
     with c1:
-        last_price_val = clean_val(data.get('last_price', 0))
+        last_price_val = values.get("last_price")
+        last_price_fmt = f"{last_price_val:,.2f}" if last_price_val is not None else "---"
         st.markdown(f"""
             <div class="main-card">
                 <div class="label-small">Último Preço</div>
-                <div class="price-large">{last_price_val:,.2f}</div>
+                <div class="price-large">{last_price_fmt}</div>
                 <div style="color:{color_hex}; font-weight:bold; margin-top:5px;">{change_str}</div>
             </div>
         """, unsafe_allow_html=True)
     with c2:
-        st.metric("VWAP",   safe_fmt(data['vwap']))
-        st.metric("Ajuste", safe_fmt(data['adjustment']))
+        st.metric("VWAP", safe_fmt(values.get("vwap")))
+        st.metric("Ajuste", safe_fmt(values.get("adjustment")))
     with c3:
-        saldo_agr = data.get('saldo_agressao')
+        saldo_agr = values.get("saldo_agressao")
         if saldo_agr is not None:
             try:
-                saldo_num = clean_val(saldo_agr)
+                saldo_num = saldo_agr
                 color = "#00FFA3" if saldo_num > 0 else ("#FF4B4B" if saldo_num < 0 else "#E0E0E0")
                 # Formata com sinal (+/-) e separadores de milhar no padrão brasileiro
                 saldo_fmt = f"{saldo_num:+,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -4731,14 +4803,14 @@ def painel_topo_rtd():
             st.markdown(f"<div class='label-small'>Saldo Agressão</div><div style='color:{color}; font-size:1.1rem; font-weight:bold;'>{saldo_fmt}</div>", unsafe_allow_html=True)
             
     # --- INTERPRETAÇÃO DE DIVERGÊNCIA DE DELTA ---
-    last_price_val = data.get('last_price')
-    vwap_val = data.get('vwap')
-    saldo_agr = data.get('saldo_agressao')
+    last_price_val = values.get("last_price")
+    vwap_val = values.get("vwap")
+    saldo_agr = values.get("saldo_agressao")
     
     if last_price_val is not None and vwap_val is not None and saldo_agr is not None:
         try:
-            np_price = clean_val(last_price_val)
-            np_vwap = clean_val(vwap_val)
+            np_price = last_price_val
+            np_vwap = vwap_val
             
             # Ajuste de magnitude robusto
             if np_price > 0 and np_vwap > 0:
@@ -4748,7 +4820,7 @@ def painel_topo_rtd():
                 elif ratio < 0.002:
                     np_price *= 1000
             
-            saldo_num = clean_val(saldo_agr)
+            saldo_num = saldo_agr
             
             if np_price > np_vwap and saldo_num < 0:
                 st.markdown("""
@@ -4778,9 +4850,19 @@ def painel_topo_rtd():
             return "background-color:#1A1A1A;color:#E0E0E0;border:1px solid #333;"
 
         s1, s2, s3 = st.columns(3)
-        with s1: st.markdown(f"<div class='status-box' style='{sig_style(sem.get('direcao'))}'>DIREÇÃO DO DIA<br>{sem.get('direcao','---')}</div>", unsafe_allow_html=True)
-        with s2: st.markdown(f"<div class='status-box' style='{sig_style(sem.get('correlacao_rtd'))}'>CORRELAÇÕES RTD<br>{sem.get('correlacao_rtd','---')}</div>", unsafe_allow_html=True)
-        with s3: st.markdown(f"<div class='status-box' style='{sig_style(sem.get('correlacao_interna'))}'>CORRELAÇÃO INTERNA<br>{sem.get('correlacao_interna','---')}</div>", unsafe_allow_html=True)
+        direction = rtd_text(sem.get("direcao"))
+        rtd_correlation = rtd_text(sem.get("correlacao_rtd"))
+        internal_correlation = rtd_text(sem.get("correlacao_interna"))
+        with s1: st.markdown(f"<div class='status-box' style='{sig_style(direction)}'>DIREÇÃO DO DIA<br>{html.escape(direction)}</div>", unsafe_allow_html=True)
+        with s2: st.markdown(f"<div class='status-box' style='{sig_style(rtd_correlation)}'>CORRELAÇÕES RTD<br>{html.escape(rtd_correlation)}</div>", unsafe_allow_html=True)
+        with s3: st.markdown(f"<div class='status-box' style='{sig_style(internal_correlation)}'>CORRELAÇÃO INTERNA<br>{html.escape(internal_correlation)}</div>", unsafe_allow_html=True)
+
+    with st.expander("Insumos e regras do RTD / semáforo", expanded=False):
+        st.markdown("- **Preço, VWAP, ajuste e variação:** campos L4, L5, L6 e L12 lidos do Excel ProfitChart pelo `dashboard_bridge`.")
+        st.markdown("- **Agressão:** campo J6 do Excel; sinal positivo/negativo é exibido sem reinterpretar o cálculo original.")
+        st.markdown("- **Semáforo e correlações:** campos G9:G11 calculados no Excel. As fórmulas não são enviadas pelo payload, portanto ficam identificadas como regras externas não auditáveis no dashboard.")
+        st.markdown("- **Divergência calculada aqui:** preço acima da VWAP com agressão negativa, ou preço abaixo da VWAP com agressão positiva. É um alerta de divergência, não recomendação de trade.")
+        st.markdown(f"- **Base da variação:** {html.escape(str(audit.get('change_basis')))}; o bridge não envia timestamp do último negócio nem a fórmula/base usada na célula L12.")
 
     # 4. Histograma de Variação % do Dia (Movido para baixo do Semáforo a pedido do usuário)
     if data.get("correlacoes") or data.get("acoes_peso"):
@@ -4795,14 +4877,18 @@ def painel_topo_rtd():
                     fator = row[0]
                     if "CORR" in str(fator).upper():
                         continue
-                    var_val = clean_val(row[2])
+                    var_val = rtd_number(row[2])
+                    if var_val is None:
+                        continue
                     bar_data.append({"Ativo": fator, "Variação %": var_val})
             
             # Adiciona ações de maior peso
             if data.get("acoes_peso"):
                 for row in data["acoes_peso"]:
                     fator = row[0]
-                    var_val = clean_val(row[3])
+                    var_val = rtd_number(row[3])
+                    if var_val is None:
+                        continue
                     bar_data.append({"Ativo": fator, "Variação %": var_val})
             
             df_bar = pd.DataFrame(bar_data)
@@ -5182,7 +5268,17 @@ def painel_inferior_rtd():
 
     # 5. Escada de Níveis
 
-    if data.get("escada"):
+    valid_ladder = []
+    for row in data.get("escada") or []:
+        if not isinstance(row, (list, tuple)) or len(row) < 4:
+            continue
+        price = rtd_number(row[2], positive=True)
+        variation = rtd_number(row[1])
+        distance = rtd_number(row[3])
+        if price is not None and variation is not None and distance is not None:
+            valid_ladder.append((row[0], variation, price, distance))
+
+    if valid_ladder:
         st.markdown("""<div style="background:#FF9800; color:#000; padding:5px 15px; font-weight:bold; border-radius:4px 4px 0; font-size:0.8rem; display:flex; justify-content:space-between;">
             <span>ESCADA DE NÍVEIS</span>
             <span>0,5% EM 0,5%</span>
@@ -5191,20 +5287,21 @@ def painel_inferior_rtd():
         html = '<div class="ladder-container" style="margin-top:0; border-top:none;">'
         html += '<div class="ladder-row ladder-header" style="grid-template-columns: 0.8fr 1fr 1.2fr 1.2fr 1fr;"><div>NÍVEL</div><div style="text-align:right;">Δ %</div><div style="text-align:right;">PREÇO</div><div style="text-align:right;">Δ P/ ÚLTIMO</div><div style="text-align:right;">MARCADOR</div></div>'
         
-        last_price = clean_val(data.get('last_price', 0))
-        precos_niveis = [float(row[2]) for row in data["escada"]]
+        last_price = rtd_number(data.get("last_price"), positive=True)
+        last_price = last_price if last_price is not None else valid_ladder[0][2]
+        precos_niveis = [row[2] for row in valid_ladder]
         preco_mais_proximo = min(precos_niveis, key=lambda x: abs(x - last_price))
 
-        for row in data["escada"]:
+        for row in valid_ladder:
             nivel, var_pct, preco, dist = row
-            preco_val = float(preco)
+            preco_val = preco
             is_highlight = abs(preco_val - preco_mais_proximo) < 0.1
             is_ajuste = "AJUSTE" in str(nivel).upper()
             row_class = "highlight-row" if is_highlight else ("ajuste-row" if is_ajuste else ("pos-row" if any(x in str(nivel) for x in ["+","1","2","3","4","5"]) else "neg-row"))
             marcador = "◀ PREÇO" if is_highlight else ""
             p_fmt = f"{preco_val:,.0f}".replace(",", ".")
-            d_fmt = f"{float(dist):+,.0f}".replace(",", ".")
-            v_fmt = f"{float(var_pct):+.1f}%".replace(".", ",")
+            d_fmt = f"{dist:+,.0f}".replace(",", ".")
+            v_fmt = f"{var_pct:+.1f}%".replace(".", ",")
             
             html += f'<div class="ladder-row {row_class}" style="grid-template-columns: 0.8fr 1fr 1.2fr 1.2fr 1fr;">'
             html += f'<div class="level-col">{nivel}</div>'
@@ -5215,6 +5312,8 @@ def painel_inferior_rtd():
             html += '</div>'
         html += '</div>'
         st.markdown(html, unsafe_allow_html=True)
+    elif data.get("escada"):
+        st.warning("Escada indisponível: o Excel não enviou níveis numéricos válidos.")
 
 @st.fragment(run_every=30)
 def painel_topo_global():
@@ -9112,6 +9211,10 @@ def secao_fluxo_estrangeiro_fragment():
     records = fluxo_data["records"][:30] # Últimos 30 dias
     if not records:
         return
+    latest_flow_date = records[0].get("date", "data não informada") if isinstance(records[0], dict) else "data não informada"
+    flow_received = fluxo_data.get("updated_at")
+    flow_age = format_age(age_seconds_since(flow_received))
+    st.caption(f"Fonte: {fluxo_data.get('source', 'Dados de Mercado')} · observação mais recente: {latest_flow_date} · saldo em R$ mil (publicação diária; não representa fluxo intradiário). Recebido: {flow_received or 'horário não informado'} ({flow_age}).")
         
     df = pd.DataFrame(records)
     df = df.sort_values("date") # Ordem cronológica para o gráfico
@@ -9155,6 +9258,9 @@ def secao_boletim_focus_fragment():
     st.markdown("---")
     st.markdown("#### 🇧🇷 BOLETIM FOCUS (BCB)")
     st.markdown(f"<span style='color: #666; font-size: 0.75rem; font-family: \"Roboto Mono\", monospace;'>DATA BASE: {focus_data.get('publish_date', '---')}</span>", unsafe_allow_html=True)
+    focus_received = focus_data.get("updated_at")
+    focus_age = format_age(age_seconds_since(focus_received))
+    st.caption(f"Fonte: Banco Central do Brasil · medianas das expectativas de mercado, não taxas negociadas · recebido: {focus_received or 'horário não informado'} ({focus_age}).")
     
     years = sorted(list(focus_data["years"].keys()))
     if not years:
@@ -9501,12 +9607,21 @@ def render_terminal_lightweight_copy():
 def pagina_terminal():
     """Renderiza o terminal principal de trading."""
     painel_tickers_topo()
+    global_data = get_global_markets_data()
     render_regime_juros_section()
-    render_di_brasil_regime_panel(compact=True)
+    render_di_brasil_regime_panel(global_data=global_data, compact=True)
+    render_terminal_market_brief(global_data=global_data)
 
     st.markdown("#### CONTEXTO OPERACIONAL")
-    painel_topo_rtd()
-    painel_inferior_rtd()
+    if st.session_state.get("terminal_rtd_loaded", False):
+        if st.button("Ocultar painel RTD", key="terminal_rtd_hide"):
+            st.session_state["terminal_rtd_loaded"] = False
+            st.rerun()
+        painel_topo_rtd()
+        painel_inferior_rtd()
+    elif st.button("Carregar painel RTD", key="terminal_rtd_load", type="primary"):
+        st.session_state["terminal_rtd_loaded"] = True
+        st.rerun()
 
     render_b3_settlements_section()
     secao_boletim_focus_fragment() # Estático/Lento (300s)
