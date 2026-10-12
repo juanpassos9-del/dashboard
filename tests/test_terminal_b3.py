@@ -102,6 +102,8 @@ def test_sector_regime_and_winner_concentration_are_reported(monkeypatch):
     assert sector["weekly_breadth"] == pytest.approx(50)
     assert sector["weekly_leader_share"] == pytest.approx(100)
     assert sector["regime"] == "Recuperação de curto prazo"
+    assert sector["observations_5d"] == 2
+    assert sector["weekly_participation"] == "Mista"
     assert report["market_breadth"]["weekly_leader_share"] == pytest.approx(100)
 
 

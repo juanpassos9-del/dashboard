@@ -9766,22 +9766,60 @@ def pagina_terminal_b3():
     asset_rows = report.get("rows") or []
     if sector_rows:
         st.markdown("### Rotação setorial")
-        sectors_df = pd.DataFrame([{
-            "Setor": row["sector"], "Ativos": row["assets"],
-            "Média 5 pregões": f"{row['weekly']:+.2f}%" if row["weekly"] is not None else "—",
-            "Média 21 pregões": f"{row['monthly']:+.2f}%" if row["monthly"] is not None else "—",
-            "Rel. BOVA 5d": f"{row['weekly_relative']:+.2f} p.p." if row["weekly_relative"] is not None else "—",
-            "Rel. BOVA 21d": f"{row['monthly_relative']:+.2f} p.p." if row["monthly_relative"] is not None else "—",
-            "Amplitude 5d (%)": round(row["weekly_breadth"]) if row["weekly_breadth"] is not None else None,
-            "Amplitude 21d (%)": round(row["monthly_breadth"]) if row["monthly_breadth"] is not None else None,
-            "Concentração top 2 ganhos (%)": round(row["weekly_leader_share"]) if row["weekly_leader_share"] is not None else None,
-            "Regime": row["regime"],
-        } for row in sector_rows])
-        st.dataframe(sectors_df, hide_index=True, use_container_width=True, column_config={
-            "Amplitude 5d (%)": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%d%%"),
-            "Amplitude 21d (%)": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%d%%"),
-            "Concentração top 2 ganhos (%)": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%d%%"),
-        })
+        rotation_controls = st.columns([1, 1, 2])
+        rotation_period = rotation_controls[0].radio(
+            "Janela de desempenho", ["5 pregões", "21 pregões"], horizontal=True,
+            key="terminal_b3_rotation_period",
+        )
+        rotation_sort = rotation_controls[1].selectbox(
+            "Ordenar por", ["Retorno", "Força vs BOVA11", "Amplitude"],
+            key="terminal_b3_rotation_sort",
+        )
+        period_key = "weekly" if rotation_period == "5 pregões" else "monthly"
+        relative_key = "weekly_relative" if period_key == "weekly" else "monthly_relative"
+        breadth_key = "weekly_breadth" if period_key == "weekly" else "monthly_breadth"
+        leader_key = "weekly_leader_share" if period_key == "weekly" else "monthly_leader_share"
+        sort_key = {"Retorno": period_key, "Força vs BOVA11": relative_key, "Amplitude": breadth_key}[rotation_sort]
+        visible_sectors = sorted(
+            sector_rows,
+            key=lambda row: row.get(sort_key) if row.get(sort_key) is not None else -float("inf"),
+            reverse=True,
+        )
+        max_abs_return = max((abs(row[period_key]) for row in visible_sectors if row.get(period_key) is not None), default=1) or 1
+        for row in visible_sectors:
+            value = row.get(period_key)
+            breadth = row.get(breadth_key)
+            relative = row.get(relative_key)
+            concentration = row.get(leader_key)
+            with st.container(border=True):
+                name_col, chart_col, stats_col = st.columns([1.25, 2.5, 2])
+                name_col.markdown(f"**{row['sector']}**")
+                name_col.caption(f"{row['observations_5d' if period_key == 'weekly' else 'observations_21d']}/{row['assets']} papéis · {row['regime']}")
+                if value is None:
+                    chart_col.caption("Retorno indisponível")
+                else:
+                    width = min(100.0, abs(value) / max_abs_return * 100)
+                    left_width = width if value < 0 else 0
+                    right_width = width if value > 0 else 0
+                    color = "#54a8ff" if value >= 0 else "#ff6268"
+                    chart_col.markdown(
+                        f'<div style="display:grid;grid-template-columns:1fr 2px 1fr;align-items:center;min-height:26px;">'
+                        f'<div style="display:flex;justify-content:flex-end;height:10px;"><div style="width:{left_width:.1f}%;background:{color};border-radius:4px 0 0 4px;"></div></div>'
+                        f'<div style="height:20px;background:#77818e;"></div>'
+                        f'<div style="display:flex;justify-content:flex-start;height:10px;"><div style="width:{right_width:.1f}%;background:{color};border-radius:0 4px 4px 0;"></div></div>'
+                        f'</div><div style="text-align:center;font-size:0.8rem;color:{color};font-weight:600;">{value:+.2f}% · {rotation_period}</div>',
+                        unsafe_allow_html=True,
+                    )
+                stats_col.markdown(
+                    f"Amplitude **{breadth:.0f}%**" if breadth is not None else "Amplitude **—**"
+                )
+                stats_col.caption(
+                    f"vs BOVA11 {relative:+.2f} p.p. · concentração top 2 {concentration:.0f}%"
+                    if relative is not None and concentration is not None
+                    else f"vs BOVA11 {relative:+.2f} p.p." if relative is not None
+                    else "Força relativa ou concentração indisponível"
+                )
+        st.caption("Retorno é média simples das ações classificadas no setor. Barras são normalizadas dentro da janela selecionada; amplitude indica a parcela de ações positivas, e concentração mede quanto os dois maiores ganhos representam dos ganhos positivos.")
 
     st.markdown("### Destaques por ativo")
     filter_cols = st.columns(2)

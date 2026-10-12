@@ -189,6 +189,8 @@ def build_terminal_b3_report(frames: dict[str, pd.DataFrame]) -> dict[str, Any]:
         sectors.append({
             "sector": sector,
             "assets": len(members),
+            "observations_5d": len(weekly),
+            "observations_21d": len(monthly),
             "weekly": _mean(weekly),
             "monthly": _mean(monthly),
             "weekly_relative": _mean(weekly_relative),
@@ -197,6 +199,11 @@ def build_terminal_b3_report(frames: dict[str, pd.DataFrame]) -> dict[str, Any]:
             "monthly_breadth": _positive_breadth(monthly),
             "weekly_leader_share": _positive_leader_share(weekly),
             "monthly_leader_share": _positive_leader_share(monthly),
+            "weekly_participation": (
+                "Ampla" if _positive_breadth(weekly) is not None and _positive_breadth(weekly) >= 60
+                else "Estreita" if _positive_breadth(weekly) is not None and _positive_breadth(weekly) <= 40
+                else "Mista" if weekly else "Sem dados"
+            ),
             "regime": regime,
         })
     sectors.sort(key=lambda row: row["weekly"] if row["weekly"] is not None else -math.inf, reverse=True)
