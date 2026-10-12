@@ -7382,6 +7382,147 @@ def pagina_monitor_macro():
                 st.caption(str(err))
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_renda_fixa_tesouro_cached():
+    from execution.renda_fixa_br import fetch_tesouro_data, save_tesouro_cache
+
+    payload = fetch_tesouro_data()
+    save_tesouro_cache(payload)
+    return payload
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def _fetch_renda_fixa_selic_history():
+    from execution.monitor_br import _fetch_bcb_series
+
+    return _fetch_bcb_series(432, 90)
+
+
+def pagina_renda_fixa_br():
+    """Panorama de renda fixa com preços/taxas oficiais do Tesouro e curva DI."""
+    from execution.renda_fixa_br import latest_rows, load_tesouro_cache, title_history
+
+    st.title("RENDAFIXABR")
+    st.caption("Panorama da renda fixa brasileira · Tesouro Direto, Selic e curva DI")
+
+    payload = load_tesouro_cache()
+    refresh_col, source_col = st.columns([1, 2])
+    with refresh_col:
+        refresh = st.button("Atualizar dados do Tesouro", type="primary", use_container_width=True, key="renda_fixa_refresh")
+    with source_col:
+        st.caption("Fonte oficial diária · atualização pode refletir a manhã do pregão, não cotação em tempo real.")
+
+    if refresh or not payload:
+        with st.spinner("Baixando histórico oficial de preços e taxas do Tesouro Direto..."):
+            try:
+                if refresh:
+                    _fetch_renda_fixa_tesouro_cached.clear()
+                payload = _fetch_renda_fixa_tesouro_cached()
+            except Exception as exc:
+                st.error(f"Não foi possível atualizar os dados oficiais do Tesouro: {exc}")
+                payload = payload or load_tesouro_cache()
+
+    if not payload:
+        st.info("Ainda não há dados do Tesouro em cache. Tente atualizar novamente mais tarde.")
+        return
+
+    rows = payload.get("rows") or []
+    current_rows = latest_rows(payload)
+    source_date = payload.get("latest_date") or "indisponível"
+    st.caption(f"Data-base dos preços e taxas: {source_date} · recebido {payload.get('updated_at', 'horário indisponível')} · Tesouro Transparente (ODbL)")
+
+    try:
+        selic_rows = _fetch_renda_fixa_selic_history()
+    except Exception:
+        selic_rows = []
+    selic = selic_rows[-1] if selic_rows else {}
+    previous_selic = selic_rows[-2] if len(selic_rows) > 1 else {}
+    selic_delta = float(selic["value"]) - float(previous_selic["value"]) if selic and previous_selic else None
+
+    try:
+        di_payload = fetch_di_futuro_cached_for_ui() or {}
+        di_rows = di_payload.get("principais") or []
+    except Exception:
+        di_rows = []
+    di_front = next((item for item in di_rows if item.get("symbol") == "DI1F27"), di_rows[0] if di_rows else {})
+
+    metric_cols = st.columns(4)
+    with metric_cols[0]:
+        st.metric("Selic meta", f"{selic['value']:.2f}% a.a." if selic else "--", f"{selic_delta:+.2f} p.p." if selic_delta is not None else None)
+        st.caption(f"BCB SGS 432 · {selic.get('date', 'data indisponível')}")
+    with metric_cols[1]:
+        st.metric("DI curto", f"{float(di_front.get('rate', di_front.get('price'))):.2f}%" if di_front and di_front.get("rate", di_front.get("price")) is not None else "--")
+        st.caption(f"{di_front.get('symbol', 'DI Futuro')} · {di_payload.get('source', 'fonte indisponível')}")
+    with metric_cols[2]:
+        ipca_rows = [row for row in rows if "IPCA" in row["title"].upper() and row["date"] == source_date]
+        longest_ipca = max(ipca_rows, key=lambda row: row["maturity"], default={})
+        st.metric("Tesouro IPCA+ mais longo", f"{longest_ipca['buy_rate']:.2f}% + IPCA" if longest_ipca.get("buy_rate") is not None else "--")
+        st.caption(f"Venc. {longest_ipca.get('maturity', '--')} · taxa de compra manhã")
+    with metric_cols[3]:
+        focus = fetch_app_state_cached("boletim_focus") or {}
+        focus_year = str(datetime.now(ZoneInfo("America/Sao_Paulo")).year)
+        focus_ipca = ((focus.get("years") or {}).get(focus_year) or {}).get("IPCA") or {}
+        focus_value = focus_ipca.get("hoje")
+        st.metric(f"Focus IPCA {focus_year}", f"{float(focus_value):.2f}%" if focus_value is not None else "--")
+        st.caption(f"Boletim de {focus.get('publish_date', 'data indisponível')} · mediana, não meta")
+
+    st.subheader("Taxas e preços do Tesouro Direto")
+    if current_rows:
+        frame = pd.DataFrame(current_rows)
+        frame = frame.rename(columns={
+            "title": "Título", "maturity": "Vencimento", "date": "Data-base",
+            "buy_rate": "Taxa compra manhã (%)", "sell_rate": "Taxa venda manhã (%)",
+            "buy_price": "PU compra (R$)", "sell_price": "PU venda (R$)", "base_price": "PU base (R$)",
+        })
+        frame = frame[["Título", "Vencimento", "Taxa compra manhã (%)", "Taxa venda manhã (%)", "PU compra (R$)", "PU venda (R$)", "PU base (R$)"]]
+        st.dataframe(frame, use_container_width=True, hide_index=True)
+    else:
+        st.warning("O arquivo não trouxe linhas para a data-base mais recente.")
+
+    st.subheader("Histórico diário por título")
+    choices = sorted({(row["title"], row["maturity"]) for row in current_rows if row.get("title") and row.get("maturity")})
+    if choices:
+        choice_labels = {f"{title} · {maturity}": (title, maturity) for title, maturity in choices}
+        chosen_label = st.selectbox("Título e vencimento", list(choice_labels), key="renda_fixa_title_history")
+        history = title_history(payload, *choice_labels[chosen_label])
+        history_frame = pd.DataFrame(history)
+        history_frame["date"] = pd.to_datetime(history_frame["date"])
+        history_frame = history_frame.sort_values("date").set_index("date")
+        price_tab, rate_tab = st.tabs(["Preço unitário", "Taxas"])
+        with price_tab:
+            price_columns = [column for column in ("buy_price", "sell_price", "base_price") if column in history_frame and history_frame[column].notna().any()]
+            if price_columns:
+                st.line_chart(history_frame[price_columns], use_container_width=True)
+                st.caption("Série de PUs diários publicados pelo Tesouro Transparente; preços podem oscilar antes do vencimento.")
+            else:
+                st.info("Não há histórico de PU para este título e vencimento.")
+        with rate_tab:
+            rate_columns = [column for column in ("buy_rate", "sell_rate") if column in history_frame and history_frame[column].notna().any()]
+            if rate_columns:
+                st.line_chart(history_frame[rate_columns], use_container_width=True)
+                st.caption("A taxa e o preço do título podem se mover em sentidos opostos devido à marcação a mercado.")
+            else:
+                st.info("Não há histórico de taxas para este título e vencimento.")
+    else:
+        st.info("Não há títulos disponíveis para montar o histórico.")
+
+    st.subheader("Curva DI · expectativas de juros")
+    if di_rows:
+        curve = pd.DataFrame(di_rows)
+        rate_column = "rate" if "rate" in curve else "price" if "price" in curve else None
+        if rate_column and "symbol" in curve:
+            curve[rate_column] = pd.to_numeric(curve[rate_column], errors="coerce")
+            curve = curve.dropna(subset=[rate_column]).sort_values("symbol")
+            st.bar_chart(curve.set_index("symbol")[[rate_column]], use_container_width=True)
+            st.caption(f"Fonte: {di_payload.get('source', 'DI Futuro')}. Curva observada de mercado, não previsão garantida da Selic.")
+        else:
+            st.info("Os contratos DI atuais não trouxeram taxas plotáveis.")
+    else:
+        st.info("Curva DI indisponível nesta atualização; os dados do Tesouro continuam disponíveis.")
+
+    st.caption("Informação de mercado para acompanhamento; não constitui recomendação de investimento. Preços e taxas são distintos de rentabilidade garantida em resgate antecipado.")
+
+
 def pagina_monitor_br():
     """Painel deterministico de macroeconomia brasileira."""
     st.title("MONITOR BR")
@@ -13201,7 +13342,7 @@ with st.sidebar:
         _clear_auth_session()
         _auth_rerun()
     st.markdown("### 🧭 Navegação")
-    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "FX COMMAND CENTER", "MONITOR MACRO", "🇧🇷 MONITOR BR", "Crypto Terminal", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
+    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "FX COMMAND CENTER", "MONITOR MACRO", "🇧🇷 MONITOR BR", "RENDAFIXABR", "Crypto Terminal", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
     sidebar_clock()
     
     st.markdown("---")
@@ -13231,6 +13372,8 @@ elif page == "MONITOR MACRO":
     pagina_monitor_macro()
 elif page == "🇧🇷 MONITOR BR":
     pagina_monitor_br()
+elif page == "RENDAFIXABR":
+    pagina_renda_fixa_br()
 elif page == "Crypto Terminal":
     pagina_crypto_terminal()
 elif page == "📺 Terminal Bloomberg":

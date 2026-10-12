@@ -1,0 +1,32 @@
+from execution.renda_fixa_br import latest_rows, parse_tesouro_csv, title_history
+
+
+CSV = """Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha
+Tesouro IPCA+;15/05/2035;08/10/2026;6,50;6,55;1.234,56;1.230,10;1.232,33
+Tesouro IPCA+;15/05/2035;09/10/2026;6,60;6,65;1.220,50;1.216,00;1.218,25
+Tesouro Selic;01/03/2031;09/10/2026;0,09;0,10;19.991,91;19.972,93;19.972,93
+"""
+
+
+def test_parse_tesouro_daily_csv_and_brazilian_numbers():
+    payload = parse_tesouro_csv(CSV)
+    assert payload["latest_date"] == "2026-10-09"
+    assert payload["rows"][0]["buy_price"] == 1234.56
+    assert payload["rows"][0]["buy_rate"] == 6.5
+    assert len(latest_rows(payload)) == 2
+
+
+def test_title_history_filters_by_exact_title_and_maturity():
+    payload = parse_tesouro_csv(CSV)
+    history = title_history(payload, "Tesouro IPCA+", "2035-05-15")
+    assert [row["date"] for row in history] == ["2026-10-08", "2026-10-09"]
+    assert len(title_history(payload, "Tesouro Selic", "2035-05-15")) == 0
+
+
+def test_invalid_csv_fails_instead_of_reporting_empty_success():
+    try:
+        parse_tesouro_csv("wrong;columns\nvalue;value")
+    except ValueError as exc:
+        assert "não contém linhas válidas" in str(exc)
+    else:
+        raise AssertionError("CSV inválido deveria falhar")
