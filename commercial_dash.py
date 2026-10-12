@@ -2617,7 +2617,7 @@ def _fetch_top_movers_yfinance(limit: int = 6) -> dict:
             timeout=6,
         )
         if df is None or df.empty:
-            mark_source("Top Movers Brasil", "error", message="Yahoo Finance retornou vazio.", source="yfinance")
+            mark_source("Top Movers Brasil", "error", message="Yahoo Finance retornou vazio.", source="Yahoo Finance")
             return {}
 
         rows = []
@@ -2665,23 +2665,25 @@ def _fetch_top_movers_yfinance(limit: int = 6) -> dict:
             except Exception:
                 continue
 
-        mark_source("Top Movers Brasil", "ok" if rows else "error", rows=len(rows), message="Ranking B3 via yfinance.", source="yfinance")
-        return _build_top_movers_payload(rows, limit, "yfinance") if rows else {}
+        mark_source("Top Movers Brasil", "ok" if rows else "error", rows=len(rows), message="Ranking B3 via Yahoo Finance.", source="Yahoo Finance")
+        return _build_top_movers_payload(rows, limit, "Yahoo Finance") if rows else {}
     except Exception as e:
-        mark_source("Top Movers Brasil", "error", message=str(e), source="yfinance")
+        mark_source("Top Movers Brasil", "error", message=str(e), source="Yahoo Finance")
         return {}
 
 
 @st.cache_data(ttl=600, show_spinner=False)
 def get_top_movers_brasil(limit: int = 6) -> dict:
-    """Ranking B3 do dia: Brapi primeiro, yfinance como fallback gratuito."""
-    brapi_payload = _fetch_top_movers_brapi(limit)
-    if brapi_payload and int(brapi_payload.get("rows_count") or 0) >= max(limit * 2, 10):
-        return brapi_payload
+    """Ranking diário B3: Yahoo Finance prioritário, Brapi como fallback."""
+    from execution.top_movers import choose_top_movers_payload
+
     yf_payload = _fetch_top_movers_yfinance(limit)
-    if yf_payload and (yf_payload.get("gainers") or yf_payload.get("losers")):
+    minimum_rows = max(limit * 2, 10)
+    if yf_payload and int(yf_payload.get("rows_count") or 0) >= minimum_rows:
         return yf_payload
-    return {"gainers": [], "losers": [], "updated_at": "", "source": "Brapi/yfinance"}
+
+    brapi_payload = _fetch_top_movers_brapi(limit)
+    return choose_top_movers_payload(yf_payload, brapi_payload, minimum_rows)
 
 
 def render_top_movers_brasil():
@@ -2737,7 +2739,7 @@ def render_top_movers_brasil():
           <div class="tm-head">
             <div>
               <div class="tm-title">Top Movers Brasil</div>
-              <div class="tm-sub">Altas e baixas do dia | Fonte: {html.escape(str(movers.get('source') or 'Brapi/yfinance'))} | Atualizado {html.escape(str(movers.get('updated_at') or '---'))}</div>
+              <div class="tm-sub">Altas e baixas do dia | Fonte: {html.escape(str(movers.get('source') or 'Yahoo Finance/Brapi'))} | Atualizado {html.escape(str(movers.get('updated_at') or '---'))}</div>
             </div>
           </div>
           <div class="tm-grid">
