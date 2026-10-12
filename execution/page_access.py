@@ -2,6 +2,7 @@
 
 RESTRICTED_PAGE_ACCESS = {
     "fccarne@terra.com.br": frozenset({
+        "📉 Terminal de Trading",
         "🇧🇷 Terminal B3",
         "🌎 Terminal Global",
         "MONITOR MACRO",

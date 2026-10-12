@@ -17,6 +17,7 @@ ALL_PAGES = [
 
 def test_restricted_account_sees_only_requested_pages():
     assert pages_for_user("FCCARNE@TERRA.COM.BR", ALL_PAGES) == [
+        "📉 Terminal de Trading",
         "🇧🇷 Terminal B3",
         "🌎 Terminal Global",
         "MONITOR MACRO",
