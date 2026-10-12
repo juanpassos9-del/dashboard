@@ -109,6 +109,30 @@ def latest_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return [row for row in rows if row.get("date") == latest_date]
 
 
+def pu_history_coverage(payload: dict[str, Any], minimum_observations: int = 31) -> dict[str, int]:
+    """Summarize usable history for securities currently quoted by the source."""
+    latest = latest_rows(payload)
+    current_keys = {
+        (str(row.get("title") or ""), str(row.get("maturity") or ""))
+        for row in latest
+    }
+    counts: dict[tuple[str, str], int] = {}
+    for row in payload.get("rows", []):
+        key = (str(row.get("title") or ""), str(row.get("maturity") or ""))
+        price = row.get("base_price") if row.get("base_price") is not None else row.get("buy_price")
+        try:
+            valid_price = float(price) > 0
+        except (TypeError, ValueError):
+            valid_price = False
+        if key in current_keys and valid_price:
+            counts[key] = counts.get(key, 0) + 1
+    return {
+        "current_securities": len(current_keys),
+        "covered_securities": sum(counts.get(key, 0) >= minimum_observations for key in current_keys),
+        "minimum_observations": minimum_observations,
+    }
+
+
 def title_history(payload: dict[str, Any], title: str, maturity: str) -> list[dict[str, Any]]:
     return [
         row for row in payload.get("rows", [])

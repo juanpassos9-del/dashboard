@@ -1,6 +1,6 @@
 from datetime import date, datetime, timedelta, timezone
 
-from execution.renda_fixa_br import build_di_curve_rows, detect_pu_spikes, historical_delta, latest_rows, parse_tesouro_csv, title_history
+from execution.renda_fixa_br import build_di_curve_rows, detect_pu_spikes, historical_delta, latest_rows, parse_tesouro_csv, pu_history_coverage, title_history
 
 
 CSV = """Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha
@@ -107,6 +107,27 @@ def test_pu_spikes_skip_normal_movement_insufficient_history_and_old_titles():
     old_history = [dict(row, title="Tesouro IPCA+", maturity="2032-05-15") for row in rows[:30]]
     payload = {"latest_date": rows[-1]["date"], "rows": rows + short_history + old_history}
     assert detect_pu_spikes(payload) == []
+
+
+def test_pu_history_coverage_counts_valid_observations_for_current_securities():
+    payload = parse_tesouro_csv(CSV)
+    coverage = pu_history_coverage(payload, minimum_observations=2)
+    assert coverage == {
+        "current_securities": 2,
+        "covered_securities": 1,
+        "minimum_observations": 2,
+    }
+
+
+def test_pu_history_coverage_does_not_count_missing_or_nonpositive_prices():
+    payload = {
+        "latest_date": "2026-10-09",
+        "rows": [
+            {"title": "Tesouro Selic", "maturity": "2031-03-01", "date": "2026-10-08", "base_price": 100},
+            {"title": "Tesouro Selic", "maturity": "2031-03-01", "date": "2026-10-09", "base_price": 0},
+        ],
+    }
+    assert pu_history_coverage(payload, minimum_observations=2)["covered_securities"] == 0
 
 
 def test_invalid_csv_fails_instead_of_reporting_empty_success():

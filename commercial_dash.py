@@ -7400,7 +7400,7 @@ def _fetch_renda_fixa_selic_history():
 
 def pagina_renda_fixa_br():
     """Panorama de renda fixa com preços/taxas oficiais do Tesouro e curva DI."""
-    from execution.renda_fixa_br import historical_delta, latest_rows, load_tesouro_cache, title_history
+    from execution.renda_fixa_br import historical_delta, latest_rows, load_tesouro_cache, pu_history_coverage, title_history
 
     st.title("RENDAFIXABR")
     st.caption("Panorama da renda fixa brasileira · Tesouro Direto, Selic e curva DI")
@@ -7412,15 +7412,19 @@ def pagina_renda_fixa_br():
     with source_col:
         st.caption("Fonte oficial diária · atualização pode refletir a manhã do pregão, não cotação em tempo real.")
 
-    if refresh or not payload:
+    coverage = pu_history_coverage(payload) if payload else {"current_securities": 0, "covered_securities": 0}
+    stale_history_cache = bool(payload and coverage["current_securities"] and not coverage["covered_securities"])
+    if refresh or not payload or stale_history_cache:
         with st.spinner("Baixando histórico oficial de preços e taxas do Tesouro Direto..."):
             try:
-                if refresh:
+                if refresh or stale_history_cache:
                     _fetch_renda_fixa_tesouro_cached.clear()
                 payload = _fetch_renda_fixa_tesouro_cached()
+                coverage = pu_history_coverage(payload)
             except Exception as exc:
                 st.error(f"Não foi possível atualizar os dados oficiais do Tesouro: {exc}")
                 payload = payload or load_tesouro_cache()
+                coverage = pu_history_coverage(payload) if payload else coverage
 
     if not payload:
         st.info("Ainda não há dados do Tesouro em cache. Tente atualizar novamente mais tarde.")
@@ -7430,6 +7434,7 @@ def pagina_renda_fixa_br():
     current_rows = latest_rows(payload)
     source_date = payload.get("latest_date") or "indisponível"
     st.caption(f"Data-base dos preços e taxas: {source_date} · recebido {payload.get('updated_at', 'horário indisponível')} · Tesouro Transparente (ODbL)")
+    st.caption(f"Histórico para alertas: {coverage['covered_securities']} de {coverage['current_securities']} títulos atuais com pelo menos {coverage['minimum_observations']} observações válidas.")
 
     try:
         selic_rows = _fetch_renda_fixa_selic_history()
@@ -7570,8 +7575,8 @@ def pagina_renda_fixa_br():
             st.dataframe(alert_frame, use_container_width=True, hide_index=True)
             if len(pu_alerts) > len(shown_alerts):
                 st.caption(f"Mostrando os 12 movimentos mais fortes de {len(pu_alerts)} alertas calculados.")
-        elif sum(len(title_history(payload, row["title"], row["maturity"])) >= 31 for row in current_rows) == 0:
-            st.info("Ainda não há 31 observações diárias para nenhum dos títulos atuais; os alertas serão habilitados quando houver histórico suficiente.")
+        elif not coverage["covered_securities"]:
+            st.warning("O cache atual não contém histórico diário suficiente. Atualize os dados do Tesouro para baixar novamente a série oficial completa.")
         else:
             st.success(f"Nenhuma alta incomum detectada na data-base {source_date} com o histórico disponível.")
 
