@@ -7471,6 +7471,40 @@ def pagina_renda_fixa_br():
         st.metric(f"Focus IPCA {focus_year}", f"{float(focus_value):.2f}%" if focus_value is not None else "--")
         st.caption(f"Boletim de {focus.get('publish_date', 'data indisponível')} · mediana, não meta")
 
+    from execution.renda_fixa_br import build_fixed_income_intelligence
+
+    all_di_contracts = di_payload.get("contracts") or di_rows
+    intelligence = build_fixed_income_intelligence(
+        payload,
+        all_di_contracts,
+        as_of=datetime.now(ZoneInfo("America/Sao_Paulo")).date(),
+    )
+    st.subheader("Inteligência de mercado")
+    st.caption("Leitura quantitativa local · variações medianas em cinco pregões · sem recomendação automática.")
+    st.info(intelligence["summary"])
+    intelligence_cols = st.columns(4)
+    with intelligence_cols[0]:
+        value = intelligence["median_pu_change_5d"]
+        st.metric("PU mediano · 5 pregões", f"{value:+.2f}%" if value is not None else "—", help=f"Mediana entre {intelligence['pu_observations']} séries de títulos com histórico suficiente.")
+    with intelligence_cols[1]:
+        value = intelligence["median_rate_change_5d"]
+        st.metric("Taxa mediana · 5 pregões", f"{value:+.2f} p.p." if value is not None else "—", help=f"Variação mediana da taxa de compra em {intelligence['rate_observations']} séries.")
+    with intelligence_cols[2]:
+        value = intelligence["implied_inflation"]
+        st.metric("Inflação implícita", f"{value:.2f}% a.a." if value is not None else "—", help=f"Estimativa por comparação de taxas nominais e reais com vencimentos próximos; {intelligence['inflation_pairs']} pares usados.")
+    with intelligence_cols[3]:
+        value = intelligence["di_slope"]
+        st.metric("Inclinação da curva DI", f"{value:+.2f} p.p." if value is not None else "—", intelligence["di_curve_read"].capitalize() if value is not None else None, help=f"Diferença entre a taxa do contrato mais longo e a do mais curto; {intelligence['di_contracts']} vencimentos válidos.")
+    if intelligence["families"]:
+        family_frame = pd.DataFrame([{
+            "Família": item["family"],
+            "Títulos": item["securities"],
+            "PU mediano · 5 pregões": f"{item['pu_change_5d']:+.2f}%" if item["pu_change_5d"] is not None else "—",
+            "Taxa mediana · 5 pregões": f"{item['rate_change_5d']:+.2f} p.p." if item["rate_change_5d"] is not None else "—",
+        } for item in intelligence["families"]])
+        st.dataframe(family_frame, use_container_width=True, hide_index=True)
+    st.caption(f"Base Tesouro: {intelligence['as_of']} · inflação implícita é uma aproximação de mercado, não previsão direta do IPCA.")
+
     st.subheader("Taxas e preços do Tesouro Direto")
     if current_rows:
         def title_group(title):
@@ -7609,7 +7643,6 @@ def pagina_renda_fixa_br():
 
     from execution.renda_fixa_br import build_di_curve_rows
 
-    all_di_contracts = di_payload.get("contracts") or di_rows
     curve_rows = build_di_curve_rows(
         all_di_contracts,
         as_of=datetime.now(ZoneInfo("America/Sao_Paulo")).date(),

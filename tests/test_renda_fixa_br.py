@@ -1,6 +1,6 @@
 from datetime import date, datetime, timedelta, timezone
 
-from execution.renda_fixa_br import build_di_curve_rows, detect_pu_spikes, historical_delta, latest_rows, parse_tesouro_csv, pu_history_coverage, title_history
+from execution.renda_fixa_br import build_di_curve_rows, build_fixed_income_intelligence, detect_pu_spikes, historical_delta, latest_rows, parse_tesouro_csv, pu_history_coverage, title_history
 
 
 CSV = """Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha
@@ -128,6 +128,33 @@ def test_pu_history_coverage_does_not_count_missing_or_nonpositive_prices():
         ],
     }
     assert pu_history_coverage(payload, minimum_observations=2)["covered_securities"] == 0
+
+
+def test_fixed_income_intelligence_reads_price_yield_breakeven_and_di_curve():
+    dates = ["2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08"]
+    rows = []
+    for index, day in enumerate(dates):
+        rows.extend([
+            {"title": "Tesouro Prefixado", "maturity": "2030-01-01", "date": day,
+             "buy_rate": 10 - index * 0.1, "base_price": 100 + index * 2},
+            {"title": "Tesouro IPCA+", "maturity": "2030-05-15", "date": day,
+             "buy_rate": 5 - index * 0.1, "base_price": 100 + index * 2},
+        ])
+    payload = {"latest_date": dates[-1], "rows": rows}
+    contracts = [
+        {"symbol": "DI1F27", "rate": 12.0, "maturity": "01/01/2027"},
+        {"symbol": "DI1F28", "rate": 13.0, "maturity": "01/01/2028"},
+    ]
+
+    result = build_fixed_income_intelligence(payload, contracts, as_of=date(2026, 10, 12))
+
+    assert result["median_pu_change_5d"] > 0
+    assert result["median_rate_change_5d"] < 0
+    assert "valorização por marcação a mercado" in result["summary"]
+    assert abs(result["implied_inflation"] - ((1.095 / 1.045 - 1) * 100)) < 1e-9
+    assert result["inflation_pairs"] == 1
+    assert result["di_slope"] == 1.0
+    assert result["di_curve_read"] == "ascendente"
 
 
 def test_invalid_csv_fails_instead_of_reporting_empty_success():

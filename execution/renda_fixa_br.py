@@ -181,6 +181,158 @@ def historical_delta(
         return None, None
 
 
+def _title_family(title: str) -> str:
+    normalized = title.upper()
+    if "SELIC" in normalized:
+        return "Tesouro Selic"
+    if "IPCA" in normalized and "JUROS SEMESTRAIS" in normalized:
+        return "IPCA+ com juros semestrais"
+    if "PREFIXADO" in normalized and "JUROS SEMESTRAIS" in normalized:
+        return "Prefixado com juros semestrais"
+    if "IPCA" in normalized:
+        return "Tesouro IPCA+"
+    if "PREFIXADO" in normalized:
+        return "Tesouro Prefixado"
+    if "EDUCA" in normalized:
+        return "Tesouro Educa+"
+    if "RENDA+" in normalized or "RENDA +" in normalized:
+        return "Tesouro RendA+"
+    return "Outros títulos"
+
+
+def _session_change(
+    history: list[dict[str, Any]],
+    current: dict[str, Any],
+    field: str,
+    sessions: int,
+    *,
+    relative: bool = False,
+) -> float | None:
+    valid = []
+    for row in sorted(history, key=lambda item: str(item.get("date") or "")):
+        try:
+            value = float(row.get(field))
+            row_date = str(row.get("date") or "")
+        except (TypeError, ValueError):
+            continue
+        if value > 0 and row_date <= str(current.get("date") or ""):
+            valid.append((row_date, value))
+    if len(valid) <= sessions:
+        return None
+    current_date, current_value = valid[-1]
+    if current_date != str(current.get("date") or ""):
+        return None
+    reference_value = valid[-1 - sessions][1]
+    if relative:
+        return (current_value / reference_value - 1) * 100 if reference_value else None
+    return current_value - reference_value
+
+
+def build_fixed_income_intelligence(
+    payload: dict[str, Any],
+    di_contracts: list[dict[str, Any]] | None = None,
+    *,
+    as_of: date | None = None,
+) -> dict[str, Any]:
+    """Create a deterministic market read from Treasury history and the DI curve."""
+    current = latest_rows(payload)
+    latest_date = str(payload.get("latest_date") or "")
+    histories: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in payload.get("rows", []):
+        key = (str(row.get("title") or ""), str(row.get("maturity") or ""))
+        histories.setdefault(key, []).append(row)
+
+    grouped: dict[str, dict[str, list[float]]] = {}
+    all_pu_changes: list[float] = []
+    all_rate_changes: list[float] = []
+    for row in current:
+        key = (str(row.get("title") or ""), str(row.get("maturity") or ""))
+        history = histories.get(key, [])
+        family = _title_family(key[0])
+        bucket = grouped.setdefault(family, {"pu": [], "rate": []})
+        price_field = "base_price" if row.get("base_price") is not None else "buy_price"
+        pu_change = _session_change(history, row, price_field, 5, relative=True)
+        rate_change = _session_change(history, row, "buy_rate", 5)
+        if pu_change is not None:
+            bucket["pu"].append(pu_change)
+            all_pu_changes.append(pu_change)
+        if rate_change is not None:
+            bucket["rate"].append(rate_change)
+            all_rate_changes.append(rate_change)
+
+    family_rows = []
+    for family, values in grouped.items():
+        family_rows.append({
+            "family": family,
+            "securities": len({(row.get("title"), row.get("maturity")) for row in current if _title_family(str(row.get("title") or "")) == family}),
+            "pu_change_5d": statistics.median(values["pu"]) if values["pu"] else None,
+            "rate_change_5d": statistics.median(values["rate"]) if values["rate"] else None,
+            "observations": min(len(values["pu"]), len(values["rate"])) if values["pu"] and values["rate"] else max(len(values["pu"]), len(values["rate"])),
+        })
+    family_rows.sort(key=lambda item: item["family"])
+
+    median_pu = statistics.median(all_pu_changes) if all_pu_changes else None
+    median_rate = statistics.median(all_rate_changes) if all_rate_changes else None
+    if median_pu is not None and median_rate is not None and median_pu >= 0.15 and median_rate <= -0.05:
+        summary = "Os preços dos títulos avançaram enquanto as taxas recuaram em cinco pregões: movimento compatível com valorização por marcação a mercado."
+    elif median_pu is not None and median_rate is not None and median_pu <= -0.15 and median_rate >= 0.05:
+        summary = "Os preços recuaram enquanto as taxas subiram em cinco pregões: movimento compatível com pressão de marcação a mercado sobre os títulos."
+    elif median_pu is not None and median_rate is not None:
+        summary = "Os movimentos agregados de preços e taxas estão mistos ou modestos; a leitura exige atenção às diferenças entre vencimentos e tipos de título."
+    else:
+        summary = "Histórico insuficiente para uma leitura comparável de cinco pregões; atualize os dados diários do Tesouro."
+
+    nominal = [row for row in current if "PREFIXADO" in str(row.get("title", "")).upper() and "JUROS SEMESTRAIS" not in str(row.get("title", "")).upper() and row.get("buy_rate") is not None]
+    real = [row for row in current if "IPCA" in str(row.get("title", "")).upper() and "JUROS SEMESTRAIS" not in str(row.get("title", "")).upper() and row.get("buy_rate") is not None]
+    breakevens = []
+    for ipca_row in real:
+        try:
+            ipca_maturity = date.fromisoformat(str(ipca_row["maturity"]))
+            real_rate = float(ipca_row["buy_rate"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        matches = []
+        for nominal_row in nominal:
+            try:
+                nominal_maturity = date.fromisoformat(str(nominal_row["maturity"]))
+                nominal_rate = float(nominal_row["buy_rate"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            distance = abs((nominal_maturity - ipca_maturity).days)
+            if distance <= 366 and real_rate > -100:
+                matches.append((distance, nominal_rate, real_rate))
+        if matches:
+            _, nominal_rate, real_rate = min(matches, key=lambda item: item[0])
+            breakevens.append(((1 + nominal_rate / 100) / (1 + real_rate / 100) - 1) * 100)
+    implied_inflation = statistics.median(breakevens) if breakevens else None
+
+    curve = build_di_curve_rows(di_contracts or [], as_of=as_of or date.today())
+    curve_slope = curve[-1]["rate"] - curve[0]["rate"] if len(curve) >= 2 else None
+    if curve_slope is None:
+        curve_read = "indisponível"
+    elif curve_slope > 0.15:
+        curve_read = "ascendente"
+    elif curve_slope < -0.15:
+        curve_read = "invertida"
+    else:
+        curve_read = "quase plana"
+
+    return {
+        "as_of": latest_date,
+        "summary": summary,
+        "median_pu_change_5d": median_pu,
+        "median_rate_change_5d": median_rate,
+        "pu_observations": len(all_pu_changes),
+        "rate_observations": len(all_rate_changes),
+        "families": family_rows,
+        "implied_inflation": implied_inflation,
+        "inflation_pairs": len(breakevens),
+        "di_slope": curve_slope,
+        "di_curve_read": curve_read,
+        "di_contracts": len(curve),
+    }
+
+
 def build_di_curve_rows(contracts: list[dict[str, Any]], as_of: date | None = None) -> list[dict[str, Any]]:
     """Prepare valid, unexpired DI contracts in maturity order for plotting."""
     as_of = as_of or datetime.now(timezone.utc).date()
