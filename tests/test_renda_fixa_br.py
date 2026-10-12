@@ -1,4 +1,4 @@
-from execution.renda_fixa_br import latest_rows, parse_tesouro_csv, title_history
+from execution.renda_fixa_br import historical_delta, latest_rows, parse_tesouro_csv, title_history
 
 
 CSV = """Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha
@@ -21,6 +21,26 @@ def test_title_history_filters_by_exact_title_and_maturity():
     history = title_history(payload, "Tesouro IPCA+", "2035-05-15")
     assert [row["date"] for row in history] == ["2026-10-08", "2026-10-09"]
     assert len(title_history(payload, "Tesouro Selic", "2035-05-15")) == 0
+
+
+def test_historical_delta_uses_previous_observation_and_rate_point_change():
+    payload = parse_tesouro_csv(CSV)
+    history = title_history(payload, "Tesouro IPCA+", "2035-05-15")
+    daily, daily_date = historical_delta(history, history[-1], "buy_rate", days=1)
+    assert abs(daily - 0.1) < 1e-9
+    assert daily_date == "2026-10-08"
+
+    relative, reference_date = historical_delta(history, history[-1], "buy_price", days=1, relative=True)
+    assert relative < 0
+    assert reference_date == "2026-10-08"
+
+
+def test_historical_delta_returns_missing_when_reference_is_outside_tolerance():
+    payload = parse_tesouro_csv(CSV)
+    history = title_history(payload, "Tesouro IPCA+", "2035-05-15")
+    change, reference_date = historical_delta(history, history[-1], "buy_rate", days=365, tolerance_days=20)
+    assert change is None
+    assert reference_date is None
 
 
 def test_invalid_csv_fails_instead_of_reporting_empty_success():

@@ -7400,7 +7400,7 @@ def _fetch_renda_fixa_selic_history():
 
 def pagina_renda_fixa_br():
     """Panorama de renda fixa com preços/taxas oficiais do Tesouro e curva DI."""
-    from execution.renda_fixa_br import latest_rows, load_tesouro_cache, title_history
+    from execution.renda_fixa_br import historical_delta, latest_rows, load_tesouro_cache, title_history
 
     st.title("RENDAFIXABR")
     st.caption("Panorama da renda fixa brasileira · Tesouro Direto, Selic e curva DI")
@@ -7468,14 +7468,78 @@ def pagina_renda_fixa_br():
 
     st.subheader("Taxas e preços do Tesouro Direto")
     if current_rows:
-        frame = pd.DataFrame(current_rows)
-        frame = frame.rename(columns={
-            "title": "Título", "maturity": "Vencimento", "date": "Data-base",
-            "buy_rate": "Taxa compra manhã (%)", "sell_rate": "Taxa venda manhã (%)",
-            "buy_price": "PU compra (R$)", "sell_price": "PU venda (R$)", "base_price": "PU base (R$)",
-        })
-        frame = frame[["Título", "Vencimento", "Taxa compra manhã (%)", "Taxa venda manhã (%)", "PU compra (R$)", "PU venda (R$)", "PU base (R$)"]]
-        st.dataframe(frame, use_container_width=True, hide_index=True)
+        def title_group(title):
+            normalized = title.upper()
+            if "SELIC" in normalized:
+                return "Tesouro Selic"
+            if "IPCA" in normalized and "JUROS SEMESTRAIS" in normalized:
+                return "Tesouro IPCA+ com juros semestrais"
+            if "PREFIXADO" in normalized and "JUROS SEMESTRAIS" in normalized:
+                return "Tesouro Prefixado com juros semestrais"
+            if "IPCA" in normalized:
+                return "Tesouro IPCA+"
+            if "PREFIXADO" in normalized:
+                return "Tesouro Prefixado"
+            if "EDUCA" in normalized:
+                return "Tesouro Educa+"
+            if "RENDA+" in normalized or "RENDA +" in normalized:
+                return "Tesouro RendA+"
+            return "Outros títulos"
+
+        def number_text(value, decimals=2, suffix=""):
+            if value is None:
+                return "—"
+            return f"{float(value):,.{decimals}f}{suffix}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+        def change_text(value, decimals=2, suffix=""):
+            if value is None:
+                return "—"
+            color = "#36D6A5" if value > 0 else "#FF7373" if value < 0 else "#94A3B8"
+            return f'<span style="color:{color};">{value:+.{decimals}f}{suffix}</span>'
+
+        grouped = {}
+        for row in current_rows:
+            grouped.setdefault(title_group(row["title"]), []).append(row)
+        group_order = (
+            "Tesouro Selic", "Tesouro Prefixado", "Tesouro IPCA+",
+            "Tesouro Prefixado com juros semestrais", "Tesouro IPCA+ com juros semestrais",
+            "Tesouro Educa+", "Tesouro RendA+", "Outros títulos",
+        )
+        st.markdown("""
+        <style>
+        .rf-list{border:1px solid #26364A;border-radius:7px;overflow:hidden;background:#0B1220;margin:4px 0 12px}
+        .rf-header,.rf-row{display:grid;grid-template-columns:minmax(190px,2fr) repeat(4,minmax(115px,1fr));gap:12px;align-items:center;padding:9px 12px}
+        .rf-header{background:#111B2A;color:#8FA3BB;font-size:.65rem;font-weight:800;text-transform:uppercase;border-bottom:1px solid #26364A}
+        .rf-row{min-height:56px;border-bottom:1px solid #1D2A3A;color:#E7EEF7;font-size:.77rem}
+        .rf-row:last-child{border-bottom:0}.rf-name{font-weight:800}.rf-maturity,.rf-sub{display:block;color:#8091A7;font-size:.64rem;margin-top:3px}
+        .rf-num{font-variant-numeric:tabular-nums;font-weight:750}.rf-sub{font-weight:500}
+        @media(max-width:760px){.rf-header{display:none}.rf-row{grid-template-columns:1fr 1fr;gap:7px}.rf-name{grid-column:1/-1;border-bottom:1px solid #1D2A3A;padding-bottom:6px}.rf-col:before{display:block;color:#8091A7;font-size:.58rem;text-transform:uppercase;margin-bottom:2px}.rf-buy:before{content:'Compra'}.rf-sell:before{content:'Venda'}.rf-pub:before{content:'PU compra'}.rf-puv:before{content:'PU venda'}}
+        </style>
+        """, unsafe_allow_html=True)
+        for group in group_order:
+            group_rows = grouped.get(group)
+            if not group_rows:
+                continue
+            st.markdown(f"#### {html.escape(group)} <span style='color:#8292A8;font-size:.7em;font-weight:500'>· {len(group_rows)} títulos</span>", unsafe_allow_html=True)
+            cells = ["<div class='rf-header'><div>Título / vencimento</div><div>Taxa de compra</div><div>Taxa de venda</div><div>PU compra</div><div>PU venda</div></div>"]
+            for row in sorted(group_rows, key=lambda item: item["maturity"]):
+                history = title_history(payload, row["title"], row["maturity"])
+                rate_day, _ = historical_delta(history, row, "buy_rate", days=1)
+                rate_year, _ = historical_delta(history, row, "buy_rate", days=365, tolerance_days=20)
+                pu_day, _ = historical_delta(history, row, "buy_price", days=1)
+                pu_year, _ = historical_delta(history, row, "buy_price", days=365, tolerance_days=20, relative=True)
+                cells.append(
+                    "<div class='rf-row'>"
+                    f"<div class='rf-name'>{html.escape(row['title'])}<span class='rf-maturity'>Venc. {html.escape(row['maturity'])}</span></div>"
+                    f"<div class='rf-col rf-buy'><span class='rf-num'>{number_text(row.get('buy_rate'), 2, '%')}</span>"
+                    f"<span class='rf-sub'>Δ 1d {change_text(rate_day, 2, ' p.p.')} · 12m {change_text(rate_year, 2, ' p.p.')}</span></div>"
+                    f"<div class='rf-col rf-sell'><span class='rf-num'>{number_text(row.get('sell_rate'), 2, '%')}</span></div>"
+                    f"<div class='rf-col rf-pub'><span class='rf-num'>R$ {number_text(row.get('buy_price'), 2)}</span>"
+                    f"<span class='rf-sub'>Δ 1d {change_text(pu_day, 2, ' R$')} · 12m {change_text(pu_year, 2, '%')}</span></div>"
+                    f"<div class='rf-col rf-puv'><span class='rf-num'>R$ {number_text(row.get('sell_price'), 2)}</span></div>"
+                    "</div>"
+                )
+            st.markdown(f"<div class='rf-list'>{''.join(cells)}</div>", unsafe_allow_html=True)
     else:
         st.warning("O arquivo não trouxe linhas para a data-base mais recente.")
 

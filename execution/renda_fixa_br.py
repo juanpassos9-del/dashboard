@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import date, datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -110,3 +110,44 @@ def title_history(payload: dict[str, Any], title: str, maturity: str) -> list[di
         row for row in payload.get("rows", [])
         if row.get("title") == title and row.get("maturity") == maturity
     ]
+
+
+def historical_delta(
+    history: list[dict[str, Any]],
+    current: dict[str, Any],
+    field: str,
+    *,
+    days: int = 1,
+    tolerance_days: int = 5,
+    relative: bool = False,
+) -> tuple[float | None, str | None]:
+    """Compare with the closest available observation near a past reference date."""
+    try:
+        current_date = datetime.strptime(str(current["date"]), "%Y-%m-%d").date()
+        current_value = current.get(field)
+        if current_value is None:
+            return None, None
+        target_date = current_date - timedelta(days=days)
+        candidates = []
+        for row in history:
+            value = row.get(field)
+            try:
+                row_date = datetime.strptime(str(row["date"]), "%Y-%m-%d").date()
+                numeric = float(value)
+            except (KeyError, TypeError, ValueError):
+                continue
+            distance = (target_date - row_date).days
+            if 0 <= distance <= tolerance_days and row_date < current_date:
+                candidates.append((distance, row_date, numeric))
+        if not candidates:
+            return None, None
+        _, reference_date, reference_value = min(candidates, key=lambda item: item[0])
+        if relative:
+            if reference_value == 0:
+                return None, None
+            delta = (float(current_value) / reference_value - 1) * 100
+        else:
+            delta = float(current_value) - reference_value
+        return delta, reference_date.isoformat()
+    except (KeyError, TypeError, ValueError):
+        return None, None
