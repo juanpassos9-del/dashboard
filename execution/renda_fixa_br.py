@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import datetime, timedelta
+import re
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,8 @@ TESOURO_CSV_URL = (
     "796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv"
 )
 CACHE_PATH = Path(__file__).resolve().parents[1] / ".tmp" / "renda_fixa_br.json"
+DI_CONTRACT_RE = re.compile(r"^DI1[A-Z]\d{2}$")
+MONTH_LABELS_PT = ("jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez")
 
 
 def _number(value: Any) -> float | None:
@@ -151,3 +154,36 @@ def historical_delta(
         return delta, reference_date.isoformat()
     except (KeyError, TypeError, ValueError):
         return None, None
+
+
+def build_di_curve_rows(contracts: list[dict[str, Any]], as_of: date | None = None) -> list[dict[str, Any]]:
+    """Prepare valid, unexpired DI contracts in maturity order for plotting."""
+    as_of = as_of or datetime.now(timezone.utc).date()
+    by_symbol: dict[str, dict[str, Any]] = {}
+    for item in contracts:
+        symbol = str(item.get("symbol") or "").upper()
+        if not DI_CONTRACT_RE.fullmatch(symbol):
+            continue
+        try:
+            rate = float(item.get("rate", item.get("price")))
+            maturity_ts = item.get("maturity_timestamp")
+            if maturity_ts:
+                maturity = datetime.fromtimestamp(float(maturity_ts), timezone.utc).date()
+            else:
+                maturity = datetime.strptime(str(item["maturity"]), "%d/%m/%Y").date()
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if maturity < as_of:
+            continue
+        previous = by_symbol.get(symbol)
+        if previous and str(previous.get("source_timestamp") or "") >= str(item.get("source_timestamp") or ""):
+            continue
+        by_symbol[symbol] = {
+            "symbol": symbol,
+            "maturity": maturity.isoformat(),
+            "label": f"{MONTH_LABELS_PT[maturity.month - 1]}/{maturity.strftime('%y')}",
+            "rate": rate,
+            "last_trade": str(item.get("last_trade") or item.get("source_timestamp") or "—"),
+            "source": str(item.get("source") or "DI Futuro"),
+        }
+    return sorted(by_symbol.values(), key=lambda item: (item["maturity"], item["symbol"]))

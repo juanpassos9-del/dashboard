@@ -7570,19 +7570,87 @@ def pagina_renda_fixa_br():
     else:
         st.info("Não há títulos disponíveis para montar o histórico.")
 
-    st.subheader("Curva DI · expectativas de juros")
-    if di_rows:
-        curve = pd.DataFrame(di_rows)
-        rate_column = "rate" if "rate" in curve else "price" if "price" in curve else None
-        if rate_column and "symbol" in curve:
-            curve[rate_column] = pd.to_numeric(curve[rate_column], errors="coerce")
-            curve = curve.dropna(subset=[rate_column]).sort_values("symbol")
-            st.bar_chart(curve.set_index("symbol")[[rate_column]], use_container_width=True)
-            st.caption(f"Fonte: {di_payload.get('source', 'DI Futuro')}. Curva observada de mercado, não previsão garantida da Selic.")
-        else:
-            st.info("Os contratos DI atuais não trouxeram taxas plotáveis.")
+    from execution.renda_fixa_br import build_di_curve_rows
+
+    all_di_contracts = di_payload.get("contracts") or di_rows
+    curve_rows = build_di_curve_rows(
+        all_di_contracts,
+        as_of=datetime.now(ZoneInfo("America/Sao_Paulo")).date(),
+    )
+    st.markdown("#### EXPECTATIVA PARA JUROS ›")
+    st.subheader("Curva DI: taxas implícitas por vencimento")
+    st.caption("Taxas anualizadas (% a.a.) · cada ponto representa um contrato futuro DI vigente.")
+    if curve_rows:
+        import plotly.graph_objects as go
+
+        x_values = [pd.to_datetime(item["maturity"]) for item in curve_rows]
+        rates = [item["rate"] for item in curve_rows]
+        floor = min(rates) - 0.25
+        tick_indices = list(range(0, len(curve_rows), max(1, len(curve_rows) // 8)))
+        figure = go.Figure()
+        figure.add_trace(go.Scatter(
+            x=x_values,
+            y=[floor] * len(curve_rows),
+            mode="lines",
+            line={"width": 0, "color": "rgba(72, 210, 171, 0)"},
+            hoverinfo="skip",
+            showlegend=False,
+        ))
+        figure.add_trace(go.Scatter(
+            x=x_values,
+            y=rates,
+            mode="lines+markers",
+            name="Curva vigente",
+            line={"color": "#48D2AB", "width": 3, "shape": "linear"},
+            marker={"color": "#48D2AB", "size": 6, "line": {"color": "#0B1220", "width": 1}},
+            fill="tonexty",
+            fillcolor="rgba(72, 210, 171, 0.10)",
+            customdata=[[item["symbol"], item["last_trade"], item["source"]] for item in curve_rows],
+            hovertemplate="<b>%{customdata[0]}</b><br>Vencimento %{x|%d/%m/%Y}<br>Taxa %{y:.3f}% a.a.<br>Último negócio %{customdata[1]}<br>Fonte %{customdata[2]}<extra></extra>",
+        ))
+        figure.update_layout(
+            height=390,
+            margin={"l": 12, "r": 14, "t": 22, "b": 38},
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="#0B1220",
+            font={"color": "#CBD5E1", "family": "Arial, sans-serif", "size": 11},
+            showlegend=False,
+            hovermode="x",
+            xaxis={
+                "title": "Vencimentos",
+                "type": "date",
+                "tickmode": "array",
+                "tickvals": [x_values[index] for index in tick_indices],
+                "ticktext": [curve_rows[index]["label"] for index in tick_indices],
+                "showgrid": True,
+                "gridcolor": "#1C2938",
+                "linecolor": "#34465A",
+            },
+            yaxis={
+                "title": "% ao ano",
+                "range": [floor, max(rates) + 0.25],
+                "ticksuffix": "%",
+                "showgrid": True,
+                "gridcolor": "#1C2938",
+                "linecolor": "#34465A",
+                "zeroline": False,
+            },
+        )
+        st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
+        curve_updated = di_payload.get("updated_at")
+        curve_source = di_payload.get("source", "DI Futuro")
+        st.caption(f"Fonte: {curve_source} · snapshot {curve_updated or 'sem horário informado'} · {len(curve_rows)} vencimentos plotados")
+        try:
+            updated_dt = datetime.fromisoformat(str(curve_updated).replace("Z", "+00:00"))
+            if updated_dt.tzinfo is None:
+                updated_dt = updated_dt.replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+            age_hours = (datetime.now(ZoneInfo("America/Sao_Paulo")) - updated_dt.astimezone(ZoneInfo("America/Sao_Paulo"))).total_seconds() / 3600
+            if age_hours > 24:
+                st.warning(f"O snapshot da curva tem {age_hours:.0f} horas. Confira o último negócio de cada contrato antes de usar como referência atual.")
+        except (TypeError, ValueError):
+            pass
     else:
-        st.info("Curva DI indisponível nesta atualização; os dados do Tesouro continuam disponíveis.")
+        st.info("Curva DI indisponível ou sem contratos vigentes nesta atualização; os dados do Tesouro continuam disponíveis.")
 
     st.caption("Informação de mercado para acompanhamento; não constitui recomendação de investimento. Preços e taxas são distintos de rentabilidade garantida em resgate antecipado.")
 
