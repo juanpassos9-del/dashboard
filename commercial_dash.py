@@ -9500,24 +9500,50 @@ def render_terminal_lightweight_copy():
 
 def pagina_terminal():
     """Renderiza o terminal principal de trading."""
-    painel_tickers_topo()   # Indicadores Globais no Topo
-    regime_col, koyfin_col = st.columns([0.68, 0.32], gap="medium")
-    with regime_col:
-        render_regime_juros_section()
-    with koyfin_col:
-        render_koyfin_terminal_trading_embed()
+    painel_tickers_topo()
+    render_regime_juros_section()
     render_di_brasil_regime_panel(compact=True)
+
+    st.markdown("#### CONTEXTO OPERACIONAL")
+    painel_topo_rtd()
+    painel_inferior_rtd()
+
     render_b3_settlements_section()
-    render_top_movers_brasil()
-    render_terminal_global_line_chart()
-    render_terminal_interest_rate_tv_comparison()
-    render_ewz_vwap_vol_plotly_chart()
-    render_terminal_lightweight_copy()
     secao_boletim_focus_fragment() # Estático/Lento (300s)
     secao_fluxo_estrangeiro_fragment() # Fluxo B3 (300s)
-    painel_topo_rtd()       # Tempo Real (1s)
-    secao_ia_fragment()     # Estático/Lento (60s)
-    painel_inferior_rtd()   # Tempo Real (1s) - Escada de Níveis
+
+    st.markdown("#### ANÁLISE E GRÁFICOS")
+    show_macro_embed = st.toggle(
+        "Mostrar painel Koyfin",
+        value=False,
+        key="terminal_koyfin_enabled",
+        help="O painel Koyfin é externo e opcional; os cálculos do dashboard não dependem dele.",
+    )
+    if show_macro_embed:
+        render_koyfin_terminal_trading_embed()
+
+    show_market_modules = st.toggle(
+        "Carregar Top Movers e gráficos intradiários",
+        value=False,
+        key="terminal_market_modules_enabled",
+        help="Consulta fontes externas e pode levar alguns segundos. Os resultados usam cache.",
+    )
+    if show_market_modules:
+        render_top_movers_brasil()
+        render_terminal_global_line_chart()
+        render_terminal_interest_rate_tv_comparison()
+        render_ewz_vwap_vol_plotly_chart()
+
+    show_technical_chart = st.toggle(
+        "Carregar gráfico técnico proprietário",
+        value=False,
+        key="terminal_lightweight_enabled",
+        help="Abre a cópia do gráfico Lightweight com motor de reversão e indicadores técnicos.",
+    )
+    if show_technical_chart:
+        render_terminal_lightweight_copy()
+
+    secao_ia_fragment()
 
 def pagina_market_report():
     """Página dedicada ao Market Report Institucional."""
