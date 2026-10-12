@@ -11,6 +11,7 @@ ALL_PAGES = [
     "RENDAFIXABR",
     "Crypto Terminal",
     "📺 Terminal Bloomberg",
+    "WATCHLIST",
 ]
 
 
@@ -22,6 +23,7 @@ def test_restricted_account_sees_only_requested_pages():
         "🇧🇷 MONITOR BR",
         "RENDAFIXABR",
         "Crypto Terminal",
+        "WATCHLIST",
     ]
 
 

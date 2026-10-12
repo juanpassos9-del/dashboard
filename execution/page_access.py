@@ -8,6 +8,7 @@ RESTRICTED_PAGE_ACCESS = {
         "🇧🇷 MONITOR BR",
         "RENDAFIXABR",
         "Crypto Terminal",
+        "WATCHLIST",
     }),
 }
 
