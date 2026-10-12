@@ -4,8 +4,14 @@ import time
 import json
 from dotenv import load_dotenv
 
-# Adiciona o diretório deste script ao path para importação limpa
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# The script is invoked by path, so Python starts with `execution/` on sys.path.
+# Add the repository root as well for imports using the `execution.*` package.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+EXECUTION_DIR = os.path.dirname(os.path.abspath(__file__))
+if EXECUTION_DIR not in sys.path:
+    sys.path.insert(0, EXECUTION_DIR)
 
 from app_state_sync import get_service_client, sync_app_state_value
 
@@ -24,10 +30,13 @@ def sync_to_supabase(key, value):
     try:
         sync_app_state_value(key, value, supabase)
         print(f"[*] Sincronizado com sucesso: {key}")
+        return True
     except Exception as e:
         print(f"[!] Erro ao sincronizar {key}: {e}")
+        return False
 
 print("=== INICIANDO ATUALIZAÇÕES EM NUVEM ===")
+critical_errors = []
 
 # 1. IA Analista
 try:
@@ -39,7 +48,8 @@ try:
         if os.path.exists(p):
             with open(p, "r", encoding="utf-8") as f:
                 new_insight = json.load(f)
-                sync_to_supabase("ai_insight", new_insight)
+                if not sync_to_supabase("ai_insight", new_insight):
+                    raise RuntimeError("Supabase recusou a gravação de ai_insight.")
                 
                 # Atualiza Histórico
                 try:
@@ -49,32 +59,45 @@ try:
                     history = res.data[0]["value"] if res.data else []
                     updated_history, added = append_direction_history(history, new_insight)
                     if added or updated_history != history:
-                        sync_to_supabase("ai_insight_history", updated_history)
+                        if not sync_to_supabase("ai_insight_history", updated_history):
+                            raise RuntimeError("Supabase recusou a gravação de ai_insight_history.")
                 except Exception as he:
-                    print(f"[!] Erro ao atualizar histórico da IA: {he}")
+                    raise RuntimeError(f"Falha ao atualizar histórico da IA: {he}") from he
             break
+    else:
+        raise RuntimeError("O gerador não produziu ai_insight.json.")
 except Exception as e:
     print(f"[!] Erro em IA Analista: {e}")
+    critical_errors.append(f"IA Analista: {e}")
 
 # 3. Market Report
 try:
     print("\n[3/4] Atualizando Market Report...")
     from market_report import generate_market_report
-    generate_market_report()
+    report = generate_market_report()
+    if report is None:
+        raise RuntimeError("O gerador não produziu um Market Report.")
     paths = ["market_report.json", "execution/market_report.json"]
+    report_synced = False
     for p in paths:
         if os.path.exists(p):
             with open(p, "r", encoding="utf-8") as f:
-                sync_to_supabase("market_report", json.load(f))
+                if not sync_to_supabase("market_report", json.load(f)):
+                    raise RuntimeError("Supabase recusou a gravação de market_report.")
+                report_synced = True
             break
+    if not report_synced:
+        raise RuntimeError("O gerador não produziu market_report.json.")
     daily_paths = ["market_report_daily.json", "execution/market_report_daily.json"]
     for p in daily_paths:
         if os.path.exists(p):
             with open(p, "r", encoding="utf-8") as f:
-                sync_to_supabase("market_report_daily", json.load(f))
+                if not sync_to_supabase("market_report_daily", json.load(f)):
+                    raise RuntimeError("Supabase recusou a gravação de market_report_daily.")
             break
 except Exception as e:
     print(f"[!] Erro em Market Report: {e}")
+    critical_errors.append(f"Market Report: {e}")
 
 # 4. Calendário Econômico
 try:
@@ -179,5 +202,8 @@ try:
         sync_to_supabase("boletim_focus", data_to_save)
 except Exception as e:
     print(f"[!] Erro no Boletim Focus: {e}")
+
+if critical_errors:
+    raise SystemExit("Atualizações críticas falharam: " + " | ".join(critical_errors))
 
 print("\n=== ATUALIZAÇÕES COMPLETADAS COM SUCESSO ===")
