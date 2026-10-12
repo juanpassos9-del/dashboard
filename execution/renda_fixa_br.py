@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+import statistics
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -187,3 +188,73 @@ def build_di_curve_rows(contracts: list[dict[str, Any]], as_of: date | None = No
             "source": str(item.get("source") or "DI Futuro"),
         }
     return sorted(by_symbol.values(), key=lambda item: (item["maturity"], item["symbol"]))
+
+
+def detect_pu_spikes(
+    payload: dict[str, Any],
+    *,
+    horizons: tuple[int, ...] = (1, 5, 20),
+    minimum_observations: int = 31,
+) -> list[dict[str, Any]]:
+    """Find unusual positive PU moves against each bond's own historical volatility."""
+    floors = {1: 0.5, 5: 1.5, 20: 3.0}
+    latest_date_in_payload = str(payload.get("latest_date") or max((str(row.get("date") or "") for row in payload.get("rows", [])), default=""))
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in payload.get("rows", []):
+        grouped.setdefault((str(row.get("title") or ""), str(row.get("maturity") or "")), []).append(row)
+
+    alerts = []
+    for (title, maturity), history in grouped.items():
+        history.sort(key=lambda row: str(row.get("date") or ""))
+        if not history or str(history[-1].get("date") or "") != latest_date_in_payload:
+            continue
+        if len(history) < minimum_observations:
+            continue
+        price_field = "base_price" if any(row.get("base_price") is not None for row in history) else "buy_price"
+        valid = []
+        for row in history:
+            try:
+                value = float(row.get(price_field))
+                row_date = datetime.strptime(str(row.get("date")), "%Y-%m-%d").date()
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                valid.append((row_date, value))
+        if len(valid) < minimum_observations:
+            continue
+
+        latest_date, latest_price = valid[-1]
+        for horizon in horizons:
+            if horizon not in floors or len(valid) < max(minimum_observations, horizon + 11):
+                continue
+            baseline_returns = []
+            for end in range(horizon, len(valid) - 1):
+                start_value = valid[end - horizon][1]
+                end_value = valid[end][1]
+                if start_value > 0:
+                    baseline_returns.append(abs((end_value / start_value - 1) * 100))
+            if len(baseline_returns) < 10:
+                continue
+            center = statistics.median(baseline_returns)
+            mad = statistics.median(abs(value - center) for value in baseline_returns)
+            threshold = max(floors[horizon], center + 3 * 1.4826 * mad)
+
+            reference_date, reference_price = valid[-1 - horizon]
+            change = (latest_price / reference_price - 1) * 100
+            if change < threshold:
+                continue
+            alerts.append({
+                "title": title,
+                "maturity": maturity,
+                "date": latest_date.isoformat(),
+                "reference_date": reference_date.isoformat(),
+                "horizon_sessions": horizon,
+                "horizon_label": "1 pregão" if horizon == 1 else f"{horizon} pregões",
+                "price_field": price_field,
+                "current_price": latest_price,
+                "reference_price": reference_price,
+                "change_percent": change,
+                "threshold_percent": threshold,
+                "multiple": change / threshold if threshold else None,
+            })
+    return sorted(alerts, key=lambda item: (item["multiple"] or 0, item["change_percent"]), reverse=True)

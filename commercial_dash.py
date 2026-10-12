@@ -7543,6 +7543,38 @@ def pagina_renda_fixa_br():
     else:
         st.warning("O arquivo não trouxe linhas para a data-base mais recente.")
 
+    from execution.renda_fixa_br import detect_pu_spikes
+
+    st.subheader("Alertas de alta incomum nos preços unitários")
+    st.caption("Alertas usam o PU base da manhã (ou PU de compra se o PU base faltar), comparado ao histórico do mesmo título e vencimento. Pisos de disparo: 0,50% em 1 pregão, 1,50% em 5 e 3,00% em 20; o limite final também considera a volatilidade histórica do papel.")
+    try:
+        source_age_days = (datetime.now(ZoneInfo("America/Sao_Paulo")).date() - datetime.strptime(source_date, "%Y-%m-%d").date()).days
+    except ValueError:
+        source_age_days = None
+    if source_age_days is not None and source_age_days > 7:
+        st.warning(f"Alertas suspensos: a última data-base ({source_date}) está há {source_age_days} dias. Atualize os dados do Tesouro antes de interpretar movimentos.")
+    else:
+        pu_alerts = detect_pu_spikes(payload)
+        if pu_alerts:
+            shown_alerts = pu_alerts[:12]
+            alert_frame = pd.DataFrame([{
+                "Título": item["title"],
+                "Vencimento": item["maturity"],
+                "Janela": item["horizon_label"],
+                "Alta do PU (%)": round(item["change_percent"], 2),
+                "Limite adaptativo (%)": round(item["threshold_percent"], 2),
+                "PU atual (R$)": round(item["current_price"], 2),
+                "PU de referência (R$)": round(item["reference_price"], 2),
+                "Data-base": item["date"],
+            } for item in shown_alerts])
+            st.dataframe(alert_frame, use_container_width=True, hide_index=True)
+            if len(pu_alerts) > len(shown_alerts):
+                st.caption(f"Mostrando os 12 movimentos mais fortes de {len(pu_alerts)} alertas calculados.")
+        elif sum(len(title_history(payload, row["title"], row["maturity"])) >= 31 for row in current_rows) == 0:
+            st.info("Ainda não há 31 observações diárias para nenhum dos títulos atuais; os alertas serão habilitados quando houver histórico suficiente.")
+        else:
+            st.success(f"Nenhuma alta incomum detectada na data-base {source_date} com o histórico disponível.")
+
     st.subheader("Histórico diário por título")
     choices = sorted({(row["title"], row["maturity"]) for row in current_rows if row.get("title") and row.get("maturity")})
     if choices:

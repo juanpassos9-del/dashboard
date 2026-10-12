@@ -1,6 +1,6 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
-from execution.renda_fixa_br import build_di_curve_rows, historical_delta, latest_rows, parse_tesouro_csv, title_history
+from execution.renda_fixa_br import build_di_curve_rows, detect_pu_spikes, historical_delta, latest_rows, parse_tesouro_csv, title_history
 
 
 CSV = """Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha
@@ -64,6 +64,49 @@ def test_di_curve_uses_timestamp_maturity_when_display_date_is_missing():
         {"symbol": "DI1F27", "price": 13.3, "maturity_timestamp": maturity_ts},
     ], as_of=date(2026, 10, 12))
     assert curve[0]["maturity"] == "2027-01-01"
+
+
+def test_pu_spike_detects_large_move_and_uses_same_bond_baseline():
+    rows = []
+    price = 100.0
+    start = date(2026, 1, 1)
+    for index in range(45):
+        if index == 44:
+            price *= 1.02
+        else:
+            price *= 1.0005
+        rows.append({
+            "title": "Tesouro IPCA+",
+            "maturity": "2035-05-15",
+            "date": (start + timedelta(days=index)).isoformat(),
+            "base_price": price,
+            "buy_price": price - 0.1,
+        })
+    payload = {"latest_date": rows[-1]["date"], "rows": rows}
+
+    alerts = detect_pu_spikes(payload)
+    daily = next(alert for alert in alerts if alert["horizon_sessions"] == 1)
+    assert daily["price_field"] == "base_price"
+    assert daily["change_percent"] > daily["threshold_percent"]
+    assert daily["current_price"] == rows[-1]["base_price"]
+
+
+def test_pu_spikes_skip_normal_movement_insufficient_history_and_old_titles():
+    rows = []
+    start = date(2026, 1, 1)
+    price = 100.0
+    for index in range(45):
+        price *= 1.0005
+        rows.append({
+            "title": "Tesouro Selic",
+            "maturity": "2031-03-01",
+            "date": (start + timedelta(days=index)).isoformat(),
+            "base_price": price,
+        })
+    short_history = [dict(row, title="Tesouro Prefixado", maturity="2030-01-01") for row in rows[-10:]]
+    old_history = [dict(row, title="Tesouro IPCA+", maturity="2032-05-15") for row in rows[:30]]
+    payload = {"latest_date": rows[-1]["date"], "rows": rows + short_history + old_history}
+    assert detect_pu_spikes(payload) == []
 
 
 def test_invalid_csv_fails_instead_of_reporting_empty_success():
