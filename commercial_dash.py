@@ -9666,6 +9666,100 @@ def pagina_market_report():
     secao_market_report_fragment()
 
 
+@st.cache_data(ttl=1200, show_spinner=False)
+def _fetch_terminal_b3_report_cached():
+    from execution.terminal_b3 import download_terminal_b3_history
+
+    return download_terminal_b3_history()
+
+
+def pagina_terminal_b3():
+    """Radar setorial de ações, ETFs e BDRs listados na B3."""
+    from execution.terminal_b3 import ASSET_UNIVERSE, market_read
+
+    st.title("Terminal B3")
+    st.caption("Ações, ETFs e BDRs negociados na B3 · desempenho por pregões, força relativa e amplitude de mercado")
+    button_col, info_col = st.columns([1, 3])
+    with button_col:
+        refresh = st.button("Carregar / atualizar dados", type="primary", use_container_width=True, key="terminal_b3_refresh")
+    with info_col:
+        st.caption("Universo inicial representativo, priorizando ativos líquidos. Histórico diário ajustado · Yahoo Finance · janela móvel de 4 meses.")
+
+    if refresh:
+        _fetch_terminal_b3_report_cached.clear()
+    report = st.session_state.get("terminal_b3_report")
+    if refresh or report is None:
+        with st.spinner("Carregando histórico diário dos ativos da B3..."):
+            try:
+                report = _fetch_terminal_b3_report_cached()
+                st.session_state["terminal_b3_report"] = report
+            except Exception as exc:
+                st.error(f"Não foi possível carregar o Terminal B3: {exc}")
+                report = None
+    if not report or not report.get("rows"):
+        st.info("Os dados ainda não foram carregados ou a fonte não retornou histórico. Use o botão para tentar novamente.")
+        return
+
+    coverage = report.get("coverage") or {}
+    benchmark = report.get("benchmark") or {}
+    st.caption(f"Última sessão recebida: {report.get('latest_session') or 'indisponível'} · BOVA11: {benchmark.get('weekly'):+.2f}% na semana" if benchmark.get("weekly") is not None else f"Última sessão recebida: {report.get('latest_session') or 'indisponível'} · benchmark BOVA11 sem histórico suficiente")
+    st.caption(f"Cobertura da amostra: {coverage.get('available', 0)}/{coverage.get('universe', len(ASSET_UNIVERSE))} ativos · recebimento {report.get('updated_at', 'horário indisponível')} · retornos em fechamento ajustado")
+    if report.get("missing_assets"):
+        st.warning("Sem histórico retornado para: " + ", ".join(report["missing_assets"]) + ". Esses ativos foram excluídos dos rankings.")
+    if report.get("errors"):
+        st.warning("A fonte teve falhas parciais; ativos ausentes não entram nos rankings. " + " | ".join(report["errors"][:2]))
+
+    st.markdown("### Leitura do mercado")
+    for sentence in market_read(report):
+        st.markdown(f"- {sentence}")
+
+    sector_rows = report.get("sectors") or []
+    asset_rows = report.get("rows") or []
+    if sector_rows:
+        st.markdown("### Rotação setorial")
+        sectors_df = pd.DataFrame([{
+            "Setor": row["sector"], "Ativos": row["assets"],
+            "Média 5 pregões": f"{row['weekly']:+.2f}%" if row["weekly"] is not None else "—",
+            "Média 21 pregões": f"{row['monthly']:+.2f}%" if row["monthly"] is not None else "—",
+            "Amplitude 5d (%)": round(row["weekly_breadth"]) if row["weekly_breadth"] is not None else None,
+            "Amplitude 21d (%)": round(row["monthly_breadth"]) if row["monthly_breadth"] is not None else None,
+        } for row in sector_rows])
+        st.dataframe(sectors_df, hide_index=True, use_container_width=True, column_config={
+            "Amplitude 5d (%)": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%d%%"),
+            "Amplitude 21d (%)": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%d%%"),
+        })
+
+    st.markdown("### Destaques por ativo")
+    filter_cols = st.columns(2)
+    classes = ["Todas as classes"] + sorted({row["class"] for row in asset_rows})
+    sectors = ["Todos os setores"] + sorted({row["sector"] for row in asset_rows})
+    selected_class = filter_cols[0].selectbox("Classe", classes, key="terminal_b3_class")
+    selected_sector = filter_cols[1].selectbox("Setor / tema", sectors, key="terminal_b3_sector")
+    filtered = [row for row in asset_rows if (selected_class == "Todas as classes" or row["class"] == selected_class) and (selected_sector == "Todos os setores" or row["sector"] == selected_sector)]
+
+    def render_b3_rank(period: str, label: str):
+        valid = [row for row in filtered if row.get(period) is not None]
+        if not valid:
+            st.info(f"Sem histórico suficiente para o ranking de {label.lower()} nesta seleção.")
+            return
+        leaders = sorted(valid, key=lambda row: row[period], reverse=True)[:5]
+        laggards = sorted(valid, key=lambda row: row[period])[:5]
+        left, right = st.columns(2)
+        for col, heading, rows in ((left, f"Maiores altas · {label}", leaders), (right, f"Maiores quedas · {label}", laggards)):
+            with col:
+                st.markdown(f"**{heading}**")
+                table = pd.DataFrame([{"Ativo": r["symbol"], "Nome": r["name"], "Classe": r["class"], "Setor": r["sector"], "Variação": f"{r[period]:+.2f}%", "vs BOVA11": f"{r['relative_5d' if period == 'return_5d' else 'relative_21d']:+.2f} p.p." if r["relative_5d" if period == "return_5d" else "relative_21d"] is not None else "—", "Vol. vs mediana 20d": f"{r['volume_ratio']:.2f}x" if r["volume_ratio"] is not None else "—"} for r in rows])
+                st.dataframe(table, hide_index=True, use_container_width=True, column_config={
+                    "Variação": st.column_config.TextColumn(),
+                    "vs BOVA11": st.column_config.TextColumn(),
+                    "Vol. vs mediana 20d": st.column_config.TextColumn(),
+                })
+
+    render_b3_rank("return_5d", "5 pregões")
+    render_b3_rank("return_21d", "21 pregões")
+    st.caption("Leitura quantitativa descritiva, não recomendação. Força relativa = retorno do ativo menos retorno do BOVA11 no mesmo número de pregões. Volume relativo compara o último volume diário com a mediana dos 20 pregões anteriores.")
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def get_watchlist_payload_cached(global_data, schema_version="watchlist_v4_position_only"):
     from execution.watchlist_ai import generate_watchlist
@@ -13685,7 +13779,7 @@ with st.sidebar:
         _clear_auth_session()
         _auth_rerun()
     st.markdown("### 🧭 Navegação")
-    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🌎 Terminal Global", "FX COMMAND CENTER", "MONITOR MACRO", "🇧🇷 MONITOR BR", "RENDAFIXABR", "Crypto Terminal", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=1, label_visibility="collapsed")
+    page = st.radio("Ir para:", ["📉 Terminal de Trading", "🇧🇷 Terminal B3", "🌎 Terminal Global", "FX COMMAND CENTER", "MONITOR MACRO", "🇧🇷 MONITOR BR", "RENDAFIXABR", "Crypto Terminal", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"], index=2, label_visibility="collapsed")
     sidebar_clock()
     
     st.markdown("---")
@@ -13707,6 +13801,8 @@ with st.sidebar:
 # Roteamento de Páginas
 if page == "📉 Terminal de Trading":
     pagina_terminal()
+elif page == "🇧🇷 Terminal B3":
+    pagina_terminal_b3()
 elif page == "🌎 Terminal Global":
     pagina_terminal_global()
 elif page == "FX COMMAND CENTER":
