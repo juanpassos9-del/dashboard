@@ -940,10 +940,28 @@ FORMATO OBRIGATORIO:
 """
 
         ai_errors = []
-        has_external_ai_key = bool(os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY"))
+        has_external_ai_key = any(
+            (os.getenv(name) or "").strip()
+            for name in ("GOOGLE_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY")
+        )
         if has_external_ai_key:
             print("[*] Gerando Market Report via IA...")
-            report_text, provider, ai_errors = _generate_ai_report_text(prompt)
+            try:
+                report_text, provider, ai_errors = _generate_ai_report_text(prompt)
+            except Exception as ai_error:
+                ai_errors.append(f"IA indisponivel; usado fallback local: {ai_error}")
+                print(f"[WARN] IAs indisponiveis; gerando Market Report local: {ai_error}")
+                report_text = _generate_local_report_text(
+                    slot_meta,
+                    date_str,
+                    local_data,
+                    global_data,
+                    news,
+                    previous_reports,
+                    calendar_events,
+                    calendar_source,
+                )
+                provider = "Local/fallback (IA indisponivel)"
         else:
             print("[*] Gerando Market Report local sem chave de IA externa...")
             report_text = _generate_local_report_text(slot_meta, date_str, local_data, global_data, news, previous_reports, calendar_events, calendar_source)
