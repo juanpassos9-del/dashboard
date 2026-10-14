@@ -3,9 +3,9 @@ import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-import google.generativeai as genai
 from dotenv import load_dotenv
 
+from execution.gemini_client import generate_gemini_text
 from execution.yield_curve_regime import analyze_yield_curve_regime
 
 load_dotenv()
@@ -276,14 +276,13 @@ def generate_macro_insight():
         calendar_data = _load_json("calendario_economico.json", [])
         macro_context = build_macro_regime_context(local_data, global_data, calendar_data)
 
-        api_key = os.getenv("GOOGLE_API_KEY")
+        api_key = (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or "").strip()
         if not api_key:
             clean_text = _local_fallback_text(macro_context)
             sentiment = macro_context["sentiment_hint"]
             provider = "Local/macro_regime_engine"
         else:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(os.getenv("AI_ANALYST_GEMINI_MODEL", "gemini-flash-latest"))
+            model_name = os.getenv("AI_ANALYST_GEMINI_MODEL", "gemini-flash-latest").strip()
             prompt = f"""
 Voce e um Analista Macro Global Profissional, com mentalidade de trader institucional.
 
@@ -337,11 +336,16 @@ REGRAS:
 - Nao gere recomendacao direta de compra/venda. E uma leitura de regime macro, nao call de trade.
 - A ultima linha deve ser exatamente: REGIME: RISK-ON, REGIME: RISK-OFF ou REGIME: NEUTRO.
 """
-            response = model.generate_content(prompt)
-            full_text = getattr(response, "text", "") or ""
-            sentiment = _extract_sentiment(full_text, macro_context["sentiment_hint"])
-            clean_text = _clean_verdict(full_text)
-            provider = f"Gemini/{os.getenv('AI_ANALYST_GEMINI_MODEL', 'gemini-flash-latest')} + macro_regime_engine"
+            try:
+                full_text = generate_gemini_text(prompt, model_name=model_name, api_key=api_key)
+                sentiment = _extract_sentiment(full_text, macro_context["sentiment_hint"])
+                clean_text = _clean_verdict(full_text)
+                provider = f"Gemini/{model_name} + macro_regime_engine"
+            except Exception as e:
+                print(f"[WARN] Gemini indisponivel para IA Analista; usando leitura local: {e}")
+                clean_text = _local_fallback_text(macro_context)
+                sentiment = macro_context["sentiment_hint"]
+                provider = "Local/macro_regime_engine (fallback Gemini)"
 
         updated_at = datetime.now(ZoneInfo("America/Sao_Paulo")).isoformat(timespec="seconds")
         payload = {

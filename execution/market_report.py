@@ -8,10 +8,7 @@ from dotenv import load_dotenv
 
 from execution.fetch_news import fetch_all_news
 
-try:
-    import google.generativeai as genai
-except Exception:
-    genai = None
+from execution.gemini_client import generate_gemini_text
 
 load_dotenv()
 
@@ -132,39 +129,18 @@ def _load_app_state_value(key, default):
     return default
 
 
-def _extract_ai_text(response):
-    text = getattr(response, "text", "") or ""
-    text = text.strip()
-    if text:
-        return text
-    try:
-        parts = response.candidates[0].content.parts
-        text = "\n".join(getattr(part, "text", "") for part in parts).strip()
-    except Exception:
-        text = ""
-    return text
-
-
 def _generate_with_gemini(prompt, errors):
-    api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    api_key = (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or "").strip()
     if not api_key:
         errors.append("Gemini sem GOOGLE_API_KEY/GEMINI_API_KEY.")
         return None, None
-    if genai is None:
-        errors.append("Pacote google-generativeai indisponivel.")
-        return None, None
-
-    genai.configure(api_key=api_key)
-    model_names = [
+    model_names = dict.fromkeys([
         os.getenv("MARKET_REPORT_GEMINI_MODEL", "").strip(),
         "gemini-flash-latest",
-        "gemini-1.5-flash",
-    ]
+    ])
     for model_name in [name for name in model_names if name]:
         try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
-            text = _extract_ai_text(response)
+            text = generate_gemini_text(prompt, model_name=model_name, api_key=api_key)
             if text:
                 return text, f"Gemini/{model_name}"
             errors.append(f"{model_name}: resposta vazia.")
