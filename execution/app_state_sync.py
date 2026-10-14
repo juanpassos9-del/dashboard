@@ -24,6 +24,7 @@ APP_STATE_ALLOWED_KEYS = {
     "financial_juice_news",
     "fluxo_estrangeiro_b3",
     "manual_trades",
+    "macro_fallback_market_history",
     "market_report",
     "market_report_daily",
     "mercados_globais",

@@ -125,10 +125,10 @@ def _load_market_fallback(global_data):
     return data
 
 
-def _merge_curve_data(global_data=None):
+def _merge_curve_data(global_data=None, include_fred=True):
     global_data = global_data or {}
     data = _load_market_fallback(global_data)
-    fred_data = _load_fred_curve_data()
+    fred_data = _load_fred_curve_data() if include_fred else {}
     # O snapshot intradiario do mercado tem prioridade para yields nominais.
     # FRED preenche ausencias e continua sendo a fonte de TIPS/breakevens.
     for key, value in fred_data.items():
@@ -286,8 +286,8 @@ def _trader_sentence(regime, bias):
     return "Evitar operacao direcional forte; operar apenas com confirmacao de preco, VWAP, volume e fluxo."
 
 
-def analyze_yield_curve_regime(global_data=None):
-    data = _merge_curve_data(global_data)
+def analyze_yield_curve_regime(global_data=None, include_fred=True):
+    data = _merge_curve_data(global_data, include_fred=include_fred)
     regime = classify_yield_curve(data)
     confidence = _confidence(data, regime)
     impacts = _bias_for_assets(regime, data)
