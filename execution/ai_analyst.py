@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from execution.gemini_client import generate_gemini_text
 from execution.market_data_engine import FRESHNESS_LIMITS_SECONDS, quote_age_seconds
+from execution.terminal_market_intelligence import audit_rtd_payload, format_age, rtd_number, rtd_text
 from execution.yield_curve_regime import analyze_yield_curve_regime
 
 load_dotenv()
@@ -47,7 +48,7 @@ def _load_json(path, default):
         return default
 
 
-def _load_macro_inputs():
+def _load_macro_inputs(dashboard_inputs=None):
     keys = {
         "dados_mercado": ("dados_mercado.json", {}),
         "mercados_globais": ("mercados_globais.json", {}),
@@ -74,8 +75,84 @@ def _load_macro_inputs():
         key: state.get(key) if state.get(key) is not None else _load_json(path, default)
         for key, (path, default) in keys.items()
     }
+    for key, value in (dashboard_inputs or {}).items():
+        if key in keys and value is not None:
+            inputs[key] = value
     inputs[FALLBACK_HISTORY_KEY] = state.get(FALLBACK_HISTORY_KEY) or {"samples": []}
     return inputs, client
+
+
+def _dashboard_rtd_context(local_data, now):
+    audit = audit_rtd_payload(local_data, now=now)
+    if not audit.get("available"):
+        return {"available": False, "state": "missing", "evidence": []}
+
+    data = audit.get("data") or {}
+    market_age = audit.get("market_age_seconds")
+    bridge_age = audit.get("bridge_age_seconds")
+    state = audit.get("state", "unknown")
+    if market_age is None:
+        market_state = "horario de mercado desconhecido"
+    elif market_age <= 15 and state == "fresh":
+        market_state = "negocio recente"
+    else:
+        market_state = f"negocio possivelmente atrasado ({format_age(market_age)})"
+
+    details = []
+    price = rtd_number(data.get("last_price"), positive=True)
+    change = rtd_number(data.get("change_percent"))
+    aggression = rtd_number(data.get("saldo_agressao"))
+    if price is not None:
+        details.append(f"preco {price:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+    if change is not None:
+        details.append(f"variacao {change:+.2f}%")
+    if aggression is not None:
+        details.append(f"saldo de agressao {aggression:+,.0f}".replace(",", "."))
+    semaforo = data.get("semaforo") if isinstance(data.get("semaforo"), dict) else {}
+    direction = rtd_text(semaforo.get("direcao"), "")
+    if direction:
+        details.append(f"semaforo {direction}")
+
+    symbol = rtd_text(data.get("symbol"), "ativo RTD")
+    received = f"bridge recebeu ha {format_age(bridge_age)}" if bridge_age is not None else "recepcao sem horario"
+    evidence = [f"{symbol}: {', '.join(details) or 'sem campos numericos validos'}; {market_state}; {received}."]
+    evidence.extend(audit.get("warnings") or [])
+    return {
+        "available": True,
+        "state": state,
+        "symbol": symbol,
+        "market_timestamp": audit.get("market_timestamp"),
+        "market_age_seconds": market_age,
+        "bridge_age_seconds": bridge_age,
+        "evidence": evidence[:3],
+        "usable_for_confirmation": state == "fresh" and market_age is not None and market_age <= 15,
+    }
+
+
+def _macro_snapshot_needs_refresh(context):
+    quality = context.get("data_quality", {})
+    age = context.get("market_snapshot_age_seconds")
+    return quality.get("coverage_pct", 0) < 60 or age is None or age > 10 * 60
+
+
+def _refresh_macro_dashboard_snapshot(market_inputs, client, context):
+    status = {"attempted": False, "succeeded": False, "error": None}
+    if not _macro_snapshot_needs_refresh(context):
+        return market_inputs.get("mercados_globais"), status
+
+    status["attempted"] = True
+    try:
+        from execution.market_data_engine import collect_and_publish_market_snapshot
+
+        snapshot = collect_and_publish_market_snapshot(client)
+        if snapshot:
+            market_inputs["mercados_globais"] = snapshot
+            status["succeeded"] = True
+            return snapshot, status
+    except Exception as error:
+        status["error"] = str(error)
+        print(f"[WARN] Atualizacao sob demanda do snapshot falhou; usando o snapshot atual do dashboard: {error}")
+    return market_inputs.get("mercados_globais"), status
 
 
 def append_macro_market_snapshot(history, quotes, now=None):
@@ -391,6 +468,17 @@ def build_macro_regime_context(local_data, global_data, calendar_data, now=None,
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     now = now.astimezone(timezone.utc)
+    rtd_context = _dashboard_rtd_context(local_data, now)
+    metadata = global_data.get("metadata") if isinstance(global_data, dict) else {}
+    snapshot_timestamp = (metadata or {}).get("generated_at_utc") or (metadata or {}).get("full_timestamp")
+    try:
+        parsed_snapshot_timestamp = datetime.fromisoformat(str(snapshot_timestamp).replace("Z", "+00:00"))
+        if parsed_snapshot_timestamp.tzinfo is None:
+            parsed_snapshot_timestamp = parsed_snapshot_timestamp.replace(tzinfo=timezone.utc)
+        snapshot_age_seconds = max(0.0, (now - parsed_snapshot_timestamp.astimezone(timezone.utc)).total_seconds())
+    except (TypeError, ValueError):
+        parsed_snapshot_timestamp = None
+        snapshot_age_seconds = None
     assets = {
         "sp500": _find_asset(global_data, "s&p 500", "sp 500", "^gspc", "spy", "usa500"),
         "nasdaq": _find_asset(global_data, "nasdaq", "^ixic", "usatec"),
@@ -665,6 +753,9 @@ def build_macro_regime_context(local_data, global_data, calendar_data, now=None,
         "horizons": horizon_summaries,
         "horizon_scores": score_horizons,
         "latest_source_timestamp": latest_source_time,
+        "market_snapshot_timestamp": parsed_snapshot_timestamp.isoformat() if parsed_snapshot_timestamp else None,
+        "market_snapshot_age_seconds": snapshot_age_seconds,
+        "dashboard_rtd": rtd_context,
         "calendar_stale": calendar_stale,
         "history_quotes": history_quotes,
     }
@@ -724,6 +815,8 @@ def _local_fallback_text(context):
     stale = quality.get("stale_assets") or []
     stale_text = ", ".join(stale[:5]) if stale else "nenhum"
     horizons = context.get("horizons") or ["Historico semanal/mensal nao esta presente no snapshot; nao foi inferido."]
+    rtd = context.get("dashboard_rtd", {})
+    rtd_evidence = rtd.get("evidence") or ["Sem leitura RTD Brasil disponivel no snapshot do dashboard."]
     if context.get("regime") == "Dados insuficientes":
         impact = "A cobertura ou a atualizacao dos dados nao permite inferir um regime confiavel. Evitar conclusao direcional ate normalizar as fontes."
     elif context["regime"].startswith("Risk-on"):
@@ -738,6 +831,9 @@ def _local_fallback_text(context):
 
 QUALIDADE DOS DADOS
 {freshness}. Cotacoes atrasadas excluidas: {stale_text}.
+
+RTD BRASIL DO DASHBOARD
+{chr(10).join('- ' + item for item in rtd_evidence[:3])}
 
 EVIDENCIAS OBSERVADAS
 {chr(10).join('- ' + item for item in evidence)}
@@ -765,16 +861,27 @@ Score local e leitura de regime, nao recomendacao de compra/venda. Pesos fixos p
 """
 
 
-def generate_macro_insight():
+def generate_macro_insight(market_inputs=None, refresh_stale_dashboard=False):
     try:
-        market_inputs, supabase_client = _load_macro_inputs()
+        dashboard_inputs_supplied = market_inputs is not None
+        loaded_inputs, supabase_client = _load_macro_inputs(market_inputs)
+        market_inputs = dict(loaded_inputs)
         local_data = market_inputs["dados_mercado"]
         global_data = market_inputs["mercados_globais"]
         calendar_data = market_inputs["calendario_economico"]
         market_history = market_inputs.get(FALLBACK_HISTORY_KEY, {"samples": []})
+        dashboard_refresh = {"attempted": False, "succeeded": False, "error": None}
+        preview = build_macro_regime_context(
+            local_data, global_data, calendar_data, market_history=market_history
+        )
+        if refresh_stale_dashboard and dashboard_inputs_supplied:
+            global_data, dashboard_refresh = _refresh_macro_dashboard_snapshot(
+                market_inputs, supabase_client, preview
+            )
         macro_context = build_macro_regime_context(
             local_data, global_data, calendar_data, market_history=market_history
         )
+        macro_context["dashboard_refresh"] = dashboard_refresh
         updated_history, history_added = append_macro_market_snapshot(
             market_history,
             macro_context.get("history_quotes"),
@@ -800,6 +907,7 @@ Voce e um Analista Macro Global Profissional, com mentalidade de trader instituc
 
 Use o painel macro estruturado abaixo como fonte principal. Os dados brutos sao apenas apoio.
 Seu trabalho e transformar o contexto em uma leitura curta de regime macro para o Terminal de Trading.
+O bloco RTD Brasil e um dado do proprio dashboard, mas e separado do score global; use-o apenas como contexto/confirmacao local e respeite o horario e a idade informados.
 
 HIERARQUIA OBRIGATORIA:
 1. Curva americana, US02Y e yields longos
@@ -879,6 +987,10 @@ REGRAS:
             "latest_source_timestamp": macro_context.get("latest_source_timestamp"),
             "daily_score": macro_context.get("daily_score"),
             "horizon_scores": macro_context.get("horizon_scores", {}),
+            "market_snapshot_timestamp": macro_context.get("market_snapshot_timestamp"),
+            "market_snapshot_age_seconds": macro_context.get("market_snapshot_age_seconds"),
+            "dashboard_rtd": macro_context.get("dashboard_rtd", {}),
+            "dashboard_refresh": dashboard_refresh,
         }
         with open("ai_insight.json", "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)

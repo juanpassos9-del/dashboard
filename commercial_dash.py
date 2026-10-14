@@ -5000,6 +5000,27 @@ def secao_ia_fragment():
     if ai_data:
         observed_at = ai_record.get("updated_at") or ai_data.get("updated_at")
         age_minutes = freshness_minutes(observed_at)
+        analysis_snapshot = ai_data.get("market_snapshot_timestamp")
+        current_market_snapshot = fetch_app_state_cached("mercados_globais") or {}
+        current_snapshot = ((current_market_snapshot.get("metadata") or {}).get("generated_at_utc")
+                            or (current_market_snapshot.get("metadata") or {}).get("full_timestamp"))
+        snapshot_is_newer = False
+        try:
+            analyzed_at = datetime.fromisoformat(str(analysis_snapshot).replace("Z", "+00:00"))
+            latest_at = datetime.fromisoformat(str(current_snapshot).replace("Z", "+00:00"))
+            if analyzed_at.tzinfo is None:
+                analyzed_at = analyzed_at.replace(tzinfo=timezone.utc)
+            if latest_at.tzinfo is None:
+                latest_at = latest_at.replace(tzinfo=timezone.utc)
+            snapshot_is_newer = latest_at - analyzed_at > timedelta(minutes=1)
+        except (TypeError, ValueError):
+            pass
+        if snapshot_is_newer:
+            st.warning("O dashboard já tem um snapshot de cotações mais novo que esta análise. Atualize o Analista IA para recalcular com os dados atuais.")
+        elif not analysis_snapshot:
+            st.caption("Esta análise antiga não registra o snapshot de mercado utilizado. Atualize o Analista IA para vincular a leitura aos dados atuais do dashboard.")
+        else:
+            st.caption(f"Snapshot do dashboard usado na análise: {sanitize_text(format_history_time(analysis_snapshot))}")
         if age_minutes is None:
             st.warning("A análise não tem data completa de geração; atualize o Analista IA para validar a atualidade.")
         elif age_minutes > 20:
@@ -5048,6 +5069,11 @@ def secao_market_report_fragment():
                         _json.dump(value, f, ensure_ascii=False, indent=2)
                 except Exception as e:
                     print(f"[WARN] Falha ao preparar {path} para Market Report: {e}")
+        return {
+            "mercados_globais": snapshots["mercados_globais.json"],
+            "dados_mercado": snapshots["dados_mercado.json"],
+            "calendario_economico": snapshots["calendario_economico.json"],
+        }
 
     if st.button("Atualizar analise agora", type="primary", use_container_width=True, key="market_report_refresh_now"):
         with st.spinner("Atualizando Market Report..."):
@@ -5099,7 +5125,7 @@ def secao_market_report_fragment():
                 st.error(f"Erro ao atualizar Market Report: {e}")
 
     if st.button("Atualizar Analista IA Macro", use_container_width=True, key="ai_macro_refresh_now"):
-        with st.spinner("Atualizando Analista IA Macro..."):
+        with st.spinner("Validando cotações do dashboard e atualizando o Analista IA Macro..."):
             try:
                 import json as _json
                 from execution.ai_analyst import generate_macro_insight
@@ -5112,8 +5138,8 @@ def secao_market_report_fragment():
                 except Exception:
                     pass
 
-                prime_market_report_files()
-                generate_macro_insight()
+                dashboard_inputs = prime_market_report_files()
+                generate_macro_insight(market_inputs=dashboard_inputs, refresh_stale_dashboard=True)
                 ai_warnings = []
                 saved_online = False
                 new_insight = None
@@ -5124,7 +5150,12 @@ def secao_market_report_fragment():
                         break
                 if not new_insight:
                     st.warning("Nao foi possivel gerar a analise do Analista IA agora.")
-                elif supabase:
+                else:
+                    refresh_status = new_insight.get("dashboard_refresh") or {}
+                    if refresh_status.get("attempted") and refresh_status.get("error"):
+                        ai_warnings.append("A coleta atualizada falhou; a análise usou o snapshot disponível no dashboard.")
+
+                if new_insight and supabase:
                     ok, warning = sync_app_state_value("ai_insight", new_insight)
                     saved_online = saved_online or ok
                     if warning:
@@ -5147,11 +5178,14 @@ def secao_market_report_fragment():
                     if ai_warnings:
                         st.session_state["ai_macro_sync_warning"] = "Analista IA atualizado, mas houve aviso ao salvar historico online: " + " | ".join(ai_warnings[:2])
                     elif saved_online:
-                        st.session_state["ai_macro_sync_success"] = "Analista IA atualizado e salvo."
+                        st.session_state["ai_macro_sync_success"] = (
+                            "Cotações do dashboard renovadas; análise atualizada e salva."
+                            if refresh_status.get("succeeded") else "Analista IA atualizado e salvo."
+                        )
                     else:
                         st.session_state["ai_macro_sync_warning"] = "Analista IA gerado nesta sessao, mas nao foi salvo no historico online."
                     st.rerun()
-                else:
+                elif new_insight:
                     st.session_state["ai_macro_sync_warning"] = "Analista IA gerado, mas Supabase esta indisponivel para salvar no historico online."
                     st.rerun()
             except Exception as e:
@@ -5162,8 +5196,9 @@ def secao_market_report_fragment():
     sync_warning = st.session_state.pop("market_report_sync_warning", "")
     if sync_warning:
         st.warning(sync_warning)
-    if st.session_state.pop("ai_macro_sync_success", ""):
-        st.success("Analista IA atualizado e salvo.")
+    ai_sync_success = st.session_state.pop("ai_macro_sync_success", "")
+    if ai_sync_success:
+        st.success(ai_sync_success)
     ai_sync_warning = st.session_state.pop("ai_macro_sync_warning", "")
     if ai_sync_warning:
         st.warning(ai_sync_warning)

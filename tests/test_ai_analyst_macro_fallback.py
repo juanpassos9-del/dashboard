@@ -138,3 +138,94 @@ def test_historical_horizons_require_adequate_independent_coverage():
     assert scores["5 pregoes"]["score"] is not None
     assert scores["5 pregoes"]["coverage_pct"] == 50
     assert scores["20 pregoes"]["score"] is None
+
+
+def test_dashboard_inputs_override_persisted_market_snapshot(monkeypatch):
+    import execution.app_state_sync as app_state_sync
+
+    class Query:
+        def select(self, *_args):
+            return self
+
+        def in_(self, *_args):
+            return self
+
+        def execute(self):
+            return type("Response", (), {"data": [
+                {"key": analyst.FALLBACK_HISTORY_KEY, "value": {"samples": [{"timestamp": NOW.isoformat(), "quotes": {}}]}},
+                {"key": "mercados_globais", "value": {"persisted": True}},
+            ]})()
+
+    class Client:
+        def table(self, *_args):
+            return Query()
+
+    client = Client()
+    monkeypatch.setattr(app_state_sync, "get_service_client", lambda: client)
+    dashboard_snapshot = {"dashboard": "same in-memory snapshot"}
+
+    inputs, loaded_client = analyst._load_macro_inputs({"mercados_globais": dashboard_snapshot})
+
+    assert loaded_client is client
+    assert inputs["mercados_globais"] is dashboard_snapshot
+    assert len(inputs[analyst.FALLBACK_HISTORY_KEY]["samples"]) == 1
+
+
+def test_dashboard_rtd_is_contextual_and_requires_recent_market_tick():
+    fresh_rtd = [{
+        "symbol": "WINF27",
+        "updated_at": NOW.isoformat(),
+        "market_timestamp": NOW.isoformat(),
+        "last_price": 130000,
+        "change_percent": 0.45,
+        "saldo_agressao": 2500,
+        "semaforo": {"direcao": "COMPRA"},
+    }]
+    stale_rtd = [{**fresh_rtd[0], "market_timestamp": (NOW - timedelta(seconds=40)).isoformat()}]
+
+    fresh = analyst._dashboard_rtd_context(fresh_rtd, NOW)
+    stale = analyst._dashboard_rtd_context(stale_rtd, NOW)
+
+    assert fresh["usable_for_confirmation"]
+    assert any("saldo de agressao" in line for line in fresh["evidence"])
+    assert not stale["usable_for_confirmation"]
+    assert "atrasado" in stale["evidence"][0]
+
+
+def test_manual_analysis_refreshes_old_or_low_coverage_snapshots():
+    assert analyst._macro_snapshot_needs_refresh({
+        "data_quality": {"coverage_pct": 20}, "market_snapshot_age_seconds": 30,
+    })
+    assert analyst._macro_snapshot_needs_refresh({
+        "data_quality": {"coverage_pct": 80}, "market_snapshot_age_seconds": 601,
+    })
+    assert analyst._macro_snapshot_needs_refresh({
+        "data_quality": {"coverage_pct": 80}, "market_snapshot_age_seconds": None,
+    })
+    assert not analyst._macro_snapshot_needs_refresh({
+        "data_quality": {"coverage_pct": 80}, "market_snapshot_age_seconds": 500,
+    })
+
+
+def test_on_demand_refresh_replaces_stale_snapshot_with_dashboard_collector(monkeypatch):
+    import execution.market_data_engine as market_data_engine
+
+    client = object()
+    old_snapshot = {"metadata": {"generated_at_utc": "old"}}
+    updated_snapshot = {"metadata": {"generated_at_utc": NOW.isoformat()}}
+    inputs = {"mercados_globais": old_snapshot}
+    calls = []
+
+    def collect(passed_client):
+        calls.append(passed_client)
+        return updated_snapshot
+
+    monkeypatch.setattr(market_data_engine, "collect_and_publish_market_snapshot", collect)
+    snapshot, status = analyst._refresh_macro_dashboard_snapshot(
+        inputs, client, {"data_quality": {"coverage_pct": 20}, "market_snapshot_age_seconds": 30}
+    )
+
+    assert snapshot is updated_snapshot
+    assert inputs["mercados_globais"] is updated_snapshot
+    assert calls == [client]
+    assert status == {"attempted": True, "succeeded": True, "error": None}
