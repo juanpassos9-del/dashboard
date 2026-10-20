@@ -1,6 +1,15 @@
 """Page visibility rules for authenticated dashboard accounts."""
 
 RESTRICTED_PAGE_ACCESS = {
+    "nidia_nalonm@hotmail.com": frozenset({
+        "📉 Terminal de Trading",
+        "🇧🇷 Terminal B3",
+        "🌎 Terminal Global",
+        "MONITOR MACRO",
+        "🇧🇷 MONITOR BR",
+        "RENDAFIXABR",
+        "Crypto Terminal",
+    }),
     "fccarne@terra.com.br": frozenset({
         "📉 Terminal de Trading",
         "🇧🇷 Terminal B3",

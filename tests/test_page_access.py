@@ -11,11 +11,32 @@ ALL_PAGES = [
     "RENDAFIXABR",
     "Crypto Terminal",
     "📺 Terminal Bloomberg",
+    "📰 Market Report",
     "WATCHLIST",
+    "WATCHLIST QUANT",
+    "📊 Gráficos Avançados",
+    "⚖️ Painel de Correlação",
+    "🛡️ Gestão de Risco",
+    "⚙️ Painel de Controle",
 ]
 
 
-def test_restricted_account_sees_only_requested_pages():
+EXPECTED_NIDIA_PAGES = [
+    "📉 Terminal de Trading",
+    "🇧🇷 Terminal B3",
+    "🌎 Terminal Global",
+    "MONITOR MACRO",
+    "🇧🇷 MONITOR BR",
+    "RENDAFIXABR",
+    "Crypto Terminal",
+]
+
+
+def test_nidia_sees_only_requested_pages():
+    assert pages_for_user("NIDIA_NALONM@HOTMAIL.COM", ALL_PAGES) == EXPECTED_NIDIA_PAGES
+
+
+def test_existing_restricted_account_keeps_its_page_list():
     assert pages_for_user("FCCARNE@TERRA.COM.BR", ALL_PAGES) == [
         "📉 Terminal de Trading",
         "🇧🇷 Terminal B3",
