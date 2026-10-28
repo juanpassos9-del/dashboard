@@ -3193,6 +3193,55 @@ def get_us02y_quote_cached():
         return {}
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_fx_daily_correlation_prices() -> pd.DataFrame:
+    """Daily close history used for FX-driver correlations, without forward-filling."""
+    try:
+        import yfinance as yf
+
+        tickers = {
+            **FX_COMMAND_PAIR_MAP,
+            "DXY": "DX-Y.NYB",
+            "US02Y": "2YY=F",
+            "VIX": "^VIX",
+            "SPX": "^GSPC",
+            "WTI": "CL=F",
+            "COPPER": "HG=F",
+        }
+        raw = yf.download(
+            list(tickers.values()),
+            period="1y",
+            interval="1d",
+            group_by="ticker",
+            progress=False,
+            auto_adjust=False,
+            threads=False,
+            timeout=8,
+        )
+        if raw is None or raw.empty:
+            return pd.DataFrame()
+
+        series = {}
+        for label, ticker in tickers.items():
+            try:
+                if isinstance(raw.columns, pd.MultiIndex):
+                    if ticker in set(raw.columns.get_level_values(0)):
+                        close = raw[ticker]["Close"]
+                    elif "Close" in set(raw.columns.get_level_values(0)) and ticker in raw["Close"].columns:
+                        close = raw["Close"][ticker]
+                    else:
+                        continue
+                else:
+                    close = raw["Close"] if len(tickers) == 1 and "Close" in raw.columns else None
+                if close is not None and not close.dropna().empty:
+                    series[label] = pd.to_numeric(close, errors="coerce")
+            except Exception:
+                continue
+        return pd.DataFrame(series).sort_index().dropna(how="all")
+    except Exception:
+        return pd.DataFrame()
+
+
 def _fx_rate_change(item: dict) -> float:
     return _fx_float(item.get("change_bps"), _fx_float(item.get("change")))
 
@@ -3384,6 +3433,12 @@ def get_fx_command_center_data():
         interval="5m",
     )
     correlations = _fx_correlation_rows(pair_df, driver_df)
+    try:
+        from execution.fx_intelligence import build_fx_macro_correlation_rows
+
+        macro_correlations = build_fx_macro_correlation_rows(get_fx_daily_correlation_prices())
+    except Exception:
+        macro_correlations = []
 
     usd_score = float(strength.get("USD", 0.0))
     usd_bias = "BULLISH" if usd_score >= 25 else ("BEARISH" if usd_score <= -25 else "NEUTRO")
@@ -3408,6 +3463,7 @@ def get_fx_command_center_data():
         "mtf": mtf,
         "opportunities": opportunities,
         "correlations": correlations,
+        "macro_correlations": macro_correlations,
         "extended_risk": extended_risk,
         "regime": {
             "USD": usd_bias,
@@ -3594,6 +3650,14 @@ def render_fx_command_center():
                     st.caption("Correlacoes intradiarias aguardando mais pontos validos.")
                 else:
                     st.dataframe(corr_df.head(28), use_container_width=True, hide_index=True, height=360)
+                st.markdown("#### Relações macro em 60 pregões")
+                st.caption("Correlação Pearson entre retornos diários sincronizados. Relações de referência são contexto, não causalidade nem sinal de operação.")
+                macro_corr_df = pd.DataFrame(data.get("macro_correlations", []))
+                if macro_corr_df.empty:
+                    st.info("Histórico diário insuficiente para estimar as relações macro (mínimo de 30 observações alinhadas por par).")
+                else:
+                    st.dataframe(macro_corr_df, use_container_width=True, hide_index=True, height=390)
+                st.caption("Participação no volume global de FX não estimada: o dashboard não dispõe de uma fonte consolidada do mercado OTC.")
 
     with col_events:
         events = get_calendar_data() or []
