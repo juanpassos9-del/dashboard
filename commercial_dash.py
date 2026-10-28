@@ -41,6 +41,12 @@ from execution.terminal_market_intelligence import (
     rtd_number,
     rtd_text,
 )
+from execution.fx_intelligence import (
+    build_fx_intraday_correlation_rows,
+    build_fx_market_brief,
+    build_fx_macro_correlation_rows,
+    currency_strength_from_pair_returns,
+)
 
 
 # ── Configuração da Página ──────────────────────────────────────────────────
@@ -2830,13 +2836,13 @@ FX_COMMAND_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"]
 FX_COMMAND_PAIR_MAP = {label: ticker for label, ticker, _base, _quote in FX_COMMAND_PAIRS}
 FX_COMMAND_PAIR_META = {label: {"base": base, "quote": quote} for label, _ticker, base, quote in FX_COMMAND_PAIRS}
 FX_COMMAND_DIRECT_DRIVERS = {
-    "EURUSD": "DXY inverso + US02Y/Fed + diferencial Fed/ECB",
-    "GBPUSD": "DXY inverso + US02Y/Fed + diferencial Fed/BoE",
-    "USDJPY": "DXY direto + US02Y/US10Y + diferencial Fed/BoJ",
-    "USDCHF": "DXY direto + VIX/risk-off + yields EUA",
-    "USDCAD": "DXY direto + US02Y + petroleo indireto",
-    "AUDUSD": "DXY inverso + risco global + commodities/China",
-    "NZDUSD": "DXY inverso + risco global + commodities/China",
+    "EURUSD": "DXY inverso + Treasury 2Y como proxy EUA; Fed–BCE não calculado",
+    "GBPUSD": "DXY inverso + Treasury 2Y como proxy EUA; Fed–BoE não calculado",
+    "USDJPY": "DXY + Treasuries EUA; Fed–BoJ não calculado",
+    "USDCHF": "DXY + VIX como proxy de risco; sem diferencial local",
+    "USDCAD": "DXY + WTI; Fed–BoC não calculado",
+    "AUDUSD": "DXY + S&P/cobre como proxies; Fed–RBA não calculado",
+    "NZDUSD": "DXY + S&P como proxy de risco; Fed–RBNZ não calculado",
 }
 
 
@@ -3067,26 +3073,14 @@ def render_terminal_global_currency_performance_chart():
 
 
 def _fx_strength_from_returns(returns: dict) -> dict:
-    contributions = {currency: [] for currency in FX_COMMAND_CURRENCIES}
-    for pair, value in returns.items():
-        meta = FX_COMMAND_PAIR_META.get(pair)
-        if not meta:
-            continue
-        try:
-            ret = float(value)
-        except (TypeError, ValueError):
-            continue
-        contributions[meta["base"]].append(ret)
-        contributions[meta["quote"]].append(-ret)
-    raw_scores = {
-        currency: (sum(values) / len(values) if values else 0.0)
-        for currency, values in contributions.items()
-    }
-    max_abs = max([abs(v) for v in raw_scores.values()] + [1e-9])
-    return {
-        currency: max(-100.0, min(100.0, (score / max_abs) * 100.0))
-        for currency, score in raw_scores.items()
-    }
+    strength, coverage = currency_strength_from_pair_returns(
+        returns,
+        {pair: (meta["base"], meta["quote"]) for pair, meta in FX_COMMAND_PAIR_META.items()},
+    )
+    return (
+        {currency: strength.get(currency, 0.0) for currency in FX_COMMAND_CURRENCIES},
+        {currency: coverage.get(currency, 0) for currency in FX_COMMAND_CURRENCIES},
+    )
 
 
 def _fx_returns_for_lookback(df: pd.DataFrame, bars: int | None) -> dict:
@@ -3145,6 +3139,16 @@ def _fx_float(value, default=0.0):
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _fx_optional_float(value):
+    if value in (None, "", "---"):
+        return None
+    try:
+        number = _fx_float(value, default=None)
+        return number if number is not None and math.isfinite(number) else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _extended_market_rows(global_data: dict | None, symbols: set[str] | None = None) -> list[dict]:
@@ -3307,33 +3311,13 @@ def _fx_driver_alignment(pair: str, ret: float, dxy_change: float, us02y_change:
 
 
 def _fx_correlation_rows(pair_df: pd.DataFrame, driver_df: pd.DataFrame | None = None) -> list[dict]:
-    if pair_df.empty:
-        return []
-    combined = pair_df.copy()
-    if isinstance(driver_df, pd.DataFrame) and not driver_df.empty:
-        combined = combined.join(driver_df, how="outer", rsuffix="_driver").ffill()
-    combined = combined.dropna(how="all")
-    if len(combined) < 5:
-        return []
-    rows = []
-    driver_cols = [col for col in ["DXY", "US02Y", "US10Y", "VIX"] if col in combined.columns]
-    for pair in FX_COMMAND_PAIR_MAP:
-        if pair not in combined.columns:
-            continue
-        pair_series = combined[pair]
-        for driver in driver_cols:
-            corr = pair_series.corr(combined[driver])
-            if pd.isna(corr):
-                continue
-            expected = "inversa" if pair in {"EURUSD", "GBPUSD", "AUDUSD", "NZDUSD"} and driver in {"DXY", "US02Y", "US10Y"} else "direta"
-            rows.append({
-                "Par": pair,
-                "Driver": driver,
-                "Correlação": round(float(corr), 2),
-                "Relação esperada": expected,
-                "Leitura": "confirma" if (expected == "direta" and corr >= 0) or (expected == "inversa" and corr <= 0) else "diverge",
-            })
-    return sorted(rows, key=lambda item: abs(item["Correlação"]), reverse=True)
+    return build_fx_intraday_correlation_rows(
+        pair_df,
+        driver_df,
+        pairs=list(FX_COMMAND_PAIR_MAP),
+        inverse_pairs={"EURUSD", "GBPUSD", "AUDUSD", "NZDUSD"},
+        inverse_drivers={"DXY", "US02Y", "US10Y"},
+    )
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -3355,40 +3339,72 @@ def get_fx_command_center_data():
     brent_item = _fx_extract_global_item(global_data, ["brent"])
     gold_item = _fx_extract_global_item(global_data, ["gold", "ouro"])
 
-    dxy_change = _fx_float(dxy_item.get("change"))
-    vix_change = _fx_float(vix_item.get("change"))
-    spx_change = _fx_float(spx_item.get("change"))
-    us02y_change = _fx_rate_change(us02y_item)
-    us10y_change = _fx_float(us10y_item.get("change"))
-    us30y_change = _fx_float(us30y_item.get("change"))
+    dxy_raw_change = _fx_optional_float(dxy_item.get("change"))
+    vix_raw_change = _fx_optional_float(vix_item.get("change"))
+    spx_raw_change = _fx_optional_float(spx_item.get("change"))
+    us02y_raw_change = _fx_optional_float(us02y_item.get("change_bps", us02y_item.get("change")))
+    us10y_raw_change = _fx_optional_float(us10y_item.get("change"))
+    us30y_raw_change = _fx_optional_float(us30y_item.get("change"))
+    dxy_change = dxy_raw_change if dxy_raw_change is not None else 0.0
+    vix_change = vix_raw_change if vix_raw_change is not None else 0.0
+    spx_change = spx_raw_change if spx_raw_change is not None else 0.0
+    us02y_change = us02y_raw_change if us02y_raw_change is not None else 0.0
+    us10y_change = us10y_raw_change if us10y_raw_change is not None else 0.0
+    us30y_change = us30y_raw_change if us30y_raw_change is not None else 0.0
     brent_change = _fx_float(brent_item.get("change"))
     gold_change = _fx_float(gold_item.get("change"))
     extended_risk = _extended_market_rows(
         global_data,
         {"SPY", "EWZ", "EEM", "PBR", "VALE", "ITUB", "BBD", "EWZS", "BDORY"},
     )
+    driver_df = get_terminal_global_line_chart_data(
+        tuple({
+            "DXY": "DX-Y.NYB",
+            "US02Y": "2YY=F",
+            "US10Y": "^TNX",
+            "VIX": "^VIX",
+            "SPX": "^GSPC",
+        }.items()),
+        period="1d",
+        interval="5m",
+    )
+    common_intraday_index = pair_df.index.intersection(driver_df.index) if not driver_df.empty else pd.Index([])
+    driver_intraday_returns = {}
+    pair_intraday_returns = latest_returns = _fx_returns_for_lookback(pair_df, None)
+    synchronized_points = 0
+    if len(common_intraday_index) >= 6:
+        pair_intraday_returns = _fx_returns_for_lookback(pair_df.loc[common_intraday_index], None)
+        driver_intraday_returns = _fx_returns_for_lookback(driver_df.loc[common_intraday_index], None)
+        synchronized_points = len(common_intraday_index)
 
-    latest_returns = _fx_returns_for_lookback(pair_df, None)
-    strength = _fx_strength_from_returns(latest_returns)
-    mtf = {
-        "15m": _fx_strength_from_returns(_fx_returns_for_lookback(pair_df, 3)),
-        "1H": _fx_strength_from_returns(_fx_returns_for_lookback(pair_df, 12)),
-        "4H": _fx_strength_from_returns(_fx_returns_for_lookback(pair_df, 48)),
-        "Dia": strength,
-    }
+    strength, strength_coverage = _fx_strength_from_returns(latest_returns)
+    mtf, mtf_coverage = {}, {}
+    for horizon, bars in (("15m", 3), ("1H", 12), ("4H", 48)):
+        mtf[horizon], mtf_coverage[horizon] = _fx_strength_from_returns(_fx_returns_for_lookback(pair_df, bars))
+    mtf["Dia"], mtf_coverage["Dia"] = strength, strength_coverage
 
     rows = []
     for pair, ticker, base, quote in FX_COMMAND_PAIRS:
         if pair not in pair_df.columns:
             continue
+        if not strength_coverage.get(base) or not strength_coverage.get(quote):
+            continue
         pair_series = pair_df[pair].dropna()
         if pair_series.empty:
             continue
-        ret = float(pair_series.iloc[-1])
-        spread = float(strength.get(base, 0.0) - strength.get(quote, 0.0))
+        ret = float(pair_intraday_returns.get(pair, pair_series.iloc[-1]))
+        spread = float(strength[base] - strength[quote])
         direction = "LONG" if spread >= 0 else "SHORT"
         aligned = (ret >= 0 and direction == "LONG") or (ret <= 0 and direction == "SHORT")
-        driver_score, driver_label, dominant_driver = _fx_driver_alignment(pair, ret, dxy_change, us02y_change, us10y_change, vix_change, spx_change)
+        driver_score, driver_label, dominant_driver = _fx_driver_alignment(
+            pair,
+            pair_intraday_returns.get(pair, ret),
+            driver_intraday_returns.get("DXY", 0.0),
+            driver_intraday_returns.get("US02Y", 0.0),
+            driver_intraday_returns.get("US10Y", 0.0),
+            driver_intraday_returns.get("VIX", 0.0),
+            driver_intraday_returns.get("SPX", 0.0),
+        )
         momentum_score = min(100.0, abs(ret) * 450.0)
         alignment_score = 100.0 if aligned else 35.0
         driver_points = min(100.0, driver_score * 38.0)
@@ -3422,48 +3438,88 @@ def get_fx_command_center_data():
         })
 
     opportunities = sorted(rows, key=lambda item: item["Score"], reverse=True)
-    driver_df = get_terminal_global_line_chart_data(
-        tuple({
-            "DXY": "DX-Y.NYB",
-            "US02Y": "2YY=F",
-            "US10Y": "^TNX",
-            "VIX": "^VIX",
-        }.items()),
-        period="1d",
-        interval="5m",
-    )
     correlations = _fx_correlation_rows(pair_df, driver_df)
     try:
-        from execution.fx_intelligence import build_fx_macro_correlation_rows
-
         macro_correlations = build_fx_macro_correlation_rows(get_fx_daily_correlation_prices())
     except Exception:
         macro_correlations = []
 
     usd_score = float(strength.get("USD", 0.0))
-    usd_bias = "BULLISH" if usd_score >= 25 else ("BEARISH" if usd_score <= -25 else "NEUTRO")
-    risk_bias = "RISK-ON" if spx_change >= 0 and vix_change <= 0 else ("RISK-OFF" if spx_change < 0 and vix_change > 0 else "MISTO")
-    rates_driver = us02y_change if us02y_item else us10y_change
-    rates_bias = "RISING" if rates_driver > 0 else ("FALLING" if rates_driver < 0 else "NEUTRO")
-    treasuries_bias = "BEAR STEEP/HAWK" if (us02y_change > 0 and us10y_change > 0) else ("BULLISH RATES" if (us02y_change < 0 and us10y_change < 0) else "MISTO")
-
-    strongest = max(strength.items(), key=lambda item: item[1])[0]
-    weakest = min(strength.items(), key=lambda item: item[1])[0]
-    top_pair = opportunities[0] if opportunities else {}
-    summary = (
-        f"{strongest} e a moeda mais forte contra {weakest}. "
-        f"Dolar esta {usd_bias.lower()}, risco {risk_bias.lower()} e front-end/treasuries {rates_bias.lower()}. "
-        f"Melhor expressao atual: {top_pair.get('Direcao', '---')} {top_pair.get('Par', '---')}."
+    usd_bias = ("BULLISH" if usd_score >= 25 else ("BEARISH" if usd_score <= -25 else "NEUTRO")) if strength_coverage.get("USD") else "DADOS INSUFICIENTES"
+    aligned_spx = driver_intraday_returns.get("SPX") if synchronized_points >= 6 else None
+    aligned_vix = driver_intraday_returns.get("VIX") if synchronized_points >= 6 else None
+    aligned_dxy = driver_intraday_returns.get("DXY") if synchronized_points >= 6 else None
+    risk_bias = "RISK-ON" if aligned_spx is not None and aligned_vix is not None and aligned_spx > 0 and aligned_vix < 0 else (
+        "RISK-OFF" if aligned_spx is not None and aligned_vix is not None and aligned_spx < 0 and aligned_vix > 0 else (
+            "MISTO" if aligned_spx is not None and aligned_vix is not None else "DADOS INSUFICIENTES"
+        )
     )
+    rates_driver = driver_intraday_returns.get("US02Y") if synchronized_points >= 6 else None
+    if rates_driver is None and synchronized_points >= 6:
+        rates_driver = driver_intraday_returns.get("US10Y")
+    rates_bias = "DADOS INSUFICIENTES" if rates_driver is None else ("RISING" if rates_driver > 0 else ("FALLING" if rates_driver < 0 else "NEUTRO"))
+    intraday_us02y = driver_intraday_returns.get("US02Y") if synchronized_points >= 6 else None
+    intraday_us10y = driver_intraday_returns.get("US10Y") if synchronized_points >= 6 else None
+    treasuries_bias = "DADOS INSUFICIENTES" if intraday_us02y is None or intraday_us10y is None else (
+        "BEAR STEEP/HAWK" if (intraday_us02y > 0 and intraday_us10y > 0) else ("BULLISH RATES" if (intraday_us02y < 0 and intraday_us10y < 0) else "MISTO")
+    )
+
+    covered_strength = {currency: value for currency, value in strength.items() if strength_coverage.get(currency, 0)}
+    strongest = max(covered_strength.items(), key=lambda item: item[1])[0] if covered_strength else "---"
+    weakest = min(covered_strength.items(), key=lambda item: item[1])[0] if covered_strength else "---"
+    top_pair = opportunities[0] if opportunities else {}
+    divergence_pairs = [row for row in opportunities if row.get("Alinhado") == "Divergente"]
+    market_brief = build_fx_market_brief(
+        strength,
+        strength_coverage,
+        dxy_change=aligned_dxy,
+        spx_change=aligned_spx,
+        vix_change=aligned_vix,
+        best_pair=top_pair,
+        divergent_pairs=divergence_pairs,
+    )
+    summary = (
+        f"Força relativa no recorte: {strongest} ({strength.get(strongest, 0):+.0f}) vs {weakest} ({strength.get(weakest, 0):+.0f}); "
+        f"{len(latest_returns)}/{len(FX_COMMAND_PAIR_MAP)} pares com dados. "
+        if covered_strength else "Dados insuficientes para ranquear moedas: nenhum par com cotação válida. "
+    )
+    summary += f"USD {usd_bias.lower()}; risco {risk_bias.lower()}; juros EUA {rates_bias.lower()}. "
+    summary += f"Par com maior score relativo: {top_pair.get('Direcao', '---')} {top_pair.get('Par', '---')}." if top_pair else "Scanner sem pares com cobertura suficiente."
+
+    quote_quality = []
+    for label, item in (("DXY", dxy_item), ("VIX", vix_item), ("S&P 500", spx_item), ("US02Y", us02y_item), ("US10Y", us10y_item), ("US30Y", us30y_item), ("Brent", brent_item), ("Ouro", gold_item)):
+        if not isinstance(item, dict) or not item:
+            quote_quality.append({"Driver": label, "Fonte": "indisponível", "Observado": "—", "Qualidade": "sem cotação"})
+            continue
+        freshness, state = quote_freshness_label(item)
+        quote_quality.append({
+            "Driver": label,
+            "Fonte": str(item.get("source") or "fonte não identificada"),
+            "Observado": str(item.get("source_timestamp") or item.get("updated_at") or "horário desconhecido"),
+            "Qualidade": "fresco" if state == "fresh" else ("atrasado" if state == "stale" else "horário desconhecido"),
+            "Detalhe": freshness,
+        })
+    latest_bar = pair_df.dropna(how="all").index[-1]
+    quote_quality.insert(0, {
+        "Driver": "Majors FX (Yahoo Finance)",
+        "Fonte": "Yahoo Finance",
+        "Observado": str(latest_bar),
+        "Qualidade": f"{len(latest_returns)}/{len(FX_COMMAND_PAIR_MAP)} pares válidos",
+        "Detalhe": "Candles de 5 min; último candle" + (f"; {synchronized_points} horários sincronizados com drivers" if synchronized_points else "; sem janela sincronizada com drivers"),
+    })
 
     return {
         "updated_at": datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d %H:%M:%S"),
         "pair_df": pair_df,
         "strength": strength,
+        "strength_coverage": strength_coverage,
         "mtf": mtf,
+        "mtf_coverage": mtf_coverage,
         "opportunities": opportunities,
         "correlations": correlations,
         "macro_correlations": macro_correlations,
+        "quote_quality": quote_quality,
+        "market_brief": market_brief,
         "extended_risk": extended_risk,
         "regime": {
             "USD": usd_bias,
@@ -3471,14 +3527,23 @@ def get_fx_command_center_data():
             "RATES": rates_bias,
             "TREASURIES": treasuries_bias,
             "DXY": dxy_change,
+            "DXY_AVAILABLE": dxy_raw_change is not None,
             "VIX": vix_change,
+            "VIX_AVAILABLE": vix_raw_change is not None,
             "SPX": spx_change,
+            "SPX_AVAILABLE": spx_raw_change is not None,
             "US02Y": us02y_change,
+            "US02Y_AVAILABLE": us02y_raw_change is not None,
             "US10Y": us10y_change,
+            "US10Y_AVAILABLE": us10y_raw_change is not None,
             "US30Y": us30y_change,
+            "US30Y_AVAILABLE": us30y_raw_change is not None,
             "BRENT": brent_change,
+            "BRENT_AVAILABLE": bool(brent_item) and _fx_optional_float(brent_item.get("change")) is not None,
             "GOLD": gold_change,
+            "GOLD_AVAILABLE": bool(gold_item) and _fx_optional_float(gold_item.get("change")) is not None,
             "summary": summary,
+            "policy_spread_note": "Diferenciais Fed–BCE/BoE/BoJ/BoC/RBA/RBNZ não calculados: séries estrangeiras comparáveis não estão disponíveis neste painel. US02Y é apenas proxy de juros dos EUA.",
         },
     }
 
@@ -3496,8 +3561,14 @@ def render_fx_command_center():
     opportunities = data["opportunities"]
     correlations = data.get("correlations", [])
     updated = html.escape(str(data.get("updated_at", "---")))
-    strongest, strongest_score = max(strength.items(), key=lambda item: item[1])
-    weakest, weakest_score = min(strength.items(), key=lambda item: item[1])
+    strength_coverage = data.get("strength_coverage", {})
+    covered_strength = {currency: value for currency, value in strength.items() if strength_coverage.get(currency, 0)}
+    if covered_strength:
+        strongest, strongest_score = max(covered_strength.items(), key=lambda item: item[1])
+        weakest, weakest_score = min(covered_strength.items(), key=lambda item: item[1])
+    else:
+        strongest = weakest = "---"
+        strongest_score = weakest_score = 0.0
     best = opportunities[0] if opportunities else {}
     best_direction = html.escape(str(best.get("Direcao", "---")))
     best_pair = html.escape(str(best.get("Par", "---")))
@@ -3522,7 +3593,7 @@ def render_fx_command_center():
           @media(max-width:900px) {{ .fxcc-best {{ grid-template-columns:1fr; }} }}
         </style>
         <div class="fxcc-best">
-          <div class="fxcc-best-box"><span>Moeda forte x fraca</span><strong>{html.escape(str(strongest))} {strongest_score:+.0f} / {html.escape(str(weakest))} {weakest_score:+.0f}</strong><small>Base do mapa de forca relativa intraday.</small></div>
+          <div class="fxcc-best-box"><span>Moeda forte x fraca</span><strong>{html.escape(str(strongest))} {strongest_score:+.0f} / {html.escape(str(weakest))} {weakest_score:+.0f}</strong><small>Cobertura: {len(data.get('opportunities', []))}/{len(FX_COMMAND_PAIR_MAP)} pares válidos.</small></div>
           <div class="fxcc-best-box"><span>Best Expression</span><strong>{best_direction} {best_pair}</strong><small>Score {best_score} | Drivers {best_drivers}</small></div>
           <div class="fxcc-best-box"><span>Tese deterministica</span><strong>{best_pair}</strong><small>{best_thesis}</small></div>
         </div>
@@ -3537,64 +3608,83 @@ def render_fx_command_center():
         unsafe_allow_html=True,
     )
 
+    brief_cols = st.columns(2)
+    for column, title, key in (
+        (brief_cols[0], "O que confirma", "confirms"),
+        (brief_cols[1], "O que diverge", "divergences"),
+    ):
+        with column:
+            st.markdown(f"#### {title}")
+            for point in data.get("market_brief", {}).get(key, []):
+                st.markdown(f"- {html.escape(str(point))}")
+    if data.get("market_brief", {}).get("notes"):
+        st.caption("Dados/limites: " + " · ".join(data["market_brief"]["notes"]))
+
     col_strength, col_driver_panel = st.columns([0.58, 0.42], gap="medium")
     with col_strength:
         import plotly.graph_objects as go
 
-        strength_items = sorted(strength.items(), key=lambda item: item[1])
-        colors = ["#F43F5E" if value < -20 else "#94A3B8" if value < 20 else "#22C55E" for _ccy, value in strength_items]
-        fig = go.Figure(go.Bar(
-            x=[value for _ccy, value in strength_items],
-            y=[ccy for ccy, _value in strength_items],
-            orientation="h",
-            marker_color=colors,
-            text=[f"{value:+.0f}" for _ccy, value in strength_items],
-            textposition="outside",
-            hovertemplate="%{y}: %{x:+.1f}<extra></extra>",
-        ))
-        fig.add_vline(x=0, line_width=1, line_dash="dot", line_color="#94A3B8")
-        fig.update_layout(
-            title=dict(text="Currency Strength", x=0.01, font=dict(size=15, color="#F8FAFC")),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="#07111F",
-            font=dict(family='"Roboto Mono", monospace', color="#CBD5E1"),
-            margin=dict(l=45, r=42, t=44, b=24),
-            height=360,
-            xaxis=dict(range=[-115, 115], showgrid=True, gridcolor="#172338", zeroline=False),
-            yaxis=dict(showgrid=False),
-            showlegend=False,
-        )
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        strength_items = sorted(covered_strength.items(), key=lambda item: item[1])
+        if not strength_items:
+            st.info("Força cambial indisponível: nenhum par com observação válida.")
+        else:
+            colors = ["#F43F5E" if value < -20 else "#94A3B8" if value < 20 else "#22C55E" for _ccy, value in strength_items]
+            fig = go.Figure(go.Bar(
+                x=[value for _ccy, value in strength_items],
+                y=[ccy for ccy, _value in strength_items],
+                orientation="h",
+                marker_color=colors,
+                text=[f"{value:+.0f}" for _ccy, value in strength_items],
+                customdata=[strength_coverage.get(ccy, 0) for ccy, _value in strength_items],
+                textposition="outside",
+                hovertemplate="%{y}: %{x:+.1f} | pares observados: %{customdata}<extra></extra>",
+            ))
+            fig.add_vline(x=0, line_width=1, line_dash="dot", line_color="#94A3B8")
+            fig.update_layout(
+                title=dict(text="Currency Strength", x=0.01, font=dict(size=15, color="#F8FAFC")),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="#07111F",
+                font=dict(family='"Roboto Mono", monospace', color="#CBD5E1"),
+                margin=dict(l=45, r=42, t=44, b=24),
+                height=360,
+                xaxis=dict(range=[-115, 115], showgrid=True, gridcolor="#172338", zeroline=False),
+                yaxis=dict(showgrid=False),
+                showlegend=False,
+            )
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
     with col_driver_panel:
         st.markdown("#### Dollar / Rates Drivers")
         drivers = [
-            ("DXY", regime.get("DXY"), "%"),
-            ("VIX", regime.get("VIX"), "%"),
-            ("S&P 500", regime.get("SPX"), "%"),
-            ("US02Y", regime.get("US02Y"), "bps"),
-            ("US10Y", regime.get("US10Y"), "%"),
-            ("US30Y", regime.get("US30Y"), "%"),
+            ("DXY", "DXY", regime.get("DXY"), "%"),
+            ("VIX", "VIX", regime.get("VIX"), "%"),
+            ("S&P 500", "SPX", regime.get("SPX"), "%"),
+            ("US02Y", "US02Y", regime.get("US02Y"), "bps"),
+            ("US10Y", "US10Y", regime.get("US10Y"), "%"),
+            ("US30Y", "US30Y", regime.get("US30Y"), "%"),
         ]
-        for label, value, unit in drivers:
+        for label, key, value, unit in drivers:
+            available = regime.get(f"{key}_AVAILABLE", False)
             value = _fx_float(value)
             color = "#22C55E" if value > 0 else ("#F43F5E" if value < 0 else "#94A3B8")
             suffix = " bps" if unit == "bps" else "%"
+            shown_value = f"{value:+.2f}{suffix}" if available else "—"
             st.markdown(
-                f"<div style='display:flex; justify-content:space-between; border:1px solid #243244; border-radius:8px; padding:10px 12px; background:#0B1220; margin-bottom:8px;'><span style='color:#CBD5E1; font-weight:900;'>{html.escape(label)}</span><b style='color:{color};'>{value:+.2f}{suffix}</b></div>",
+                f"<div style='display:flex; justify-content:space-between; border:1px solid #243244; border-radius:8px; padding:10px 12px; background:#0B1220; margin-bottom:8px;'><span style='color:#CBD5E1; font-weight:900;'>{html.escape(label)}</span><b style='color:{color};'>{shown_value}</b></div>",
                 unsafe_allow_html=True,
             )
 
         st.markdown("#### Indirect Drivers")
         indirect = [
-            ("Brent", regime.get("BRENT"), "CAD"),
-            ("Gold", regime.get("GOLD"), "CHF/AUD"),
+            ("Brent", "BRENT", regime.get("BRENT"), "CAD"),
+            ("Gold", "GOLD", regime.get("GOLD"), "CHF/AUD"),
         ]
-        for label, value, impacted in indirect:
+        for label, key, value, impacted in indirect:
             value = _fx_float(value)
             color = "#22C55E" if value > 0 else ("#F43F5E" if value < 0 else "#94A3B8")
+            shown_value = f"{value:+.2f}%" if regime.get(f"{key}_AVAILABLE") else "—"
             st.markdown(
-                f"<div style='display:flex; justify-content:space-between; border:1px solid #243244; border-radius:8px; padding:9px 12px; background:#07111F; margin-bottom:8px;'><span style='color:#CBD5E1; font-weight:900;'>{html.escape(label)} <small style='color:#64748B;'>→ {html.escape(impacted)}</small></span><b style='color:{color};'>{value:+.2f}%</b></div>",
+                f"<div style='display:flex; justify-content:space-between; border:1px solid #243244; border-radius:8px; padding:9px 12px; background:#07111F; margin-bottom:8px;'><span style='color:#CBD5E1; font-weight:900;'>{html.escape(label)} <small style='color:#64748B;'>→ {html.escape(impacted)}</small></span><b style='color:{color};'>{shown_value}</b></div>",
                 unsafe_allow_html=True,
             )
 
@@ -3615,9 +3705,14 @@ def render_fx_command_center():
     for currency in FX_COMMAND_CURRENCIES:
         row = {"Moeda": currency}
         for horizon in ["15m", "1H", "4H", "Dia"]:
-            row[horizon] = round(float(data["mtf"].get(horizon, {}).get(currency, 0.0)), 1)
+            coverage = data.get("mtf_coverage", {}).get(horizon, {}).get(currency, 0)
+            row[horizon] = round(float(data["mtf"].get(horizon, {}).get(currency, 0.0)), 1) if coverage else "—"
+        day_coverage = data.get("mtf_coverage", {}).get("Dia", {}).get(currency, 0)
+        row["Pares"] = f"{day_coverage}" if day_coverage else "sem dados"
         mtf_rows.append(row)
-    mtf_df = pd.DataFrame(mtf_rows).sort_values("Dia", ascending=False)
+    mtf_df = pd.DataFrame(mtf_rows)
+    mtf_df["_sort"] = pd.to_numeric(mtf_df["Dia"], errors="coerce")
+    mtf_df = mtf_df.sort_values("_sort", ascending=False, na_position="last").drop(columns="_sort")
     st.markdown("#### Multi-timeframe Strength")
     st.dataframe(mtf_df, use_container_width=True, hide_index=True, height=230)
 
@@ -3626,6 +3721,7 @@ def render_fx_command_center():
     col_opps, col_events = st.columns([0.68, 0.32], gap="medium")
     with col_opps:
         st.markdown("#### Majors Pair Scanner")
+        st.caption("Score é um ranking heurístico de alinhamento e momentum (0–100), não probabilidade de acerto. Força relativa só inclui moedas com pares observados; veja a cobertura por moeda.")
         opp_df = pd.DataFrame(opportunities)
         if opp_df.empty:
             st.info("Scanner aguardando pares validos.")
@@ -3650,8 +3746,8 @@ def render_fx_command_center():
                     st.caption("Correlacoes intradiarias aguardando mais pontos validos.")
                 else:
                     st.dataframe(corr_df.head(28), use_container_width=True, hide_index=True, height=360)
-                st.markdown("#### Relações macro em 60 pregões")
-                st.caption("Correlação Pearson entre retornos diários sincronizados. Relações de referência são contexto, não causalidade nem sinal de operação.")
+                st.markdown("#### Relações macro em 20 e 60 pregões")
+                st.caption("Correlação Pearson dos retornos diários sincronizados. Relações de referência são contexto, não causalidade nem sinal de operação; N e último pregão aparecem na tabela.")
                 macro_corr_df = pd.DataFrame(data.get("macro_correlations", []))
                 if macro_corr_df.empty:
                     st.info("Histórico diário insuficiente para estimar as relações macro (mínimo de 30 observações alinhadas por par).")
@@ -3680,6 +3776,14 @@ def render_fx_command_center():
                 f"<div style='border-left:3px solid #38BDF8; padding:7px 9px; background:#07111F; margin-bottom:7px;'><b style='color:#F8FAFC;'>{hour} {ccy}</b><br><span style='color:#CBD5E1;'>{name}</span><br><small style='color:#94A3B8;'>{importance}</small></div>",
                 unsafe_allow_html=True,
             )
+
+    with st.expander("Qualidade, origem e limitações dos dados", expanded=False):
+        quality_df = pd.DataFrame(data.get("quote_quality", []))
+        if quality_df.empty:
+            st.info("Metadados de fonte e horário indisponíveis nesta atualização.")
+        else:
+            st.dataframe(quality_df, use_container_width=True, hide_index=True)
+        st.caption(regime.get("policy_spread_note", "Diferenciais entre bancos centrais não calculados."))
 
 
 def render_terminal_global_line_chart():
