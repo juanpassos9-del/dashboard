@@ -131,3 +131,44 @@ def test_intraday_correlations_use_synchronized_changes_not_rebased_levels():
     assert rows[0]["Correlação"] == -1.0
     assert rows[0]["Observações"] == 49
     assert rows[0]["Leitura"] == "confirma"
+
+
+def test_intraday_correlations_only_include_pair_specific_macro_context():
+    index = pd.date_range("2026-10-01", periods=50, freq="5min")
+    changes = np.sin(np.arange(len(index)) / 3)
+    pair_performance = pd.DataFrame({
+        "EURGBP": np.cumsum(changes),
+        "AUDJPY": np.cumsum(changes),
+    }, index=index)
+    driver_performance = pd.DataFrame({
+        "DXY": np.cumsum(changes),
+        "SPX": np.cumsum(changes),
+        "VIX": np.cumsum(-changes),
+    }, index=index)
+
+    rows = build_fx_intraday_correlation_rows(
+        pair_performance,
+        driver_performance,
+        pairs=["EURGBP", "AUDJPY"],
+        inverse_pairs=set(),
+        inverse_drivers=set(),
+        expected_relations={"AUDJPY": {"SPX": "direta", "VIX": "inversa"}},
+    )
+
+    assert {(row["Par"], row["Driver"]) for row in rows} == {("AUDJPY", "SPX"), ("AUDJPY", "VIX")}
+
+
+def test_daily_risk_context_includes_emerging_pairs_and_aud_jpy():
+    index = pd.date_range("2026-01-01", periods=80, freq="B")
+    risk_returns = 0.002 * np.sin(np.arange(len(index)) / 4)
+    prices = pd.DataFrame({
+        "SPX": 4000 * (1 + pd.Series(risk_returns, index=index)).cumprod(),
+        "VIX": 20 * (1 - pd.Series(risk_returns, index=index)).cumprod(),
+        "AUDJPY": 100 * (1 + pd.Series(risk_returns, index=index)).cumprod(),
+        "USDBRL": 5 * (1 - pd.Series(risk_returns, index=index)).cumprod(),
+    }, index=index)
+
+    rows = build_fx_macro_correlation_rows(prices)
+
+    assert next(row for row in rows if row["Par"] == "AUDJPY" and row["Driver"] == "SPX")["Correlação 60d"] > 0.9
+    assert next(row for row in rows if row["Par"] == "USDBRL" and row["Driver"] == "VIX")["Correlação 60d"] > 0.9

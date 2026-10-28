@@ -2830,11 +2830,41 @@ FX_COMMAND_PAIRS = [
     ("USDCAD", "CAD=X", "USD", "CAD"),
     ("AUDUSD", "AUDUSD=X", "AUD", "USD"),
     ("NZDUSD", "NZDUSD=X", "NZD", "USD"),
+    ("EURGBP", "EURGBP=X", "EUR", "GBP"),
+    ("EURJPY", "EURJPY=X", "EUR", "JPY"),
+    ("GBPJPY", "GBPJPY=X", "GBP", "JPY"),
+    ("AUDJPY", "AUDJPY=X", "AUD", "JPY"),
+    ("USDBRL", "BRL=X", "USD", "BRL"),
+    ("USDMXN", "MXN=X", "USD", "MXN"),
+    ("USDZAR", "ZAR=X", "USD", "ZAR"),
+    ("USDTRY", "TRY=X", "USD", "TRY"),
 ]
 
-FX_COMMAND_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"]
+FX_COMMAND_CORE_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"]
+FX_COMMAND_CURRENCIES = FX_COMMAND_CORE_CURRENCIES + ["BRL", "MXN", "ZAR", "TRY"]
 FX_COMMAND_PAIR_MAP = {label: ticker for label, ticker, _base, _quote in FX_COMMAND_PAIRS}
 FX_COMMAND_PAIR_META = {label: {"base": base, "quote": quote} for label, _ticker, base, quote in FX_COMMAND_PAIRS}
+FX_COMMAND_PAIR_GROUPS = {
+    **{pair: "Majors" for pair in ("EURUSD", "GBPUSD", "USDJPY", "USDCHF", "USDCAD", "AUDUSD", "NZDUSD")},
+    **{pair: "Crosses" for pair in ("EURGBP", "EURJPY", "GBPJPY", "AUDJPY")},
+    **{pair: "Emergentes" for pair in ("USDBRL", "USDMXN", "USDZAR", "USDTRY")},
+}
+FX_COMMAND_INTRADAY_EXPECTED = {
+    "EURUSD": {"DXY": "inversa", "US02Y": "inversa", "US10Y": "inversa"},
+    "GBPUSD": {"DXY": "inversa", "US02Y": "inversa", "US10Y": "inversa"},
+    "USDJPY": {"DXY": "direta", "US02Y": "direta", "US10Y": "direta"},
+    "USDCHF": {"DXY": "direta"},
+    "USDCAD": {"DXY": "direta"},
+    "AUDUSD": {"DXY": "inversa", "SPX": "direta", "VIX": "inversa"},
+    "NZDUSD": {"DXY": "inversa", "SPX": "direta", "VIX": "inversa"},
+    "EURJPY": {"SPX": "direta", "VIX": "inversa"},
+    "GBPJPY": {"SPX": "direta", "VIX": "inversa"},
+    "AUDJPY": {"SPX": "direta", "VIX": "inversa"},
+    "USDBRL": {"VIX": "direta", "SPX": "inversa"},
+    "USDMXN": {"VIX": "direta", "SPX": "inversa"},
+    "USDZAR": {"VIX": "direta", "SPX": "inversa"},
+    "USDTRY": {"VIX": "direta", "SPX": "inversa"},
+}
 FX_COMMAND_DIRECT_DRIVERS = {
     "EURUSD": "DXY inverso + Treasury 2Y como proxy EUA; Fed–BCE não calculado",
     "GBPUSD": "DXY inverso + Treasury 2Y como proxy EUA; Fed–BoE não calculado",
@@ -2843,11 +2873,19 @@ FX_COMMAND_DIRECT_DRIVERS = {
     "USDCAD": "DXY + WTI; Fed–BoC não calculado",
     "AUDUSD": "DXY + S&P/cobre como proxies; Fed–RBA não calculado",
     "NZDUSD": "DXY + S&P como proxy de risco; Fed–RBNZ não calculado",
+    "EURGBP": "Cross sem USD; diferencial BCE–BoE não disponível neste painel",
+    "EURJPY": "Cross sem USD; sensível a juros relativos e risco, sem diferencial local",
+    "GBPJPY": "Cross sem USD e de alta volatilidade; juros relativos não calculados",
+    "AUDJPY": "Cross sem USD e proxy de apetite por risco via S&P/VIX",
+    "USDBRL": "Emergente: risco global e fatores locais; política/notícias brasileiras não pontuadas aqui",
+    "USDMXN": "Emergente: risco global e fatores locais; política/notícias mexicanas não pontuadas aqui",
+    "USDZAR": "Emergente: risco global e fatores locais; política/notícias sul-africanas não pontuadas aqui",
+    "USDTRY": "Emergente: risco global e fatores locais; política/notícias turcas não pontuadas aqui",
 }
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def get_terminal_global_line_chart_data(tickers: tuple[tuple[str, str], ...], period: str = "1d", interval: str = "5m") -> pd.DataFrame:
+def get_terminal_global_line_chart_data(tickers: tuple[tuple[str, str], ...], period: str = "1d", interval: str = "5m", forward_fill: bool = True) -> pd.DataFrame:
     try:
         import yfinance as yf
 
@@ -2892,7 +2930,10 @@ def get_terminal_global_line_chart_data(tickers: tuple[tuple[str, str], ...], pe
             mark_source("Grafico Linha Terminal", "error", message="Nenhuma serie valida.", source="yfinance")
             return pd.DataFrame()
 
-        df = pd.DataFrame(series).sort_index().ffill().dropna(how="all")
+        df = pd.DataFrame(series).sort_index()
+        if forward_fill:
+            df = df.ffill()
+        df = df.dropna(how="all")
         try:
             br_tz = ZoneInfo("America/Sao_Paulo")
             if getattr(df.index, "tz", None) is None:
@@ -3086,20 +3127,14 @@ def _fx_strength_from_returns(returns: dict) -> dict:
 def _fx_returns_for_lookback(df: pd.DataFrame, bars: int | None) -> dict:
     if df.empty:
         return {}
-    clean = df.ffill().dropna(how="all")
-    if clean.empty:
-        return {}
-    latest = clean.iloc[-1].dropna()
-    if bars is None or len(clean) <= bars:
-        base = clean.iloc[0].dropna()
-    else:
-        base = clean.iloc[-bars - 1].dropna()
     values = {}
-    for col in clean.columns:
-        if col not in latest.index or col not in base.index:
+    for col in df.columns:
+        observed = pd.to_numeric(df[col], errors="coerce").dropna()
+        if len(observed) < 2:
             continue
+        start = 0 if bars is None or len(observed) <= bars else -bars - 1
         try:
-            values[col] = float(latest[col]) - float(base[col])
+            values[col] = float(observed.iloc[-1]) - float(observed.iloc[start])
         except (TypeError, ValueError):
             continue
     return values
@@ -3255,6 +3290,28 @@ def _fx_driver_alignment(pair: str, ret: float, dxy_change: float, us02y_change:
     signals = []
     score = 0.0
 
+    if FX_COMMAND_PAIR_GROUPS.get(pair) == "Emergentes":
+        if spx_change > 0 and vix_change < 0 and ret < 0:
+            score += 0.6
+            signals.append("risk-on favorece moeda emergente")
+        elif spx_change < 0 and vix_change > 0 and ret > 0:
+            score += 0.6
+            signals.append("risk-off pressiona moeda emergente")
+        else:
+            signals.append("risco global sem confirmação")
+        return score, " | ".join(signals), "risco global; fatores locais não medidos"
+
+    if FX_COMMAND_PAIR_GROUPS.get(pair) == "Crosses":
+        if pair == "AUDJPY" and spx_change > 0 and vix_change < 0 and ret > 0:
+            score += 0.6
+            signals.append("risk-on confirma AUD/JPY")
+        elif pair == "AUDJPY" and spx_change < 0 and vix_change > 0 and ret < 0:
+            score += 0.6
+            signals.append("risk-off confirma AUD/JPY")
+        else:
+            signals.append("cross sem USD; risco só contextual")
+        return score, " | ".join(signals), "risco" if score else "força relativa"
+
     if pair in {"EURUSD", "GBPUSD", "AUDUSD", "NZDUSD"}:
         if dxy_change < -0.05 and ret > 0:
             score += 1.0
@@ -3301,10 +3358,6 @@ def _fx_driver_alignment(pair: str, ret: float, dxy_change: float, us02y_change:
         elif spx_change < 0 and vix_change > 0 and ret < 0:
             score += 0.6
             signals.append("risk-off confirma")
-    if pair in {"USDCHF", "USDJPY"} and vix_change > 0 and ret > 0:
-        score += 0.4
-        signals.append("defensivo confirma")
-
     label = " | ".join(signals[:3]) if signals else "sem driver forte"
     dominant = "USD/rates" if any("DXY" in s or "rates" in s for s in signals) else ("risco" if signals else "tecnico")
     return score, label, dominant
@@ -3317,16 +3370,17 @@ def _fx_correlation_rows(pair_df: pd.DataFrame, driver_df: pd.DataFrame | None =
         pairs=list(FX_COMMAND_PAIR_MAP),
         inverse_pairs={"EURUSD", "GBPUSD", "AUDUSD", "NZDUSD"},
         inverse_drivers={"DXY", "US02Y", "US10Y"},
+        expected_relations=FX_COMMAND_INTRADAY_EXPECTED,
     )
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_fx_command_center_data():
-    pair_df = get_terminal_global_line_chart_data(tuple(FX_COMMAND_PAIR_MAP.items()), period="1d", interval="5m")
+    pair_df = get_terminal_global_line_chart_data(tuple(FX_COMMAND_PAIR_MAP.items()), period="1d", interval="5m", forward_fill=False)
     if pair_df.empty:
         return {"error": "Sem dados intradiarios FX nesta atualizacao."}
 
-    pair_df = pair_df.ffill().dropna(how="all")
+    pair_df = pair_df.dropna(how="all")
     global_data = get_global_markets_data()
     dxy_item = _fx_extract_global_item(global_data, ["dxy", "dolar index", "dólar index"])
     vix_item = _fx_extract_global_item(global_data, ["vix"])
@@ -3367,6 +3421,7 @@ def get_fx_command_center_data():
         }.items()),
         period="1d",
         interval="5m",
+        forward_fill=False,
     )
     common_intraday_index = pair_df.index.intersection(driver_df.index) if not driver_df.empty else pd.Index([])
     driver_intraday_returns = {}
@@ -3377,23 +3432,33 @@ def get_fx_command_center_data():
         driver_intraday_returns = _fx_returns_for_lookback(driver_df.loc[common_intraday_index], None)
         synchronized_points = len(common_intraday_index)
 
-    strength, strength_coverage = _fx_strength_from_returns(latest_returns)
+    core_pair_names = {pair for pair in FX_COMMAND_PAIR_GROUPS if FX_COMMAND_PAIR_GROUPS[pair] != "Emergentes"}
+    emerging_pair_names = set(FX_COMMAND_PAIR_GROUPS) - core_pair_names
+    core_pair_returns = {pair: value for pair, value in latest_returns.items() if pair in core_pair_names}
+    emerging_pair_returns = {pair: value for pair, value in latest_returns.items() if pair in emerging_pair_names}
+    strength, strength_coverage = _fx_strength_from_returns(core_pair_returns)
+    emerging_strength, emerging_strength_coverage = _fx_strength_from_returns(emerging_pair_returns)
     mtf, mtf_coverage = {}, {}
     for horizon, bars in (("15m", 3), ("1H", 12), ("4H", 48)):
-        mtf[horizon], mtf_coverage[horizon] = _fx_strength_from_returns(_fx_returns_for_lookback(pair_df, bars))
+        horizon_returns = _fx_returns_for_lookback(pair_df, bars)
+        horizon_returns = {pair: value for pair, value in horizon_returns.items() if pair in core_pair_names}
+        mtf[horizon], mtf_coverage[horizon] = _fx_strength_from_returns(horizon_returns)
     mtf["Dia"], mtf_coverage["Dia"] = strength, strength_coverage
 
     rows = []
     for pair, ticker, base, quote in FX_COMMAND_PAIRS:
         if pair not in pair_df.columns:
             continue
-        if not strength_coverage.get(base) or not strength_coverage.get(quote):
+        group = FX_COMMAND_PAIR_GROUPS[pair]
+        pair_strength = emerging_strength if group == "Emergentes" else strength
+        pair_strength_coverage = emerging_strength_coverage if group == "Emergentes" else strength_coverage
+        if not pair_strength_coverage.get(base) or not pair_strength_coverage.get(quote):
             continue
         pair_series = pair_df[pair].dropna()
         if pair_series.empty:
             continue
         ret = float(pair_intraday_returns.get(pair, pair_series.iloc[-1]))
-        spread = float(strength[base] - strength[quote])
+        spread = float(pair_strength[base] - pair_strength[quote])
         direction = "LONG" if spread >= 0 else "SHORT"
         aligned = (ret >= 0 and direction == "LONG") or (ret <= 0 and direction == "SHORT")
         driver_score, driver_label, dominant_driver = _fx_driver_alignment(
@@ -3410,8 +3475,8 @@ def get_fx_command_center_data():
         driver_points = min(100.0, driver_score * 38.0)
         volatility_score = min(100.0, float(pair_series.diff().dropna().std() or 0.0) * 650.0)
         score = min(100.0, (abs(spread) * 0.36) + (momentum_score * 0.18) + (alignment_score * 0.13) + (driver_points * 0.26) + (volatility_score * 0.03))
-        base_score = float(strength.get(base, 0.0))
-        quote_score = float(strength.get(quote, 0.0))
+        base_score = float(pair_strength.get(base, 0.0))
+        quote_score = float(pair_strength.get(quote, 0.0))
         driver_count = 1
         driver_count += 1 if abs(spread) >= 45 else 0
         driver_count += 1 if aligned else 0
@@ -3424,6 +3489,8 @@ def get_fx_command_center_data():
         )
         rows.append({
             "Par": pair,
+            "Grupo": group,
+            "Risco": "Elevado; spread/liquidez não medidos" if group == "Emergentes" else ("Volatilidade estrutural alta; custo não medido" if pair in {"GBPJPY", "AUDJPY"} else "Padrão"),
             "Direcao": direction,
             "Base": base,
             "Quote": quote,
@@ -3467,8 +3534,10 @@ def get_fx_command_center_data():
     covered_strength = {currency: value for currency, value in strength.items() if strength_coverage.get(currency, 0)}
     strongest = max(covered_strength.items(), key=lambda item: item[1])[0] if covered_strength else "---"
     weakest = min(covered_strength.items(), key=lambda item: item[1])[0] if covered_strength else "---"
-    top_pair = opportunities[0] if opportunities else {}
-    divergence_pairs = [row for row in opportunities if row.get("Alinhado") == "Divergente"]
+    core_opportunities = [row for row in opportunities if row["Grupo"] != "Emergentes"]
+    emerging_opportunities = [row for row in opportunities if row["Grupo"] == "Emergentes"]
+    top_pair = core_opportunities[0] if core_opportunities else {}
+    divergence_pairs = [row for row in core_opportunities if row.get("Alinhado") == "Divergente"]
     market_brief = build_fx_market_brief(
         strength,
         strength_coverage,
@@ -3480,7 +3549,8 @@ def get_fx_command_center_data():
     )
     summary = (
         f"Força relativa no recorte: {strongest} ({strength.get(strongest, 0):+.0f}) vs {weakest} ({strength.get(weakest, 0):+.0f}); "
-        f"{len(latest_returns)}/{len(FX_COMMAND_PAIR_MAP)} pares com dados. "
+        f"{len(core_pair_returns)}/{len(core_pair_names)} pares principais/crosses com dados; "
+        f"emergentes {len(emerging_pair_returns)}/{len(emerging_pair_names)}. "
         if covered_strength else "Dados insuficientes para ranquear moedas: nenhum par com cotação válida. "
     )
     summary += f"USD {usd_bias.lower()}; risco {risk_bias.lower()}; juros EUA {rates_bias.lower()}. "
@@ -3500,12 +3570,34 @@ def get_fx_command_center_data():
             "Detalhe": freshness,
         })
     latest_bar = pair_df.dropna(how="all").index[-1]
+    for pair, ticker, base, quote in FX_COMMAND_PAIRS:
+        if pair not in pair_df.columns:
+            quote_quality.append({
+                "Driver": pair,
+                "Grupo": FX_COMMAND_PAIR_GROUPS[pair],
+                "Fonte": "Yahoo Finance",
+                "Símbolo": ticker,
+                "Observado": "—",
+                "Qualidade": "sem candles",
+                "Detalhe": f"{base}/{quote}; não entra nos rankings.",
+            })
+            continue
+        observed = pair_df[pair].dropna()
+        quote_quality.append({
+            "Driver": pair,
+            "Grupo": FX_COMMAND_PAIR_GROUPS[pair],
+            "Fonte": "Yahoo Finance",
+            "Símbolo": ticker,
+            "Observado": str(observed.index[-1]) if not observed.empty else "—",
+            "Qualidade": f"{len(observed)} candles 5m" if not observed.empty else "sem candles",
+            "Detalhe": "Cotação indicativa; spread, profundidade e liquidez não disponíveis." if FX_COMMAND_PAIR_GROUPS[pair] == "Emergentes" else "Histórico intradiário; timestamps sem preenchimento entre pares.",
+        })
     quote_quality.insert(0, {
-        "Driver": "Majors FX (Yahoo Finance)",
+        "Driver": "FX Yahoo Finance",
         "Fonte": "Yahoo Finance",
         "Observado": str(latest_bar),
         "Qualidade": f"{len(latest_returns)}/{len(FX_COMMAND_PAIR_MAP)} pares válidos",
-        "Detalhe": "Candles de 5 min; último candle" + (f"; {synchronized_points} horários sincronizados com drivers" if synchronized_points else "; sem janela sincronizada com drivers"),
+        "Detalhe": "Candles de 5 min; timestamps sem preenchimento entre símbolos" + (f"; {synchronized_points} horários sincronizados com drivers" if synchronized_points else "; sem janela sincronizada com drivers"),
     })
 
     return {
@@ -3513,9 +3605,14 @@ def get_fx_command_center_data():
         "pair_df": pair_df,
         "strength": strength,
         "strength_coverage": strength_coverage,
+        "emerging_strength": emerging_strength,
+        "emerging_strength_coverage": emerging_strength_coverage,
         "mtf": mtf,
         "mtf_coverage": mtf_coverage,
         "opportunities": opportunities,
+        "core_opportunities": core_opportunities,
+        "emerging_opportunities": emerging_opportunities,
+        "best_expression": top_pair,
         "correlations": correlations,
         "macro_correlations": macro_correlations,
         "quote_quality": quote_quality,
@@ -3569,7 +3666,7 @@ def render_fx_command_center():
     else:
         strongest = weakest = "---"
         strongest_score = weakest_score = 0.0
-    best = opportunities[0] if opportunities else {}
+    best = data.get("best_expression") or {}
     best_direction = html.escape(str(best.get("Direcao", "---")))
     best_pair = html.escape(str(best.get("Par", "---")))
     best_score = html.escape(str(best.get("Score", "---")))
@@ -3593,8 +3690,8 @@ def render_fx_command_center():
           @media(max-width:900px) {{ .fxcc-best {{ grid-template-columns:1fr; }} }}
         </style>
         <div class="fxcc-best">
-          <div class="fxcc-best-box"><span>Moeda forte x fraca</span><strong>{html.escape(str(strongest))} {strongest_score:+.0f} / {html.escape(str(weakest))} {weakest_score:+.0f}</strong><small>Cobertura: {len(data.get('opportunities', []))}/{len(FX_COMMAND_PAIR_MAP)} pares válidos.</small></div>
-          <div class="fxcc-best-box"><span>Best Expression</span><strong>{best_direction} {best_pair}</strong><small>Score {best_score} | Drivers {best_drivers}</small></div>
+          <div class="fxcc-best-box"><span>Moeda forte x fraca</span><strong>{html.escape(str(strongest))} {strongest_score:+.0f} / {html.escape(str(weakest))} {weakest_score:+.0f}</strong><small>Força principal usa majors + crosses; emergentes ficam separados.</small></div>
+          <div class="fxcc-best-box"><span>Best Expression · majors/crosses</span><strong>{best_direction} {best_pair}</strong><small>Score {best_score} | Drivers {best_drivers}</small></div>
           <div class="fxcc-best-box"><span>Tese deterministica</span><strong>{best_pair}</strong><small>{best_thesis}</small></div>
         </div>
         <div class="fxcc-grid">
@@ -3702,7 +3799,7 @@ def render_fx_command_center():
                 )
 
     mtf_rows = []
-    for currency in FX_COMMAND_CURRENCIES:
+    for currency in FX_COMMAND_CORE_CURRENCIES:
         row = {"Moeda": currency}
         for horizon in ["15m", "1H", "4H", "Dia"]:
             coverage = data.get("mtf_coverage", {}).get(horizon, {}).get(currency, 0)
@@ -3716,26 +3813,50 @@ def render_fx_command_center():
     st.markdown("#### Multi-timeframe Strength")
     st.dataframe(mtf_df, use_container_width=True, hide_index=True, height=230)
 
+    emerging_rows = []
+    for currency in ("BRL", "MXN", "ZAR", "TRY"):
+        count = data.get("emerging_strength_coverage", {}).get(currency, 0)
+        score = data.get("emerging_strength", {}).get(currency)
+        emerging_rows.append({"Moeda": currency, "Força no grupo EM": round(float(score), 1) if count and score is not None else "—", "Pares observados": count or "sem dados"})
+    st.markdown("#### Força relativa · emergentes (escala separada)")
+    st.dataframe(pd.DataFrame(emerging_rows), use_container_width=True, hide_index=True, height=190)
+    st.caption("A escala de emergentes é calculada separadamente e não altera o ranking principal de moedas.")
+
     render_terminal_global_currency_performance_chart()
 
     col_opps, col_events = st.columns([0.68, 0.32], gap="medium")
     with col_opps:
-        st.markdown("#### Majors Pair Scanner")
-        st.caption("Score é um ranking heurístico de alinhamento e momentum (0–100), não probabilidade de acerto. Força relativa só inclui moedas com pares observados; veja a cobertura por moeda.")
+        st.markdown("#### FX Pair Scanner")
+        st.caption("Score é um ranking heurístico de alinhamento e momentum (0–100), não probabilidade de acerto. Crosses não usam DXY como driver; emergentes têm força relativa isolada.")
         opp_df = pd.DataFrame(opportunities)
         if opp_df.empty:
             st.info("Scanner aguardando pares validos.")
         else:
-            display_cols = ["Par", "Direcao", "Score", "Driver dominante", "Drivers", "Spread", "Momentum %", "Alinhado", "Tese"]
-            top_long = opp_df[opp_df["Direcao"] == "LONG"].head(12)
-            top_short = opp_df[opp_df["Direcao"] == "SHORT"].head(12)
-            divergences = opp_df[opp_df["Alinhado"] == "Divergente"].sort_values("Score", ascending=False).head(12)
-            tab_long, tab_short, tab_div, tab_corr = st.tabs(["Top Long", "Top Short", "Divergencias", "Correlacoes"])
-            with tab_long:
-                st.dataframe(top_long[display_cols], use_container_width=True, hide_index=True, height=360)
-            with tab_short:
-                st.dataframe(top_short[display_cols], use_container_width=True, hide_index=True, height=360)
+            display_cols = ["Par", "Direcao", "Score", "Driver dominante", "Drivers", "Spread", "Momentum %", "Risco", "Alinhado", "Tese"]
+            tab_majors, tab_crosses, tab_em, tab_div, tab_corr = st.tabs(["Majors", "Crosses sem USD", "Emergentes · alto risco", "Divergencias", "Correlacoes"])
+            with tab_majors:
+                majors = opp_df[opp_df["Grupo"] == "Majors"]
+                if majors.empty:
+                    st.caption("Sem candles suficientes para os majors nesta atualização.")
+                else:
+                    st.dataframe(majors[display_cols], use_container_width=True, hide_index=True, height=360)
+            with tab_crosses:
+                crosses = opp_df[opp_df["Grupo"] == "Crosses"]
+                st.caption("EUR/GBP, EUR/JPY, GBP/JPY e AUD/JPY. GBP/JPY e AUD/JPY têm volatilidade estrutural elevada, mas faixa em pips e custos não são medidos. Não há diferenciais BCE/BoE/BoJ comparáveis; AUD/JPY é apenas proxy contextual de risco.")
+                if crosses.empty:
+                    st.caption("Sem candles suficientes para os crosses nesta atualização.")
+                else:
+                    st.dataframe(crosses[display_cols], use_container_width=True, hide_index=True, height=360)
+            with tab_em:
+                emerging = opp_df[opp_df["Grupo"] == "Emergentes"]
+                st.warning("Cotações indicativas do Yahoo. Spread, profundidade, liquidez executável e gaps não são medidos; fatores políticos/monetários locais não entram no score. Não usar este ranking como execução ou recomendação.")
+                if emerging.empty:
+                    st.caption("Sem candles suficientes; pares fora do ranking até a fonte voltar.")
+                else:
+                    st.dataframe(emerging[display_cols], use_container_width=True, hide_index=True, height=360)
             with tab_div:
+                core_opps_df = opp_df[opp_df["Grupo"] != "Emergentes"]
+                divergences = core_opps_df[core_opps_df["Alinhado"] == "Divergente"].sort_values("Score", ascending=False).head(12)
                 if divergences.empty:
                     st.caption("Sem divergencias relevantes entre strength e momentum agora.")
                 else:

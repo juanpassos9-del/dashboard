@@ -18,6 +18,21 @@ FX_MACRO_RELATIONSHIPS = (
     ("AUDUSD", "SPX", "direta", "Apetite por risco global"),
     ("NZDUSD", "SPX", "direta", "Apetite por risco global"),
     ("USDCAD", "WTI", "inversa", "Petróleo e termos de troca do Canadá"),
+    ("AUDJPY", "SPX", "direta", "Proxy de carry/apetite por risco; relação muda por regime"),
+    ("AUDJPY", "VIX", "inversa", "Proxy de carry/apetite por risco; relação muda por regime"),
+    ("AUDJPY", "COPPER", "direta", "Commodities/aço da atividade global versus iene"),
+    ("EURJPY", "SPX", "direta", "Risco/carry como contexto; não substitui diferencial BCE–BoJ"),
+    ("EURJPY", "VIX", "inversa", "Risco/carry como contexto; não substitui diferencial BCE–BoJ"),
+    ("GBPJPY", "SPX", "direta", "Risco/carry como contexto; não substitui diferencial BoE–BoJ"),
+    ("GBPJPY", "VIX", "inversa", "Risco/carry como contexto; não substitui diferencial BoE–BoJ"),
+    ("USDBRL", "SPX", "inversa", "Risco externo; fatores fiscais/políticos locais não estão no modelo"),
+    ("USDBRL", "VIX", "direta", "Risco global; fatores locais podem dominar"),
+    ("USDMXN", "SPX", "inversa", "Risco externo; fatores locais podem dominar"),
+    ("USDMXN", "VIX", "direta", "Risco global; fatores locais podem dominar"),
+    ("USDZAR", "SPX", "inversa", "Risco externo; fatores locais podem dominar"),
+    ("USDZAR", "VIX", "direta", "Risco global; fatores locais podem dominar"),
+    ("USDTRY", "SPX", "inversa", "Risco externo; política monetária e fatores locais podem dominar"),
+    ("USDTRY", "VIX", "direta", "Risco global; política monetária e fatores locais podem dominar"),
 )
 
 
@@ -50,7 +65,8 @@ def build_fx_macro_correlation_rows(
 
         risk_corr = {"risk_on": None, "risk_on_n": 0, "risk_off": None, "risk_off_n": 0}
         if "SPX" in returns.columns and "VIX" in returns.columns:
-            regime_history = returns[[pair, driver, "SPX", "VIX"]].dropna().tail(max(1, int(window)))
+            regime_columns = list(dict.fromkeys((pair, driver, "SPX", "VIX")))
+            regime_history = returns[regime_columns].dropna().tail(max(1, int(window)))
             risk_on = regime_history[(regime_history["SPX"] > 0) & (regime_history["VIX"] <= 0)]
             risk_off = regime_history[(regime_history["SPX"] < 0) & (regime_history["VIX"] > 0)]
             for name, regime_sample in (("risk_on", risk_on), ("risk_off", risk_off)):
@@ -90,6 +106,7 @@ def build_fx_intraday_correlation_rows(
     pairs: list[str],
     inverse_pairs: set[str],
     inverse_drivers: set[str],
+    expected_relations: dict[str, dict[str, str]] | None = None,
     min_observations: int = 30,
 ) -> list[dict]:
     """Correlate synchronized intraday changes, not rebased performance levels."""
@@ -106,13 +123,18 @@ def build_fx_intraday_correlation_rows(
         for driver in driver_performance.columns:
             if driver not in changes.columns:
                 continue
+            if expected_relations is not None:
+                expected = expected_relations.get(pair, {}).get(driver)
+                if expected not in {"direta", "inversa"}:
+                    continue
+            else:
+                expected = "inversa" if pair in inverse_pairs and driver in inverse_drivers else "direta"
             sample = changes[[pair, driver]].dropna()
             if len(sample) < min_observations:
                 continue
             correlation = sample[pair].corr(sample[driver])
             if pd.isna(correlation):
                 continue
-            expected = "inversa" if pair in inverse_pairs and driver in inverse_drivers else "direta"
             value = float(correlation)
             reading = "fraca/indefinida" if abs(value) < 0.15 else (
                 "confirma" if (expected == "direta" and value > 0) or (expected == "inversa" and value < 0) else "diverge"
