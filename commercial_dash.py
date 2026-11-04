@@ -10016,6 +10016,19 @@ def _fetch_terminal_b3_report_cached():
     return download_terminal_b3_history()
 
 
+@st.cache_data(ttl=21600, show_spinner=False)
+def _fetch_terminal_b3_profit_price_cached(symbol: str, ticker: str, period: str, has_brapi_key: bool):
+    from execution.terminal_b3 import download_profit_vs_price
+
+    api_key = _get_secret_value("BRAPI_API_KEY", "BRAPI_TOKEN")
+    return download_profit_vs_price(
+        symbol,
+        ticker,
+        period,
+        api_key=api_key if has_brapi_key else "",
+    )
+
+
 def pagina_terminal_b3():
     """Radar setorial de ações, ETFs e BDRs listados na B3."""
     from execution.terminal_b3 import ASSET_UNIVERSE, build_macro_context, market_read
@@ -10102,6 +10115,111 @@ def pagina_terminal_b3():
         st.dataframe(pd.DataFrame(factor_rows), hide_index=True, use_container_width=True)
     else:
         st.info("DI, dólar, Brent e fluxo ainda não têm observações suficientes no snapshot compartilhado.")
+
+    st.markdown("### Quant fundamentalista · lucro líquido x cotação")
+    stock_assets = [asset for asset in ASSET_UNIVERSE if asset["class"] == "Ação"]
+    with st.form("terminal_b3_profit_price_form"):
+        fundamental_controls = st.columns([2, 1, 1])
+        selected_fundamental_asset = fundamental_controls[0].selectbox(
+            "Ação",
+            stock_assets,
+            format_func=lambda asset: f"{asset['symbol']} · {asset['name']}",
+            key="terminal_b3_fundamental_asset",
+        )
+        period_label = fundamental_controls[1].radio(
+            "Frequência da DRE", ["Anual", "Trimestral"], horizontal=True,
+            key="terminal_b3_fundamental_period",
+        )
+        load_fundamental = fundamental_controls[2].form_submit_button(
+            "Gerar gráfico", type="primary", use_container_width=True,
+        )
+    fundamental_period = "annual" if period_label == "Anual" else "quarterly"
+    fundamental_key = (selected_fundamental_asset["symbol"], fundamental_period)
+    if load_fundamental:
+        with st.spinner(f"Carregando DRE e histórico de {selected_fundamental_asset['symbol']}..."):
+            try:
+                result = _fetch_terminal_b3_profit_price_cached(
+                    selected_fundamental_asset["symbol"],
+                    selected_fundamental_asset["ticker"],
+                    fundamental_period,
+                    bool(_get_secret_value("BRAPI_API_KEY", "BRAPI_TOKEN")),
+                )
+                st.session_state["terminal_b3_profit_price"] = {"key": fundamental_key, "data": result}
+            except Exception as exc:
+                st.session_state["terminal_b3_profit_price"] = {"key": fundamental_key, "error": str(exc)}
+    fundamental_state = st.session_state.get("terminal_b3_profit_price") or {}
+    if fundamental_state.get("key") == fundamental_key:
+        if fundamental_state.get("error"):
+            st.warning(f"Não foi possível montar a comparação: {fundamental_state['error']}")
+        else:
+            fundamental_data = fundamental_state.get("data") or {}
+            fundamental_rows = fundamental_data.get("rows") or []
+            if fundamental_rows:
+                import plotly.graph_objects as go
+                from plotly.subplots import make_subplots
+
+                period_end = [row["period_label"] for row in fundamental_rows]
+                fig = make_subplots(specs=[[{"secondary_y": True}]])
+                fig.add_trace(go.Scatter(
+                    x=period_end,
+                    y=[row["net_income"] / 1_000_000_000 for row in fundamental_rows],
+                    mode="lines+markers",
+                    name="Lucro líquido",
+                    line={"color": "#57C7B6", "width": 3, "shape": "spline"},
+                    marker={"size": 7},
+                    customdata=[[row["period_end"], row["net_margin"]] for row in fundamental_rows],
+                    hovertemplate="%{x}<br>Lucro: R$ %{y:.2f} bi<br>Fim do período: %{customdata[0]}<br>Margem líquida: %{customdata[1]:.1f}%<extra></extra>",
+                ), secondary_y=False)
+                priced_rows = [row for row in fundamental_rows if row.get("price") is not None]
+                fig.add_trace(go.Scatter(
+                    x=[row["period_label"] for row in priced_rows],
+                    y=[row["price"] for row in priced_rows],
+                    mode="lines+markers",
+                    name="Cotação",
+                    line={"color": "#C8B995", "width": 2.5, "shape": "spline"},
+                    marker={"size": 6},
+                    customdata=[[row["price_date"], row["period_end"]] for row in priced_rows],
+                    hovertemplate="%{x}<br>Fechamento: R$ %{y:.2f}<br>Pregão usado: %{customdata[0]}<br>Fim do período: %{customdata[1]}<extra></extra>",
+                ), secondary_y=True)
+                fig.update_layout(
+                    title=f"Lucro líquido x cotação · {selected_fundamental_asset['symbol']}",
+                    template="plotly_dark",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="#0B1220",
+                    font={"color": "#DCE5EF"},
+                    height=430,
+                    hovermode="x unified",
+                    legend={"orientation": "h", "y": 1.12, "x": 0.02},
+                    margin={"l": 65, "r": 65, "t": 75, "b": 45},
+                )
+                fig.update_xaxes(title_text="Período fiscal", gridcolor="#1E293B")
+                fig.update_yaxes(title_text="Lucro líquido · R$ bilhões", secondary_y=False, gridcolor="#1E293B", zeroline=True, zerolinecolor="#475569")
+                fig.update_yaxes(title_text="Cotação · R$ por ação", secondary_y=True, showgrid=False)
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                basis = fundamental_data.get("consolidation")
+                basis_label = {"consolidated": "consolidado", "individual": "individual"}.get(basis, "base não informada pela fonte")
+                st.caption(
+                    f"DRE: {fundamental_data.get('income_source', 'fonte não identificada')} · base {basis_label}. "
+                    f"Cotação: {fundamental_data.get('price_source', 'fonte não identificada')}. "
+                    "Preço é o último fechamento até o encerramento de cada período. Comparação histórica, não causalidade nem recomendação."
+                )
+                if fundamental_data.get("source_note"):
+                    st.caption(fundamental_data["source_note"])
+                fundamental_table = []
+                for row in fundamental_rows:
+                    fundamental_table.append({
+                        "Período": row["period_label"],
+                        "Lucro líquido · R$ bi": row["net_income"] / 1_000_000_000,
+                        "Var. anual": f"{row['net_income_yoy']:+.1f}%" if row.get("net_income_yoy") is not None else "—",
+                        "Margem líquida": f"{row['net_margin']:.1f}%" if row.get("net_margin") is not None else "—",
+                        "Cotação · R$": f"{row['price']:.2f}" if row.get("price") is not None else "—",
+                        "Pregão da cotação": row.get("price_date") or "sem preço alinhado",
+                    })
+                st.dataframe(pd.DataFrame(fundamental_table), use_container_width=True, hide_index=True)
+            else:
+                st.info("A fonte ainda não forneceu períodos suficientes para a comparação.")
+    else:
+        st.caption("Escolha uma ação e a frequência da demonstração; o histórico fundamentalista só é consultado ao clicar em Gerar gráfico.")
 
     sector_rows = report.get("sectors") or []
     asset_rows = report.get("rows") or []

@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 import pandas as pd
+import requests
 import yfinance as yf
 
 
@@ -18,6 +19,7 @@ ASSET_UNIVERSE: list[dict[str, str]] = [
     {"symbol": "GGBR4", "ticker": "GGBR4.SA", "name": "Gerdau PN", "class": "Ação", "sector": "Mineração e siderurgia"},
     {"symbol": "CSNA3", "ticker": "CSNA3.SA", "name": "CSN", "class": "Ação", "sector": "Mineração e siderurgia"},
     {"symbol": "ITUB4", "ticker": "ITUB4.SA", "name": "Itaú Unibanco PN", "class": "Ação", "sector": "Bancos"},
+    {"symbol": "BBDC3", "ticker": "BBDC3.SA", "name": "Bradesco ON", "class": "Ação", "sector": "Bancos"},
     {"symbol": "BBDC4", "ticker": "BBDC4.SA", "name": "Bradesco PN", "class": "Ação", "sector": "Bancos"},
     {"symbol": "BBAS3", "ticker": "BBAS3.SA", "name": "Banco do Brasil", "class": "Ação", "sector": "Bancos"},
     {"symbol": "SANB11", "ticker": "SANB11.SA", "name": "Santander Brasil Unit", "class": "Ação", "sector": "Bancos"},
@@ -82,6 +84,185 @@ def download_terminal_b3_history() -> dict[str, Any]:
     report = build_terminal_b3_report(frames)
     report["errors"] = errors[-8:]
     return report
+
+
+def _income_statement_rows_from_yahoo(ticker: str, period: str) -> list[dict[str, Any]]:
+    statement = getattr(yf.Ticker(ticker), "income_stmt" if period == "annual" else "quarterly_income_stmt", None)
+    if statement is None or statement.empty:
+        return []
+
+    def row_for(candidates: tuple[str, ...]) -> pd.Series | None:
+        normalized = {str(index).strip().lower(): index for index in statement.index}
+        for candidate in candidates:
+            original = normalized.get(candidate.lower())
+            if original is not None:
+                return statement.loc[original]
+        return None
+
+    net_income = row_for((
+        "Net Income",
+        "Net Income Common Stockholders",
+        "Net Income From Continuing Operation Net Minority Interest",
+        "Net Income Continuous Operations",
+        "Net Income Including Noncontrolling Interests",
+    ))
+    if net_income is None:
+        return []
+    revenue = row_for(("Total Revenue",))
+    rows = []
+    for date, value in net_income.items():
+        if pd.isna(value):
+            continue
+        revenue_value = revenue.get(date) if revenue is not None else None
+        rows.append({
+            "endDate": pd.Timestamp(date).date().isoformat(),
+            "netIncome": float(value),
+            "totalRevenue": float(revenue_value) if revenue_value is not None and pd.notna(revenue_value) else None,
+            "consolidationType": None,
+        })
+    return rows
+
+
+def fetch_income_statement(symbol: str, ticker: str, period: str, api_key: str = "") -> tuple[list[dict[str, Any]], str, str | None]:
+    """Prefer Brapi's reported DRE; fall back to Yahoo statements when available."""
+    source_note = None
+    try:
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        response = requests.get(
+            "https://brapi.dev/api/v2/stocks/income-statement",
+            params={"symbols": symbol, "period": period},
+            headers=headers,
+            timeout=10,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        result = next((
+            item for item in payload.get("results", [])
+            if str(item.get("requestedSymbol") or item.get("symbol") or "").upper() == symbol.upper()
+        ), None)
+        rows = result.get("data", []) if isinstance(result, dict) else []
+        rows = [row for row in rows if isinstance(row, dict) and row.get("endDate") and row.get("netIncome") is not None]
+        if rows:
+            return rows, "Brapi · DRE", None
+        source_note = "A Brapi não retornou DRE para este ativo/período."
+    except requests.RequestException as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        source_note = f"Brapi indisponível{f' (HTTP {status})' if status else ''}; tentando Yahoo Finance."
+    except (AttributeError, TypeError, ValueError, KeyError):
+        source_note = "Resposta da Brapi sem formato de DRE esperado; tentando Yahoo Finance."
+
+    try:
+        rows = _income_statement_rows_from_yahoo(ticker, period)
+        if rows:
+            return rows, "Yahoo Finance · demonstração anual" if period == "annual" else "Yahoo Finance · demonstração trimestral", source_note
+    except Exception:
+        pass
+    return [], "", source_note or "DRE não disponível nas fontes consultadas."
+
+
+def build_profit_price_series(
+    income_rows: list[dict[str, Any]],
+    price_history: pd.DataFrame,
+    *,
+    period: str,
+) -> dict[str, Any]:
+    """Align each reported net income with the last market close on/before period end."""
+    if not income_rows:
+        return {"rows": [], "consolidation": None}
+
+    valid_rows = []
+    for raw in income_rows:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            end_date = pd.Timestamp(raw.get("endDate")).normalize().tz_localize(None)
+            net_income = float(raw.get("netIncome"))
+            if not math.isfinite(net_income):
+                continue
+        except (TypeError, ValueError, OverflowError):
+            continue
+        revenue = _finite(raw.get("totalRevenue"))
+        consolidation = str(raw.get("consolidationType") or "").strip().lower() or None
+        valid_rows.append({
+            "date": end_date,
+            "net_income": net_income,
+            "revenue": revenue,
+            "consolidation": consolidation,
+        })
+
+    types = {row["consolidation"] for row in valid_rows if row["consolidation"]}
+    selected_type = "consolidated" if "consolidated" in types else ("individual" if "individual" in types else None)
+    if selected_type:
+        valid_rows = [row for row in valid_rows if row["consolidation"] == selected_type]
+
+    close = pd.Series(dtype=float)
+    if isinstance(price_history, pd.DataFrame) and "Close" in price_history.columns:
+        close = pd.to_numeric(price_history["Close"], errors="coerce").dropna()
+        index = pd.DatetimeIndex(pd.to_datetime(close.index))
+        if index.tz is not None:
+            index = index.tz_localize(None)
+        close.index = index.normalize()
+        close = close[~close.index.duplicated(keep="last")].sort_index()
+
+    rows = []
+    for item in sorted(valid_rows, key=lambda row: row["date"]):
+        price = None
+        price_date = None
+        if not close.empty:
+            position = close.index.searchsorted(item["date"], side="right") - 1
+            if position >= 0:
+                price_date = close.index[position]
+                price = float(close.iloc[position])
+        rows.append({
+            "period_end": item["date"].date().isoformat(),
+            "period_label": item["date"].strftime("%Y" if period == "annual" else "%Y-%m"),
+            "net_income": item["net_income"],
+            "revenue": item["revenue"],
+            "net_margin": item["net_income"] / item["revenue"] * 100 if item["revenue"] else None,
+            "price": price,
+            "price_date": price_date.date().isoformat() if price_date is not None else None,
+        })
+
+    previous_by_comparable_period: dict[tuple[int, int | None], float] = {}
+    for row in rows:
+        date = pd.Timestamp(row["period_end"])
+        quarter = date.quarter if period == "quarterly" else None
+        prior = previous_by_comparable_period.get((date.year - 1, quarter))
+        row["net_income_yoy"] = (row["net_income"] / prior - 1) * 100 if prior not in (None, 0) else None
+        previous_by_comparable_period[(date.year, quarter)] = row["net_income"]
+
+    return {"rows": rows, "consolidation": selected_type}
+
+
+def download_profit_vs_price(symbol: str, ticker: str, period: str = "annual", api_key: str = "") -> dict[str, Any]:
+    if period not in {"annual", "quarterly"}:
+        raise ValueError("period deve ser annual ou quarterly")
+    income_rows, income_source, source_note = fetch_income_statement(symbol, ticker, period, api_key)
+    if not income_rows:
+        raise RuntimeError(source_note or "DRE indisponível para este ativo.")
+    price_history = yf.download(
+        ticker,
+        period="max",
+        interval="1d",
+        auto_adjust=False,
+        progress=False,
+        threads=False,
+        timeout=18,
+    )
+    if price_history is None or price_history.empty:
+        raise RuntimeError("Histórico de preços do Yahoo Finance indisponível.")
+    if isinstance(price_history.columns, pd.MultiIndex):
+        price_history.columns = price_history.columns.get_level_values(0)
+    series = build_profit_price_series(income_rows, price_history, period=period)
+    if not series["rows"]:
+        raise RuntimeError("Não foi possível alinhar os períodos da DRE.")
+    return {
+        **series,
+        "period": period,
+        "income_source": income_source,
+        "price_source": "Yahoo Finance · fechamento diário",
+        "source_note": source_note,
+    }
 
 
 def _valid_closes(frame: pd.DataFrame) -> pd.Series:

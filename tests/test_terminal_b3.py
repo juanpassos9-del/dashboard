@@ -122,3 +122,40 @@ def test_macro_context_uses_existing_global_and_foreign_flow_observations():
     assert context["flow_observations"] == 2
 
 
+def test_profit_price_series_prefers_consolidated_dre_and_aligns_last_close():
+    income_rows = [
+        {"endDate": "2022-12-31", "netIncome": 900, "totalRevenue": 3000, "consolidationType": "individual"},
+        {"endDate": "2022-12-31", "netIncome": 1000, "totalRevenue": 5000, "consolidationType": "consolidated"},
+        {"endDate": "2023-12-31", "netIncome": 1200, "totalRevenue": 6000, "consolidationType": "consolidated"},
+    ]
+    prices = pd.DataFrame(
+        {"Close": [10.0, 12.0, 13.0]},
+        index=pd.to_datetime(["2022-12-30", "2023-12-29", "2024-01-02"]),
+    )
+
+    result = terminal_b3.build_profit_price_series(income_rows, prices, period="annual")
+
+    assert result["consolidation"] == "consolidated"
+    assert len(result["rows"]) == 2
+    assert result["rows"][0]["net_income"] == 1000
+    assert result["rows"][0]["price"] == 10
+    assert result["rows"][0]["price_date"] == "2022-12-30"
+    assert result["rows"][1]["net_income_yoy"] == pytest.approx(20)
+    assert result["rows"][1]["net_margin"] == pytest.approx(20)
+
+
+def test_quarterly_profit_growth_compares_same_calendar_quarter():
+    income_rows = [
+        {"endDate": "2024-03-31", "netIncome": 100},
+        {"endDate": "2024-06-30", "netIncome": 150},
+        {"endDate": "2025-03-31", "netIncome": 125},
+    ]
+
+    result = terminal_b3.build_profit_price_series(income_rows, pd.DataFrame(), period="quarterly")
+
+    rows = result["rows"]
+    assert rows[0]["net_income_yoy"] is None
+    assert rows[2]["net_income_yoy"] == pytest.approx(25)
+    assert rows[0]["price"] is None
+
+
