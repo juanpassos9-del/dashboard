@@ -10029,6 +10029,118 @@ def _fetch_terminal_b3_profit_price_cached(symbol: str, ticker: str, period: str
     )
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def _fetch_ewz_gamma_cached():
+    from execution.gamma_zones import fetch_ewz_options
+
+    api_key = _get_secret_value("BRAPI_API_KEY", "BRAPI_TOKEN")
+    return fetch_ewz_options(api_key)
+
+
+def pagina_gama():
+    """EWZ options gamma map, clearly labeled as a daily heuristic estimate."""
+    import numpy as np
+    import plotly.graph_objects as go
+
+    st.title("Gama")
+    st.caption("EWZ · zonas de exposição à gama estimada por strike e vencimento")
+    st.warning(
+        "GEX é uma estimativa: calls positivas e puts negativas são uma convenção, não posições observadas de dealers. "
+        "A fonte fornece dados diários calculados no fechamento; não é fluxo intradiário nem recomendação de operação."
+    )
+    col_button, col_source = st.columns([1, 3])
+    with col_button:
+        load = st.button("Carregar / atualizar GEX", type="primary", use_container_width=True, key="ewz_gamma_load")
+    with col_source:
+        st.caption("Ativo inicial: EWZ · Fonte: brapi · gregas e open interest diários · requer BRAPI_API_KEY com acesso ao endpoint de opções.")
+    if load:
+        _fetch_ewz_gamma_cached.clear()
+        st.session_state.pop("ewz_gamma_data", None)
+        st.session_state.pop("ewz_gamma_error", None)
+        with st.spinner("Consultando vencimentos e gregas do EWZ..."):
+            try:
+                result = _fetch_ewz_gamma_cached()
+                st.session_state["ewz_gamma_data"] = result
+            except Exception as exc:
+                st.session_state["ewz_gamma_error"] = str(exc)
+    if st.session_state.get("ewz_gamma_error"):
+        st.error(f"Não foi possível calcular o GEX: {st.session_state['ewz_gamma_error']}")
+    result = st.session_state.get("ewz_gamma_data")
+    if not result:
+        st.info("Clique em **Carregar / atualizar GEX** para buscar a cadeia de opções e calcular as zonas.")
+        return
+
+    spot = float(result["spot"])
+    net_gex = float(result["net_gex_usd_1pct"])
+    flip = result.get("gamma_flip")
+    regime = "GEX positivo · possível amortecimento de movimentos" if net_gex >= 0 else "GEX negativo · movimentos podem se ampliar"
+    kpis = st.columns(5)
+    kpis[0].metric("EWZ · referência", f"${spot:,.2f}")
+    kpis[1].metric("GEX líquido / 1%", f"${net_gex / 1e6:,.1f} mi", help=result["sign_convention"])
+    kpis[2].metric("Gamma flip estimado", f"${flip:,.2f}" if flip is not None else "Sem cruzamento")
+    kpis[3].metric("Call wall", f"${result['call_wall']['strike']:,.2f}" if result.get("call_wall") else "Sem dado")
+    kpis[4].metric("Put wall", f"${result['put_wall']['strike']:,.2f}" if result.get("put_wall") else "Sem dado")
+    st.markdown(f"**Leitura do modelo:** {regime}.")
+    zero_cols = st.columns(3)
+    if result["zero_dte_available"]:
+        zero_cols[0].metric("GEX 0DTE / 1%", f"${result['gex_0dte_usd_1pct'] / 1e6:,.1f} mi")
+        zero_cols[1].metric("Participação 0DTE", f"{result['gex_0dte_share_pct']:.1f}%")
+        zero_cols[2].caption("Há vencimento na data do pregão de referência.")
+    else:
+        zero_cols[0].metric("GEX 0DTE", "Não disponível")
+        zero_note = (
+            "Há vencimento hoje, mas a cadeia não é da sessão de hoje; não usamos esse fechamento como 0DTE atual."
+            if result.get("zero_dte_expiration_present")
+            else "A fonte não trouxe vencimento do EWZ para hoje; não inferimos 0DTE a partir de vencimentos próximos."
+        )
+        zero_cols[1].caption(zero_note)
+    st.caption(
+        f"Referência da cadeia: {result.get('as_of') or 'não informada'} · {result['option_count']} séries · "
+        f"{result['expiration_count']} vencimentos · {result.get('source', 'brapi')} · cache de 15 min."
+    )
+
+    strike_data = result["by_strike"]
+    profile_data = result["profile"]
+    tab_zones, tab_scenarios, tab_contracts = st.tabs(["Zonas por strike", "Cenários de preço", "Séries e vencimentos"])
+    with tab_zones:
+        fig = go.Figure()
+        colors = ["#21C997" if value >= 0 else "#FF5A67" for value in strike_data["gex_usd_1pct"]]
+        fig.add_trace(go.Bar(
+            x=strike_data["strike"], y=strike_data["gex_usd_1pct"] / 1e6,
+            marker_color=colors, name="GEX / 1%",
+            customdata=np.column_stack([strike_data["call_gex"] / 1e6, strike_data["put_gex"] / 1e6, strike_data["open_interest"]]),
+            hovertemplate="Strike $%{x:.2f}<br>GEX líquido: $%{y:.2f} mi<br>Calls: $%{customdata[0]:.2f} mi<br>Puts: $%{customdata[1]:.2f} mi<br>OI: %{customdata[2]:,.0f}<extra></extra>",
+        ))
+        fig.add_hline(y=0, line_color="#8792A2", line_width=1)
+        fig.add_vline(x=spot, line_color="#F5C451", line_dash="solid", annotation_text="EWZ")
+        if flip is not None:
+            fig.add_vline(x=flip, line_color="#B49AFF", line_dash="dash", annotation_text="Flip estimado")
+        fig.update_layout(template="plotly_dark", title="Exposição estimada por strike · USD por movimento de 1%", xaxis_title="Strike", yaxis_title="GEX (US$ milhões / 1%)", height=460, margin=dict(l=20, r=20, t=55, b=20), legend=dict(orientation="h"))
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.caption("As barras mostram a convenção calls + / puts -. Paredes são concentrações estimadas de OI ponderadas pela gama, não níveis garantidos de suporte/resistência.")
+    with tab_scenarios:
+        curve = go.Figure()
+        curve.add_trace(go.Scatter(x=profile_data["spot_scenario"], y=profile_data["gex_usd_1pct"] / 1e6, mode="lines", name="GEX projetado", line=dict(color="#57C7C2", width=2.5), fill="tozeroy", fillcolor="rgba(87,199,194,0.12)"))
+        curve.add_hline(y=0, line_color="#8792A2", line_width=1)
+        curve.add_vline(x=spot, line_color="#F5C451", annotation_text="EWZ referência")
+        if flip is not None:
+            curve.add_vline(x=flip, line_color="#B49AFF", line_dash="dash", annotation_text="Flip estimado")
+        curve.update_layout(template="plotly_dark", title="Como o GEX estimado muda em cenários de preço", xaxis_title="Preço hipotético do EWZ", yaxis_title="GEX (US$ milhões / 1%)", height=420, margin=dict(l=20, r=20, t=55, b=20))
+        st.plotly_chart(curve, use_container_width=True, config={"displayModeBar": False})
+        st.caption("Curva de cenário recalcula gamma via Black-Scholes usando IV e prazo informados pela fonte; é uma aproximação, especialmente para opções americanas e vencimento no mesmo dia.")
+    with tab_contracts:
+        expiries = result["by_expiration"].copy()
+        expiries["gex_usd_1pct"] = expiries["gex_usd_1pct"].map(lambda value: f"${value / 1e6:,.2f} mi")
+        expiries["open_interest"] = expiries["open_interest"].map(lambda value: f"{value:,.0f}")
+        st.dataframe(expiries.rename(columns={"expiration": "Vencimento", "gex_usd_1pct": "GEX / 1%", "open_interest": "Open interest"}), hide_index=True, use_container_width=True)
+        top = strike_data.assign(abs_gex=strike_data["gex_usd_1pct"].abs()).nlargest(20, "abs_gex").drop(columns="abs_gex")
+        st.dataframe(top.rename(columns={"strike": "Strike", "gex_usd_1pct": "GEX / 1% (US$)", "call_gex": "Calls (US$)", "put_gex": "Puts (US$)", "open_interest": "Open interest"}), hide_index=True, use_container_width=True)
+    if result.get("notes"):
+        with st.expander("Cobertura e avisos da fonte"):
+            for note in result["notes"]:
+                st.write(f"- {note}")
+
+
 def pagina_terminal_b3():
     """Radar setorial de ações, ETFs e BDRs listados na B3."""
     from execution.terminal_b3 import ASSET_UNIVERSE, build_macro_context, market_read
@@ -14311,7 +14423,7 @@ with st.sidebar:
         _clear_auth_session()
         _auth_rerun()
     st.markdown("### 🧭 Navegação")
-    all_pages = ["📉 Terminal de Trading", "🇧🇷 Terminal B3", "🌎 Terminal Global", "FX COMMAND CENTER", "MONITOR MACRO", "🇧🇷 MONITOR BR", "RENDAFIXABR", "Crypto Terminal", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"]
+    all_pages = ["📉 Terminal de Trading", "🇧🇷 Terminal B3", "Gama", "🌎 Terminal Global", "FX COMMAND CENTER", "MONITOR MACRO", "🇧🇷 MONITOR BR", "RENDAFIXABR", "Crypto Terminal", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"]
     allowed_pages = pages_for_user(_auth_user_email(auth_user), all_pages)
     default_page = "🌎 Terminal Global" if "🌎 Terminal Global" in allowed_pages else allowed_pages[0]
     nav_key = "main_page_navigation"
@@ -14345,6 +14457,8 @@ if page == "📉 Terminal de Trading":
     pagina_terminal()
 elif page == "🇧🇷 Terminal B3":
     pagina_terminal_b3()
+elif page == "Gama":
+    pagina_gama()
 elif page == "🌎 Terminal Global":
     pagina_terminal_global()
 elif page == "FX COMMAND CENTER":
