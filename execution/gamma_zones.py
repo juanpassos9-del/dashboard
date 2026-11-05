@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 import requests
+import yfinance as yf
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -50,8 +51,8 @@ def _get_json(session: requests.Session, endpoint: str, params: dict[str, Any], 
     return payload
 
 
-def fetch_ewz_options(api_key: str, as_of: date | None = None, max_expirations: int = 8) -> dict[str, Any]:
-    """Fetch daily options analytics for near-term EWZ expirations."""
+def fetch_ewz_brapi_options(api_key: str, as_of: date | None = None, max_expirations: int = 8) -> dict[str, Any]:
+    """Fetch daily options analytics from brapi as a fallback provider."""
     if not api_key:
         raise ValueError("Configure BRAPI_API_KEY nos Secrets do Streamlit para acessar opções do EWZ.")
     market_date = as_of or datetime.now(NEW_YORK).date()
@@ -92,7 +93,103 @@ def fetch_ewz_options(api_key: str, as_of: date | None = None, max_expirations: 
     result["expirations_requested"] = [item.isoformat() for item in eligible]
     result["notes"] = notes
     result["source"] = "brapi options analytics · fechamento diário"
+    result["source_note"] = "Fonte alternativa: gregas e open interest reportados pela brapi, com referência diária."
     return result
+
+
+def fetch_ewz_yahoo_options(as_of: date | None = None, max_expirations: int = 8) -> dict[str, Any]:
+    """Fetch Yahoo chains and calculate option gamma locally from IV."""
+    market_date = as_of or datetime.now(NEW_YORK).date()
+    ticker = yf.Ticker("EWZ")
+    expirations = []
+    for value in ticker.options:
+        try:
+            expiry = date.fromisoformat(str(value)[:10])
+        except ValueError:
+            continue
+        if market_date <= expiry <= market_date + timedelta(days=60):
+            expirations.append(expiry)
+    expirations = sorted(set(expirations))[:max_expirations]
+    if not expirations:
+        raise ValueError("Yahoo não retornou vencimentos futuros do EWZ nos próximos 60 dias.")
+
+    rows: list[dict[str, Any]] = []
+    spot = None
+    for expiry in expirations:
+        chain = ticker.option_chain(expiry.isoformat())
+        underlying = getattr(chain, "underlying", None) or {}
+        if spot is None:
+            for key in ("regularMarketPrice", "currentPrice", "regularMarketPreviousClose"):
+                try:
+                    candidate = float(underlying.get(key) or 0)
+                except (TypeError, ValueError):
+                    continue
+                if candidate > 0:
+                    spot = candidate
+                    break
+        for side, contracts in (("call", chain.calls), ("put", chain.puts)):
+            if contracts is None or contracts.empty:
+                continue
+            for contract in contracts.to_dict("records"):
+                try:
+                    strike = float(contract["strike"])
+                    oi = float(contract.get("openInterest") or 0)
+                    iv = float(contract.get("impliedVolatility") or 0)
+                    contract_size = str(contract.get("contractSize") or "REGULAR").upper()
+                    multiplier = 100.0 if contract_size == "REGULAR" else 0.0
+                except (TypeError, ValueError, KeyError):
+                    continue
+                if oi <= 0 or iv <= 0 or strike <= 0 or multiplier <= 0:
+                    continue
+                days = max((expiry - market_date).days, 1)
+                years = days / 365
+                rows.append({
+                    "symbol": str(contract.get("contractSymbol") or ""),
+                    "side": side,
+                    "strike": strike,
+                    "underlyingPrice": spot,
+                    "openInterest": oi,
+                    "allocationRoundLot": multiplier,
+                    "impliedVolatility": iv,
+                    "timeToExpirationYears": years,
+                    "riskFreeRate": 0.04,
+                    "dividendYield": 0.03,
+                    "gamma": _bs_gamma(spot, strike, years, iv, 0.04, 0.03) if spot else 0,
+                    "expirationDate": expiry.isoformat(),
+                    "openInterestDate": "",
+                    "confidence": "estimated from Yahoo IV",
+                    "volume": float(contract.get("volume") or 0),
+                    "bid": float(contract.get("bid") or 0),
+                    "ask": float(contract.get("ask") or 0),
+                    "lastTradeDate": str(contract.get("lastTradeDate") or ""),
+                })
+    if not spot or not rows:
+        raise ValueError("Yahoo não retornou spot, IV e open interest utilizáveis para o EWZ.")
+    result = build_gamma_exposure(rows, as_of=market_date.isoformat(), market_date=market_date)
+    result["expirations_requested"] = [item.isoformat() for item in expirations]
+    result["source"] = "Yahoo Finance via yfinance · cadeia de opções"
+    result["source_note"] = (
+        "Yahoo pode fornecer cotações com atraso; open interest pode refletir a sessão anterior. "
+        "Gamma calculada localmente por Black-Scholes com taxa livre de risco de 4% e dividend yield de 3% assumidos."
+    )
+    result["notes"] = [result["source_note"]]
+    return result
+
+
+def fetch_ewz_options(api_key: str = "", as_of: date | None = None, max_expirations: int = 8) -> dict[str, Any]:
+    """Prefer Yahoo's free chain; fall back to brapi when Yahoo is unavailable."""
+    try:
+        return fetch_ewz_yahoo_options(as_of=as_of, max_expirations=max_expirations)
+    except Exception as yahoo_error:
+        if not api_key:
+            raise ValueError(
+                f"Yahoo não conseguiu carregar as opções do EWZ ({type(yahoo_error).__name__}). "
+                "Sem BRAPI_API_KEY, não há fallback configurado."
+            ) from None
+        result = fetch_ewz_brapi_options(api_key, as_of=as_of, max_expirations=max_expirations)
+        result["source_note"] = f"Yahoo indisponível ({type(yahoo_error).__name__}); usando fallback brapi. " + result["source_note"]
+        result["notes"] = [result["source_note"], *result.get("notes", [])]
+        return result
 
 
 def build_gamma_exposure(

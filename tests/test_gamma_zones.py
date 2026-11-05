@@ -1,7 +1,10 @@
 from datetime import date
+from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 
+from execution import gamma_zones
 from execution.gamma_zones import build_gamma_exposure, fetch_ewz_options
 
 
@@ -77,6 +80,48 @@ def test_empty_usable_chain_raises_clear_error():
         build_gamma_exposure([{"side": "call", "strike": 100}], market_date=date(2026, 11, 5))
 
 
-def test_fetch_requires_brapi_token():
+def _fake_chain(expiry):
+    contracts = pd.DataFrame([{
+        "contractSymbol": f"EWZC{expiry.replace('-', '')}",
+        "strike": 50,
+        "openInterest": 1200,
+        "impliedVolatility": 0.32,
+        "contractSize": "REGULAR",
+        "volume": 250,
+        "bid": 1.2,
+        "ask": 1.3,
+        "lastTradeDate": "2026-11-05",
+    }])
+    return SimpleNamespace(calls=contracts, puts=contracts.assign(contractSymbol=f"EWZP{expiry.replace('-', '')}"), underlying={"regularMarketPrice": 50.0})
+
+
+def test_yahoo_is_primary_and_does_not_require_brapi_key(monkeypatch):
+    class FakeTicker:
+        options = ("2026-11-05", "2026-11-12")
+
+        def option_chain(self, expiry):
+            return _fake_chain(expiry)
+
+    monkeypatch.setattr(gamma_zones.yf, "Ticker", lambda symbol: FakeTicker())
+    result = fetch_ewz_options("", as_of=date(2026, 11, 5))
+
+    assert result["source"].startswith("Yahoo Finance")
+    assert result["option_count"] == 4
+    assert result["zero_dte_available"] is True
+
+
+def test_brapi_is_used_only_when_yahoo_fails(monkeypatch):
+    fallback = {"source": "brapi", "notes": [], "source_note": "daily"}
+    monkeypatch.setattr(gamma_zones, "fetch_ewz_yahoo_options", lambda **kwargs: (_ for _ in ()).throw(ConnectionError("down")))
+    monkeypatch.setattr(gamma_zones, "fetch_ewz_brapi_options", lambda *args, **kwargs: fallback.copy())
+
+    result = fetch_ewz_options("test-token", as_of=date(2026, 11, 5))
+
+    assert result["source"] == "brapi"
+    assert "Yahoo indisponível" in result["source_note"]
+
+
+def test_missing_yahoo_and_brapi_key_returns_clear_message(monkeypatch):
+    monkeypatch.setattr(gamma_zones, "fetch_ewz_yahoo_options", lambda **kwargs: (_ for _ in ()).throw(ConnectionError("down")))
     with pytest.raises(ValueError, match="BRAPI_API_KEY"):
         fetch_ewz_options("")

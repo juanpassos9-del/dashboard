@@ -10046,13 +10046,14 @@ def pagina_gama():
     st.caption("EWZ · zonas de exposição à gama estimada por strike e vencimento")
     st.warning(
         "GEX é uma estimativa: calls positivas e puts negativas são uma convenção, não posições observadas de dealers. "
-        "A fonte fornece dados diários calculados no fechamento; não é fluxo intradiário nem recomendação de operação."
+        "As cotações Yahoo podem ter atraso e o open interest pode refletir a sessão anterior; a gamma é estimada localmente. "
+        "Não é fluxo intradiário nem recomendação de operação."
     )
     col_button, col_source = st.columns([1, 3])
     with col_button:
         load = st.button("Carregar / atualizar GEX", type="primary", use_container_width=True, key="ewz_gamma_load")
     with col_source:
-        st.caption("Ativo inicial: EWZ · Fonte: brapi · gregas e open interest diários · requer BRAPI_API_KEY com acesso ao endpoint de opções.")
+        st.caption("Ativo: EWZ · Principal: Yahoo Finance (sem chave) · fallback opcional: brapi com BRAPI_API_KEY e acesso Pro.")
     if load:
         _fetch_ewz_gamma_cached.clear()
         st.session_state.pop("ewz_gamma_data", None)
@@ -10095,8 +10096,9 @@ def pagina_gama():
         )
         zero_cols[1].caption(zero_note)
     st.caption(
-        f"Referência da cadeia: {result.get('as_of') or 'não informada'} · {result['option_count']} séries · "
-        f"{result['expiration_count']} vencimentos · {result.get('source', 'brapi')} · cache de 15 min."
+        f"Data do snapshot: {result.get('as_of') or 'não informada'} · {result['option_count']} séries · "
+        f"{result['expiration_count']} vencimentos · Fonte: {result.get('source', 'desconhecida')} · cache de 15 min. "
+        f"{result.get('source_note', '')}"
     )
 
     strike_data = result["by_strike"]
