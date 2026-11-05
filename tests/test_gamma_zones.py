@@ -173,6 +173,49 @@ def test_yahoo_is_primary_and_does_not_require_brapi_key(monkeypatch):
     assert result["zero_dte_available"] is True
 
 
+def test_yahoo_retries_empty_expirations_and_accepts_longer_dated_chain(monkeypatch):
+    attempts = {"count": 0}
+
+    class FakeTicker:
+        def __init__(self, expiries):
+            self.options = expiries
+
+        def option_chain(self, expiry):
+            return _fake_chain(expiry)
+
+    def make_ticker(symbol):
+        attempts["count"] += 1
+        expiries = () if attempts["count"] == 1 else ("2027-04-05",)
+        return FakeTicker(expiries)
+
+    monkeypatch.setattr(gamma_zones, "_get_yfinance", lambda: SimpleNamespace(Ticker=make_ticker))
+    monkeypatch.setattr(gamma_zones.time, "sleep", lambda seconds: None)
+
+    result = fetch_ewz_options("", as_of=date(2026, 11, 5))
+
+    assert attempts["count"] == 2
+    assert result["expiration_count"] == 1
+    assert result["expirations_requested"] == ["2027-04-05"]
+
+
+def test_yahoo_retries_transient_chain_request_error_and_preserves_cause(monkeypatch):
+    attempts = {"count": 0}
+
+    class FakeTicker:
+        @property
+        def options(self):
+            attempts["count"] += 1
+            raise ConnectionError("DNS lookup failed")
+
+    monkeypatch.setattr(gamma_zones, "_get_yfinance", lambda: SimpleNamespace(Ticker=lambda symbol: FakeTicker()))
+    monkeypatch.setattr(gamma_zones.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(RuntimeError, match="DNS lookup failed"):
+        gamma_zones.fetch_ewz_yahoo_options(as_of=date(2026, 11, 5))
+
+    assert attempts["count"] == 2
+
+
 def test_brapi_is_used_only_when_yahoo_fails(monkeypatch):
     fallback = {"source": "brapi", "notes": [], "source_note": "daily"}
     monkeypatch.setattr(gamma_zones, "fetch_ewz_yahoo_options", lambda **kwargs: (_ for _ in ()).throw(ConnectionError("down")))

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from math import erf, exp, log, pi, sqrt
+import time
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -107,18 +108,41 @@ def fetch_ewz_brapi_options(api_key: str, as_of: date | None = None, max_expirat
 def fetch_ewz_yahoo_options(as_of: date | None = None, max_expirations: int = 8) -> dict[str, Any]:
     """Fetch Yahoo chains and calculate option gamma locally from IV."""
     market_date = as_of or datetime.now(NEW_YORK).date()
-    ticker = _get_yfinance().Ticker("EWZ")
+    ticker = None
+    yahoo_expirations = ()
+    yahoo_request_error = None
+    for attempt in range(2):
+        try:
+            ticker = _get_yfinance().Ticker("EWZ")
+            yahoo_expirations = tuple(ticker.options or ())
+            yahoo_request_error = None
+        except Exception as exc:
+            yahoo_expirations = ()
+            yahoo_request_error = exc
+        if yahoo_expirations:
+            break
+        if attempt == 0:
+            time.sleep(0.5)
+    if not yahoo_expirations:
+        if yahoo_request_error:
+            detail = str(yahoo_request_error).strip().replace("\n", " ")[:180] or type(yahoo_request_error).__name__
+            raise RuntimeError(f"Yahoo não respondeu à cadeia do EWZ após duas consultas: {detail}") from None
+        raise ValueError("Yahoo retornou a cadeia do EWZ sem datas de vencimento após duas consultas.")
     expirations = []
-    for value in ticker.options:
+    for value in yahoo_expirations:
         try:
             expiry = date.fromisoformat(str(value)[:10])
         except ValueError:
             continue
-        if market_date <= expiry <= market_date + timedelta(days=60):
+        if market_date <= expiry <= market_date + timedelta(days=365):
             expirations.append(expiry)
     expirations = sorted(set(expirations))[:max_expirations]
     if not expirations:
-        raise ValueError("Yahoo não retornou vencimentos futuros do EWZ nos próximos 60 dias.")
+        valid_dates = sorted(str(value)[:10] for value in yahoo_expirations if str(value)[:10] >= market_date.isoformat())
+        next_expiry = valid_dates[0] if valid_dates else "nenhum vencimento futuro listado"
+        raise ValueError(
+            f"Yahoo listou {next_expiry} como próximo vencimento, fora da janela de 12 meses a partir de {market_date.isoformat()}."
+        )
 
     rows: list[dict[str, Any]] = []
     spot = None

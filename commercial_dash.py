@@ -10303,27 +10303,104 @@ def pagina_gama():
                 latest_age_minutes = max(0.0, (datetime.now(ZoneInfo("America/New_York")) - bars.index[-1].to_pydatetime()).total_seconds() / 60)
                 provider_label = intraday_provider
 
-                intraday_fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.035, row_heights=[0.78, 0.22])
+                intraday_fig = make_subplots(
+                    rows=2, cols=3,
+                    specs=[[{}, {}, {}], [None, {}, None]],
+                    shared_yaxes="rows",
+                    column_widths=[0.24, 0.59, 0.17],
+                    row_heights=[0.78, 0.22],
+                    horizontal_spacing=0.018,
+                    vertical_spacing=0.035,
+                )
+                visible_low, visible_high = intraday_price * 0.92, intraday_price * 1.08
+                profile = strike_data[
+                    strike_data["strike"].between(visible_low, visible_high)
+                ].copy()
+                profile["gex_millions"] = profile["gex_usd_1pct"] / 1e6
+                profile_scale = max(1.0, float(profile["gex_millions"].abs().max())) if not profile.empty else 1.0
+                profile_colors = ["#A879FF" if value >= 0 else "#F05B68" for value in profile["gex_millions"]]
+                intraday_fig.add_trace(go.Bar(
+                    x=profile["gex_millions"], y=profile["strike"], orientation="h",
+                    marker_color=profile_colors, opacity=0.9, name="GEX líquido / 1%",
+                    customdata=np.column_stack([
+                        profile["call_gex"] / 1e6,
+                        profile["put_gex"] / 1e6,
+                        profile["open_interest"],
+                    ]),
+                    hovertemplate=(
+                        "Strike $%{y:.2f}<br>GEX líquido: $%{x:.2f} mi"
+                        "<br>Calls: $%{customdata[0]:.2f} mi"
+                        "<br>Puts: $%{customdata[1]:.2f} mi"
+                        "<br>OI: %{customdata[2]:,.0f}<extra></extra>"
+                    ),
+                ), row=1, col=1)
+                intraday_fig.add_vline(x=0, line_color="#718096", line_width=1, row=1, col=1)
                 intraday_fig.add_trace(go.Candlestick(
                     x=bars.index, open=bars["open"], high=bars["high"], low=bars["low"], close=bars["close"],
                     name="EWZ · 5 min", increasing_line_color="#21C997", decreasing_line_color="#FF5A67",
                     increasing_fillcolor="#21C997", decreasing_fillcolor="#FF5A67",
                     hoverlabel=dict(namelength=0),
-                ), row=1, col=1)
+                ), row=1, col=2)
                 if "vwap_d" in bars:
-                    intraday_fig.add_trace(go.Scatter(x=bars.index, y=bars["vwap_d"], mode="lines", name="VWAP sessão", line=dict(color="#63B3ED", width=1.5)), row=1, col=1)
+                    intraday_fig.add_trace(go.Scatter(x=bars.index, y=bars["vwap_d"], mode="lines", name="VWAP sessão", line=dict(color="#63B3ED", width=1.5)), row=1, col=2)
                 volume_colors = ["#21C997" if row.close >= row.open else "#FF5A67" for row in bars.itertuples()]
-                intraday_fig.add_trace(go.Bar(x=bars.index, y=bars["volume"], name="Volume", marker_color=volume_colors, opacity=0.65), row=2, col=1)
-                add_gamma_overlay(intraday_fig, bars.index[0], bars.index[-1], intraday_price, subplot=True)
+                intraday_fig.add_trace(go.Bar(x=bars.index, y=bars["volume"], name="Volume", marker_color=volume_colors, opacity=0.65), row=2, col=2)
+
+                levels = []
+                for key, label, color, dash in (
+                    ("call_wall", "Call wall · GEX calls", "#F5A742", "dash"),
+                    ("put_wall", "Put wall · GEX puts", "#43C6D8", "dash"),
+                ):
+                    level = (result.get(key) or {}).get("strike")
+                    if level:
+                        levels.append((label, float(level), color, dash))
+                if flip is not None:
+                    levels.append(("Gamma flip", float(flip), "#E5B94C", "dashdot"))
+                if not profile.empty:
+                    positive_profile = profile[profile["gex_usd_1pct"] > 0]
+                    negative_profile = profile[profile["gex_usd_1pct"] < 0]
+                    if not positive_profile.empty:
+                        row = positive_profile.loc[positive_profile["gex_usd_1pct"].idxmax()]
+                        levels.append(("Maior GEX +", float(row["strike"]), "#21C997", "dot"))
+                    if not negative_profile.empty:
+                        row = negative_profile.loc[negative_profile["gex_usd_1pct"].idxmin()]
+                        levels.append(("Maior GEX -", float(row["strike"]), "#F05B68", "dot"))
+                levels.append(("EWZ · última barra", intraday_price, "#F5C451", "solid"))
+                deduped_levels = {}
+                for label, level, color, dash in levels:
+                    if visible_low <= level <= visible_high:
+                        key = round(level, 2)
+                        if key in deduped_levels:
+                            deduped_levels[key][0] += f" / {label}"
+                        else:
+                            deduped_levels[key] = [label, level, color, dash]
+                for label, level, color, dash in deduped_levels.values():
+                    intraday_fig.add_hline(y=level, line_color=color, line_dash=dash, line_width=1.25, row=1, col=2)
+                    intraday_fig.add_annotation(
+                        x=0.03, xref="x3 domain", y=level, yref="y3", text=f"{label}<br>${level:.2f}",
+                        showarrow=False, xanchor="left", align="left",
+                        bgcolor="rgba(12,16,22,0.94)", bordercolor=color, borderwidth=1, borderpad=4,
+                        font=dict(size=9, color="#E8EDF5"),
+                    )
+                for zone_key, color in (("defense", "rgba(33,201,151,0.10)"), ("acceleration", "rgba(240,91,104,0.10)")):
+                    for zone in build_price_zone_levels(result, intraday_price)[zone_key]:
+                        level = zone["price"]
+                        if visible_low <= level <= visible_high:
+                            band = level * 0.002
+                            intraday_fig.add_hrect(y0=level - band, y1=level + band, fillcolor=color, line_width=0, layer="below", row=1, col=2)
                 intraday_fig.update_layout(
-                    template="plotly_dark", title="EWZ intraday · barras de 5 minutos + mapa GEX da cadeia",
-                    height=700, margin=dict(l=20, r=20, t=58, b=20), hovermode="x unified",
+                    template="plotly_dark", title="EWZ intraday · perfil GEX por strike e níveis da cadeia",
+                    height=720, margin=dict(l=20, r=20, t=58, b=20), hovermode="x unified",
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
                 )
-                intraday_fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
-                intraday_fig.update_xaxes(rangeslider_visible=True, row=2, col=1)
-                intraday_fig.update_yaxes(title_text="Preço (US$)", row=1, col=1)
-                intraday_fig.update_yaxes(title_text="Volume", row=2, col=1)
+                intraday_fig.update_xaxes(title_text="GEX / 1% (US$ mi)", zeroline=True, range=[-profile_scale * 1.15, profile_scale * 1.15], row=1, col=1)
+                intraday_fig.update_xaxes(rangeslider_visible=False, row=1, col=2)
+                intraday_fig.update_xaxes(rangeslider_visible=True, row=2, col=2)
+                intraday_fig.update_xaxes(visible=False, row=1, col=3)
+                intraday_fig.update_yaxes(title_text="Strike (US$)", range=[visible_low, visible_high], row=1, col=1)
+                intraday_fig.update_yaxes(title_text="Preço EWZ (US$)", range=[visible_low, visible_high], row=1, col=2)
+                intraday_fig.update_yaxes(showticklabels=False, range=[visible_low, visible_high], row=1, col=3)
+                intraday_fig.update_yaxes(title_text="Volume", row=2, col=2)
                 st.plotly_chart(intraday_fig, use_container_width=True, config={"displayModeBar": True, "scrollZoom": True})
                 source_note = intraday_bundle.get("source_note")
                 st.caption(f"Intraday: {provider_label} · candles de 5 min · horário de Nova York · última barra há {latest_age_minutes:.0f} min. O atraso do provedor pode variar; as zonas são da última cadeia e ficam fixas até nova atualização. {source_note or ''}")
