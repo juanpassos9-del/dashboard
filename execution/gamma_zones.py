@@ -202,6 +202,55 @@ def fetch_ewz_daily_history(period: str = "1y", as_of: date | None = None) -> di
     }
 
 
+def fetch_ewz_intraday_bars(interval: str = "5m", period: str = "5d") -> dict[str, Any]:
+    """Fetch real intraday OHLCV bars directly from Yahoo's chart endpoint."""
+    response = requests.get(
+        "https://query1.finance.yahoo.com/v8/finance/chart/EWZ",
+        params={"interval": interval, "range": period, "includePrePost": "false", "events": "history"},
+        headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+        timeout=(5, 15),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    chart = payload.get("chart") or {}
+    if chart.get("error"):
+        raise ValueError("Yahoo retornou erro para as barras intradiárias do EWZ.")
+    result = (chart.get("result") or [None])[0]
+    if not result:
+        raise ValueError("Yahoo não retornou histórico intradiário para EWZ.")
+    timestamps = result.get("timestamp") or []
+    quote = ((result.get("indicators") or {}).get("quote") or [{}])[0]
+    if not timestamps or not quote:
+        raise ValueError("Resposta Yahoo sem candles intradiários para EWZ.")
+    frame = pd.DataFrame(
+        {
+            "open": quote.get("open", []),
+            "high": quote.get("high", []),
+            "low": quote.get("low", []),
+            "close": quote.get("close", []),
+            "volume": quote.get("volume", []),
+        },
+        index=pd.to_datetime(timestamps, unit="s", utc=True).tz_convert(NEW_YORK),
+    )
+    frame = frame.dropna(subset=["open", "high", "low", "close"]).sort_index()
+    if frame.empty:
+        raise ValueError("Yahoo não retornou candles OHLC completos para EWZ.")
+    frame["volume"] = pd.to_numeric(frame["volume"], errors="coerce").fillna(0.0)
+    frame["vwap_d"] = (
+        ((frame["high"] + frame["low"] + frame["close"]) / 3 * frame["volume"])
+        .groupby(frame.index.date).cumsum()
+        / frame["volume"].groupby(frame.index.date).cumsum().replace(0, np.nan)
+    )
+    return {
+        "bars": frame,
+        "source": "Yahoo Finance chart · intraday direto",
+        "interval": interval,
+        "period": period,
+        "last_bar_at": frame.index[-1].isoformat(),
+        "last_price": float(frame["close"].iloc[-1]),
+    }
+
+
 def build_price_zone_levels(gex_result: dict[str, Any], reference_price: float, max_per_side: int = 3) -> dict[str, list[dict[str, float]]]:
     """Select nearby net-positive (damping) and net-negative (amplification) strikes."""
     strikes = gex_result.get("by_strike")

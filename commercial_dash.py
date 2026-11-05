@@ -10051,6 +10051,13 @@ def _fetch_ewz_daily_history_cached():
     return fetch_ewz_daily_history(period="1y")
 
 
+@st.cache_data(ttl=90, show_spinner=False)
+def _fetch_ewz_intraday_cached():
+    from execution.gamma_zones import fetch_ewz_intraday_bars
+
+    return fetch_ewz_intraday_bars(interval="5m", period="5d")
+
+
 def _get_dashboard_ewz_snapshot():
     payload = fetch_app_state_cached("mercados_globais") or get_global_markets_data() or {}
     categories = payload.get("categories", {}) if isinstance(payload, dict) else {}
@@ -10089,6 +10096,7 @@ def pagina_gama():
     if load:
         _fetch_ewz_gamma_cached.clear()
         _fetch_ewz_daily_history_cached.clear()
+        _fetch_ewz_intraday_cached.clear()
         get_ewz_vwap_plotly_data.clear()
         st.session_state.pop("ewz_gamma_data", None)
         st.session_state.pop("ewz_gamma_error", None)
@@ -10108,12 +10116,26 @@ def pagina_gama():
             except Exception as exc:
                 st.session_state["ewz_gamma_history_error"] = str(exc)
             try:
-                intraday = get_ewz_vwap_plotly_data()
-                if intraday is None or intraday.empty:
-                    raise ValueError("O motor não retornou barras intradiárias utilizáveis.")
-                st.session_state["ewz_gamma_intraday"] = intraday
-            except Exception as exc:
-                st.session_state["ewz_gamma_intraday_error"] = str(exc)
+                st.session_state["ewz_gamma_intraday"] = _fetch_ewz_intraday_cached()
+            except Exception as yahoo_exc:
+                try:
+                    fallback = get_ewz_vwap_plotly_data()
+                    fallback_source = get_source_health().get("EWZ VWAP Plotly", {}).get("source", "")
+                    needed = {"open", "high", "low", "close", "volume"}
+                    if fallback is None or fallback.empty or not needed.issubset(fallback.columns) or fallback_source.lower() == "dashboard snapshot":
+                        raise ValueError("motor não forneceu candles OHLC reais")
+                    st.session_state["ewz_gamma_intraday"] = {
+                        "bars": fallback,
+                        "source": f"Motor dashboard · {fallback_source or 'fonte alternativa'}",
+                        "interval": "5 min",
+                        "last_bar_at": fallback.index[-1].isoformat(),
+                        "last_price": float(fallback["close"].iloc[-1]),
+                        "source_note": f"Yahoo indisponível ({type(yahoo_exc).__name__}); usando fallback do motor.",
+                    }
+                except Exception as fallback_exc:
+                    st.session_state["ewz_gamma_intraday_error"] = (
+                        f"Yahoo: {type(yahoo_exc).__name__}; fallback do motor: {fallback_exc}"
+                    )
     if st.session_state.get("ewz_gamma_error"):
         st.error(f"Não foi possível calcular o GEX: {st.session_state['ewz_gamma_error']}")
     result = st.session_state.get("ewz_gamma_data")
@@ -10211,12 +10233,9 @@ def pagina_gama():
                 ))
 
     with tab_intraday:
-        intraday = st.session_state.get("ewz_gamma_intraday")
-        intraday_health = get_source_health().get("EWZ VWAP Plotly", {})
-        intraday_provider = str(intraday_health.get("source") or "").strip()
-        if intraday_provider.lower() == "dashboard snapshot":
-            intraday = None
-            st.session_state["ewz_gamma_intraday_error"] = "O motor só encontrou um snapshot aproximado, não candles observados; o gráfico intraday foi ocultado para não sugerir precisão inexistente."
+        intraday_bundle = st.session_state.get("ewz_gamma_intraday") or {}
+        intraday = intraday_bundle.get("bars")
+        intraday_provider = str(intraday_bundle.get("source") or "Yahoo Finance chart")
         if intraday is None or intraday.empty:
             st.warning(f"Intraday indisponível: {st.session_state.get('ewz_gamma_intraday_error', 'use Atualizar GEX + intraday para buscar as barras do motor.')}")
         else:
@@ -10240,7 +10259,7 @@ def pagina_gama():
                 current_cols[2].metric("Regime GEX", "Positivo" if result["net_gex_usd_1pct"] >= 0 else "Negativo")
                 current_cols[3].metric("Barra mais recente · NY", bars.index[-1].strftime("%H:%M %Z"))
                 latest_age_minutes = max(0.0, (datetime.now(ZoneInfo("America/New_York")) - bars.index[-1].to_pydatetime()).total_seconds() / 60)
-                provider_label = intraday_provider or (st.session_state.get("ewz_gamma_quote") or {}).get("source") or "motor de cotações"
+                provider_label = intraday_provider
 
                 intraday_fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.035, row_heights=[0.78, 0.22])
                 intraday_fig.add_trace(go.Candlestick(
@@ -10264,7 +10283,8 @@ def pagina_gama():
                 intraday_fig.update_yaxes(title_text="Preço (US$)", row=1, col=1)
                 intraday_fig.update_yaxes(title_text="Volume", row=2, col=1)
                 st.plotly_chart(intraday_fig, use_container_width=True, config={"displayModeBar": True, "scrollZoom": True})
-                st.caption(f"Intraday: {provider_label} · candles de 5 min · horário de Nova York · última barra há {latest_age_minutes:.0f} min. O atraso do provedor pode variar; as zonas são da última cadeia e ficam fixas até nova atualização.")
+                source_note = intraday_bundle.get("source_note")
+                st.caption(f"Intraday: {provider_label} · candles de 5 min · horário de Nova York · última barra há {latest_age_minutes:.0f} min. O atraso do provedor pode variar; as zonas são da última cadeia e ficam fixas até nova atualização. {source_note or ''}")
                 st.caption("Defesa/amortecimento (GEX +) e aceleração (GEX -) dependem da convenção de posicionamento; o open interest pode ser do pregão anterior. Confirme reação do preço e liquidez, não opere apenas pelo nível.")
     with tab_price:
         price_bundle = st.session_state.get("ewz_gamma_price_history") or {}

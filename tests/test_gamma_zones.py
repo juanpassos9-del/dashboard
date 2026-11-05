@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from execution import gamma_zones
-from execution.gamma_zones import build_gamma_exposure, build_price_zone_levels, fetch_ewz_daily_history, fetch_ewz_options
+from execution.gamma_zones import build_gamma_exposure, build_price_zone_levels, fetch_ewz_daily_history, fetch_ewz_intraday_bars, fetch_ewz_options
 
 
 def _option(symbol, side, strike, expiry, oi, *, iv=0.35, spot=100.0):
@@ -98,6 +98,37 @@ def test_daily_history_excludes_incomplete_current_session(monkeypatch):
 
     assert result["last_close"] == 31.0
     assert result["last_close_date"] == "2026-11-04"
+
+
+def test_intraday_fetch_parses_yahoo_ohlcv_and_calculates_session_vwap(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "chart": {
+                    "result": [{
+                        "timestamp": [1793899800, 1793900100],
+                        "indicators": {"quote": [{
+                            "open": [32.0, 32.1],
+                            "high": [32.2, 32.3],
+                            "low": [31.9, 32.0],
+                            "close": [32.1, 32.2],
+                            "volume": [1000, 2000],
+                        }]},
+                    }],
+                    "error": None,
+                }
+            }
+
+    monkeypatch.setattr(gamma_zones.requests, "get", lambda *args, **kwargs: FakeResponse())
+    result = fetch_ewz_intraday_bars()
+
+    assert len(result["bars"]) == 2
+    assert result["bars"].iloc[-1]["close"] == 32.2
+    assert result["bars"]["vwap_d"].notna().all()
+    assert "Yahoo Finance" in result["source"]
 
 
 def test_invalid_or_missing_open_interest_rows_are_excluded():
