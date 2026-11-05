@@ -135,6 +135,7 @@ APP_STATE_ALLOWED_KEYS = {
     "lse_realtime_quotes",
     "lse_diagnostics",
     "ewz_plotly_ohlcv",
+    "ewz_gamma_history",
     "market_news_feed",
     "monitor_br_vintages",
     "regime_juros",
@@ -10075,6 +10076,33 @@ def _get_dashboard_ewz_snapshot():
     return {}
 
 
+def _load_ewz_gamma_history():
+    history = fetch_app_state("ewz_gamma_history") or []
+    if isinstance(history, list) and history:
+        return history, "Supabase compartilhado"
+    path = os.path.join(LOCAL_TMP_DIR, "ewz_gamma_history.json")
+    try:
+        with open(path, "r", encoding="utf-8") as history_file:
+            value = json.load(history_file)
+        return (value if isinstance(value, list) else []), "cache local"
+    except (OSError, json.JSONDecodeError):
+        return [], ""
+
+
+def _save_ewz_gamma_history(history):
+    saved, warning = sync_app_state_value("ewz_gamma_history", history)
+    if saved:
+        return "Supabase compartilhado", ""
+    try:
+        os.makedirs(LOCAL_TMP_DIR, exist_ok=True)
+        path = os.path.join(LOCAL_TMP_DIR, "ewz_gamma_history.json")
+        with open(path, "w", encoding="utf-8") as history_file:
+            json.dump(history, history_file, ensure_ascii=False, indent=2)
+        return "cache local", warning
+    except OSError as exc:
+        return "não salvo", f"{warning} {exc}".strip()
+
+
 def pagina_gama():
     """EWZ options gamma map, clearly labeled as a daily heuristic estimate."""
     import numpy as np
@@ -10108,6 +10136,16 @@ def pagina_gama():
             try:
                 result = _fetch_ewz_gamma_cached()
                 st.session_state["ewz_gamma_data"] = result
+                from execution.gamma_history import make_gamma_snapshot, merge_gamma_snapshots
+
+                history, _ = _load_ewz_gamma_history()
+                observed_at = datetime.now(timezone.utc).isoformat()
+                snapshot = make_gamma_snapshot(result, observed_at)
+                history = merge_gamma_snapshots(history, snapshot)
+                history_store, history_warning = _save_ewz_gamma_history(history)
+                st.session_state["ewz_gamma_history"] = history
+                st.session_state["ewz_gamma_history_store"] = history_store
+                st.session_state["ewz_gamma_history_warning"] = history_warning
             except Exception as exc:
                 st.session_state["ewz_gamma_error"] = str(exc)
             try:
@@ -10231,9 +10269,120 @@ def pagina_gama():
         f"{result.get('source_note', '')}"
     )
 
+    from execution.gamma_history import recent_gamma_snapshots
+
+    stored_history = st.session_state.get("ewz_gamma_history")
+    history_store = st.session_state.get("ewz_gamma_history_store")
+    if stored_history is None:
+        stored_history, history_store = _load_ewz_gamma_history()
+        st.session_state["ewz_gamma_history"] = stored_history
+        st.session_state["ewz_gamma_history_store"] = history_store
+    options_frame = result.get("options", pd.DataFrame()).copy()
+    calls = options_frame[options_frame["side"] == "call"] if not options_frame.empty else options_frame
+    puts = options_frame[options_frame["side"] == "put"] if not options_frame.empty else options_frame
+    total_oi = float(options_frame["open_interest"].sum()) if not options_frame.empty else 0.0
+    total_volume = float(options_frame["volume"].sum()) if not options_frame.empty and "volume" in options_frame else 0.0
+    volume_oi_pct = total_volume / total_oi * 100 if total_oi else 0.0
+    nearest_call = float(calls["open_interest"].sum()) if not calls.empty else 0.0
+    nearest_put = float(puts["open_interest"].sum()) if not puts.empty else 0.0
+    oi_put_call = nearest_put / nearest_call if nearest_call else None
+    distance_flip = ((float(flip) / spot) - 1) * 100 if flip else None
+
+    with st.container(border=True):
+        st.markdown("#### Leitura rápida · estrutura de opções EWZ")
+        read_cols = st.columns([1.05, 1, 1, 1])
+        read_cols[0].markdown(f"**Regime modelado**\n\n{'GEX positivo · hedge pode amortecer oscilações' if net_gex >= 0 else 'GEX negativo · hedge pode ampliar oscilações'}")
+        read_cols[1].markdown(f"**Flip estimado**\n\n{f'${float(flip):.2f} · {distance_flip:+.2f}% do spot' if flip and distance_flip is not None else 'Sem cruzamento no intervalo calculado'}")
+        read_cols[2].markdown(f"**OI puts / calls**\n\n{f'{oi_put_call:.2f}x' if oi_put_call is not None else 'Sem base suficiente'} · estoque agregado, não fluxo direcional")
+        read_cols[3].markdown(f"**Volume / OI**\n\n{volume_oi_pct:.1f}% · atividade observada na cadeia consultada")
+        if result.get("zero_dte_available"):
+            st.caption(f"Há série 0DTE no snapshot. GEX 0DTE: ${result['gex_0dte_usd_1pct'] / 1e6:,.1f} mi; OI ainda pode ser do pregão anterior.")
+        else:
+            st.caption("Sem vencimento 0DTE confirmado pela cadeia atual do Yahoo; não inferimos o dado a partir de outro vencimento.")
+    history_rows = recent_gamma_snapshots(stored_history, 5)
+    history_caption = f"Histórico próprio: {len(history_rows)} de 5 pregões registrados · armazenamento {history_store or 'não identificado'}. Ele começa quando atualizamos a cadeia; não há recuperação retroativa gratuita da cadeia completa."
+    st.caption(history_caption)
+    if st.session_state.get("ewz_gamma_history_warning"):
+        st.caption(f"Histórico: {st.session_state['ewz_gamma_history_warning']}")
+
     strike_data = result["by_strike"]
     profile_data = result["profile"]
-    tab_tradingview, tab_intraday, tab_price, tab_zones, tab_scenarios, tab_contracts = st.tabs(["TradingView · EWZ", "Perfil GEX + preço", "Fechamentos + zonas", "GEX por strike", "Cenários", "Séries"])
+    tab_overview, tab_intraday, tab_history, tab_chain, tab_zones, tab_scenarios, tab_price, tab_tradingview = st.tabs(["Visão geral", "Intraday + níveis", "Histórico GEX", "Cadeia + IV", "Perfil por strike", "Cenários", "Preço + níveis", "TradingView"])
+
+    with tab_overview:
+        overview_cols = st.columns([1.2, 1])
+        with overview_cols[0]:
+            st.markdown("##### Mapa de níveis")
+            levels_rows = []
+            for label, item, side in (
+                ("Call wall estimada", result.get("call_wall"), "potencial concentração de calls"),
+                ("Gamma flip estimado", {"strike": flip} if flip else None, "transição do GEX modelado"),
+                ("Put wall estimada", result.get("put_wall"), "potencial concentração de puts"),
+            ):
+                level = (item or {}).get("strike")
+                if level:
+                    levels_rows.append({"Nível": label, "Preço": f"${float(level):.2f}", "Distância do spot": f"{(float(level) / spot - 1) * 100:+.2f}%", "Leitura": side})
+            if levels_rows:
+                st.dataframe(pd.DataFrame(levels_rows), hide_index=True, use_container_width=True)
+            else:
+                st.info("A cadeia não formou níveis de concentração confiáveis.")
+        with overview_cols[1]:
+            st.markdown("##### Vencimentos no modelo")
+            expiry_view = result["by_expiration"].copy()
+            expiry_view["gex_usd_1pct"] = expiry_view["gex_usd_1pct"] / 1e6
+            expiry_view = expiry_view.rename(columns={"expiration": "Vencimento", "gex_usd_1pct": "GEX / 1% (US$ mi)", "open_interest": "OI"})
+            st.dataframe(expiry_view, hide_index=True, use_container_width=True)
+        st.markdown("##### Como interpretar")
+        st.markdown(
+            "- **GEX positivo/negativo** descreve a convenção hipotética de hedge; não prevê direção.\n"
+            "- **Call/put wall e flip** são níveis calculados da cadeia atual e mudam quando OI, IV, spot ou vencimentos mudam.\n"
+            "- **Volume/OI** mede atividade relativa, mas não informa sozinho compra/venda, abertura/fechamento ou agressor.\n"
+            "- Use a reação do preço, liquidez e contexto macro como confirmação independente."
+        )
+
+    with tab_history:
+        st.markdown("#### Evolução dos últimos pregões registrados")
+        if not history_rows:
+            st.info("Ainda não há histórico. Atualize a cadeia em pregões diferentes para começar a formar a série; o Yahoo não fornece aqui a cadeia completa retroativa.")
+        else:
+            history_df = pd.DataFrame(history_rows).sort_values("market_date")
+            hist_fig = make_subplots(specs=[[{"secondary_y": True}]])
+            hist_fig.add_trace(go.Bar(x=history_df["market_date"], y=history_df["net_gex_usd_1pct"].astype(float) / 1e6, name="GEX líquido / 1% (US$ mi)", marker_color=["#21C997" if float(value) >= 0 else "#FF5A67" for value in history_df["net_gex_usd_1pct"]]))
+            hist_fig.add_trace(go.Scatter(x=history_df["market_date"], y=history_df["spot"], name="EWZ spot (US$)", mode="lines+markers", line=dict(color="#F5C451", width=2)), secondary_y=True)
+            hist_fig.update_layout(template="plotly_dark", title="Snapshot diário · GEX modelado e EWZ", height=400, margin=dict(l=15, r=15, t=50, b=15), hovermode="x unified")
+            hist_fig.update_yaxes(title_text="GEX / 1% (US$ mi)", secondary_y=False)
+            hist_fig.update_yaxes(title_text="EWZ (US$)", secondary_y=True)
+            st.plotly_chart(hist_fig, use_container_width=True, config={"displayModeBar": False})
+            history_table = history_df[["market_date", "spot", "net_gex_usd_1pct", "gamma_flip", "call_wall", "put_wall", "option_count", "source"]].copy()
+            history_table["net_gex_usd_1pct"] = history_table["net_gex_usd_1pct"].map(lambda value: f"${float(value) / 1e6:,.2f} mi")
+            for column in ("spot", "gamma_flip", "call_wall", "put_wall"):
+                history_table[column] = history_table[column].map(lambda value: f"${float(value):.2f}" if value is not None and pd.notna(value) else "—")
+            history_table = history_table.rename(columns={"market_date": "Pregão", "spot": "EWZ", "net_gex_usd_1pct": "GEX / 1%", "gamma_flip": "Flip", "call_wall": "Call wall", "put_wall": "Put wall", "option_count": "Séries", "source": "Fonte"})
+            st.dataframe(history_table, hide_index=True, use_container_width=True)
+
+    with tab_chain:
+        st.markdown("#### Cadeia atual · Yahoo Finance")
+        st.caption("Snapshot da consulta atual; não é histórico de negócios. OI pode ter defasagem, volume não identifica agressor e Greeks/GEX são estimados localmente.")
+        chain = options_frame.copy()
+        if chain.empty:
+            st.info("A cadeia atual não contém contratos utilizáveis.")
+        else:
+            chain["volume_oi_pct"] = np.where(chain["open_interest"] > 0, chain["volume"] / chain["open_interest"] * 100, np.nan)
+            chain["gex_millions"] = chain["signed_gex"] / 1e6
+            expiry_options = sorted(chain["expiration"].astype(str).unique())
+            chosen_expiry = st.selectbox("Vencimento", expiry_options, key="ewz_gamma_chain_expiry")
+            chain = chain[chain["expiration"].astype(str) == chosen_expiry].copy()
+            chain = chain.rename(columns={"side": "Lado", "strike": "Strike", "bid": "Bid", "ask": "Ask", "last_trade_date": "Último negócio", "open_interest": "Open interest", "volume": "Volume", "volume_oi_pct": "Volume / OI %", "iv": "IV (fonte)", "gamma": "Gamma estimada", "gex_millions": "GEX / 1% (US$ mi)"})
+            chain["Lado"] = chain["Lado"].str.upper()
+            st.dataframe(chain[["Lado", "Strike", "Bid", "Ask", "Volume", "Open interest", "Volume / OI %", "IV (fonte)", "Gamma estimada", "GEX / 1% (US$ mi)", "Último negócio"]], hide_index=True, use_container_width=True)
+            iv_fig = go.Figure()
+            for side, color in (("call", "#21C997"), ("put", "#A879FF")):
+                side_frame = options_frame[(options_frame["expiration"].astype(str) == chosen_expiry) & (options_frame["side"] == side)]
+                if not side_frame.empty:
+                    iv_fig.add_trace(go.Scatter(x=side_frame["strike"], y=side_frame["iv"] * 100, mode="lines+markers", name=side.title(), line=dict(color=color, width=2)))
+            iv_fig.add_vline(x=spot, line_color="#F5C451", line_dash="dot", annotation_text="Spot")
+            iv_fig.update_layout(template="plotly_dark", title=f"Volatilidade implícita por strike · {chosen_expiry}", xaxis_title="Strike (US$)", yaxis_title="IV (%)", height=360, margin=dict(l=15, r=15, t=50, b=15))
+            st.plotly_chart(iv_fig, use_container_width=True, config={"displayModeBar": False})
 
     with tab_tradingview:
         st.caption("Gráfico nativo do TradingView · EWZ (NYSE American) · linha · intervalo de 5 min · janela de 5 dias.")
@@ -10528,13 +10677,6 @@ def pagina_gama():
         curve.update_layout(template="plotly_dark", title="Como o GEX estimado muda em cenários de preço", xaxis_title="Preço hipotético do EWZ", yaxis_title="GEX (US$ milhões / 1%)", height=420, margin=dict(l=20, r=20, t=55, b=20))
         st.plotly_chart(curve, use_container_width=True, config={"displayModeBar": False})
         st.caption("Curva de cenário recalcula gamma via Black-Scholes usando IV e prazo informados pela fonte; é uma aproximação, especialmente para opções americanas e vencimento no mesmo dia.")
-    with tab_contracts:
-        expiries = result["by_expiration"].copy()
-        expiries["gex_usd_1pct"] = expiries["gex_usd_1pct"].map(lambda value: f"${value / 1e6:,.2f} mi")
-        expiries["open_interest"] = expiries["open_interest"].map(lambda value: f"{value:,.0f}")
-        st.dataframe(expiries.rename(columns={"expiration": "Vencimento", "gex_usd_1pct": "GEX / 1%", "open_interest": "Open interest"}), hide_index=True, use_container_width=True)
-        top = strike_data.assign(abs_gex=strike_data["gex_usd_1pct"].abs()).nlargest(20, "abs_gex").drop(columns="abs_gex")
-        st.dataframe(top.rename(columns={"strike": "Strike", "gex_usd_1pct": "GEX / 1% (US$)", "call_gex": "Calls (US$)", "put_gex": "Puts (US$)", "open_interest": "Open interest"}), hide_index=True, use_container_width=True)
     if result.get("notes"):
         with st.expander("Cobertura e avisos da fonte"):
             for note in result["notes"]:

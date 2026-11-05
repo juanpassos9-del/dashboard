@@ -381,6 +381,10 @@ def build_gamma_exposure(
                 "expiration": expiry.isoformat(),
                 "open_interest_date": str(row.get("openInterestDate") or row.get("date") or "")[:10],
                 "confidence": str(row.get("confidence") or "unknown"),
+                "volume": float(row.get("volume") or 0),
+                "bid": float(row.get("bid") or 0),
+                "ask": float(row.get("ask") or 0),
+                "last_trade_date": str(row.get("lastTradeDate") or ""),
             })
         except (KeyError, TypeError, ValueError, OverflowError):
             continue

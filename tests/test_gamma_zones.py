@@ -6,6 +6,7 @@ import pytest
 
 from execution import gamma_zones
 from execution.gamma_zones import build_gamma_exposure, build_price_zone_levels, fetch_ewz_daily_history, fetch_ewz_intraday_bars, fetch_ewz_options
+from execution.gamma_history import make_gamma_snapshot, merge_gamma_snapshots, recent_gamma_snapshots
 
 
 def _option(symbol, side, strike, expiry, oi, *, iv=0.35, spot=100.0):
@@ -246,3 +247,47 @@ def test_missing_yahoo_and_brapi_key_returns_clear_message(monkeypatch):
         fetch_ewz_options("")
     assert "Yahoo timeout" in str(error.value)
     assert "preços intraday continuam acessíveis" in str(error.value)
+
+
+def test_gamma_history_replaces_same_day_and_keeps_latest_five():
+    history = []
+    for day in range(1, 7):
+        snapshot = make_gamma_snapshot({
+            "market_date": f"2026-11-{day:02d}",
+            "spot": 50 + day,
+            "net_gex_usd_1pct": day * 1e6,
+            "option_count": 40,
+        }, f"2026-11-{day:02d}T21:00:00+00:00")
+        history = merge_gamma_snapshots(history, snapshot)
+
+    replacement = make_gamma_snapshot({
+        "market_date": "2026-11-06",
+        "spot": 60,
+        "net_gex_usd_1pct": 9e6,
+        "option_count": 42,
+    }, "2026-11-06T22:00:00+00:00")
+    history = merge_gamma_snapshots(history, replacement)
+
+    recent = recent_gamma_snapshots(history, 5)
+    assert len(history) == 6
+    assert len(recent) == 5
+    assert recent[-1]["spot"] == 60
+    assert recent[-1]["net_gex_usd_1pct"] == 9e6
+
+
+def test_gamma_snapshot_keeps_only_compact_headline_fields():
+    snapshot = make_gamma_snapshot({
+        "market_date": "2026-11-05",
+        "spot": 50,
+        "net_gex_usd_1pct": -2500000,
+        "gamma_flip": 51.2,
+        "call_wall": {"strike": 55},
+        "put_wall": {"strike": 48},
+        "option_count": 250,
+        "expiration_count": 4,
+        "options": [{"symbol": "EWZ"}],
+    }, "2026-11-05T21:00:00+00:00")
+
+    assert snapshot["gamma_flip"] == 51.2
+    assert snapshot["call_wall"] == 55
+    assert "options" not in snapshot
