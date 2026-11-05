@@ -176,6 +176,52 @@ def fetch_ewz_yahoo_options(as_of: date | None = None, max_expirations: int = 8)
     return result
 
 
+def fetch_ewz_daily_history(period: str = "1y", as_of: date | None = None) -> dict[str, Any]:
+    """Return completed daily EWZ bars and the most recent regular-session close."""
+    market_date = as_of or datetime.now(NEW_YORK).date()
+    now_ny = datetime.now(NEW_YORK)
+    history = yf.Ticker("EWZ").history(period=period, interval="1d", auto_adjust=False, actions=False)
+    if history is None or history.empty or "Close" not in history:
+        raise ValueError("Yahoo não retornou histórico diário de fechamento do EWZ.")
+    frame = history.dropna(subset=["Close"]).copy()
+    index = pd.DatetimeIndex(pd.to_datetime(frame.index))
+    if index.tz is None:
+        index = index.tz_localize(NEW_YORK)
+    else:
+        index = index.tz_convert(NEW_YORK)
+    frame.index = index
+    if frame.index[-1].date() == market_date and now_ny.date() == market_date and now_ny.hour < 16 and len(frame) > 1:
+        frame = frame.iloc[:-1]
+    if frame.empty:
+        raise ValueError("Não há pregão completo no histórico diário do EWZ.")
+    return {
+        "history": frame.tail(260),
+        "last_close": float(frame["Close"].iloc[-1]),
+        "last_close_date": frame.index[-1].date().isoformat(),
+        "source": "Yahoo Finance · histórico diário",
+    }
+
+
+def build_price_zone_levels(gex_result: dict[str, Any], reference_price: float, max_per_side: int = 3) -> dict[str, list[dict[str, float]]]:
+    """Select nearby net-positive (damping) and net-negative (amplification) strikes."""
+    strikes = gex_result.get("by_strike")
+    if not isinstance(strikes, pd.DataFrame) or strikes.empty or reference_price <= 0:
+        return {"defense": [], "acceleration": []}
+    frame = strikes.copy()
+    frame["distance_pct"] = (frame["strike"] / reference_price - 1).abs() * 100
+    frame = frame[frame["distance_pct"] <= 18]
+    positive = frame[frame["gex_usd_1pct"] > 0].nlargest(max_per_side, "gex_usd_1pct")
+    negative = frame[frame["gex_usd_1pct"] < 0].nsmallest(max_per_side, "gex_usd_1pct")
+
+    def rows(data: pd.DataFrame) -> list[dict[str, float]]:
+        return [
+            {"price": float(row.strike), "gex_usd_1pct": float(row.gex_usd_1pct)}
+            for row in data.itertuples(index=False)
+        ]
+
+    return {"defense": rows(positive), "acceleration": rows(negative)}
+
+
 def fetch_ewz_options(api_key: str = "", as_of: date | None = None, max_expirations: int = 8) -> dict[str, Any]:
     """Prefer Yahoo's free chain; fall back to brapi when Yahoo is unavailable."""
     try:

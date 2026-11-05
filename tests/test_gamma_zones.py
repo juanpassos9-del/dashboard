@@ -1,11 +1,11 @@
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
 from execution import gamma_zones
-from execution.gamma_zones import build_gamma_exposure, fetch_ewz_options
+from execution.gamma_zones import build_gamma_exposure, build_price_zone_levels, fetch_ewz_daily_history, fetch_ewz_options
 
 
 def _option(symbol, side, strike, expiry, oi, *, iv=0.35, spot=100.0):
@@ -63,6 +63,41 @@ def test_gex_flip_is_interpolated_from_scenario_curve():
 
     assert result["gamma_flip"] is not None
     assert 75 <= result["gamma_flip"] <= 125
+
+
+def test_price_overlay_separates_defense_and_acceleration_strikes():
+    rows = [
+        _option("EWZC101", "call", 101, "2026-11-19", 3000),
+        _option("EWZP99", "put", 99, "2026-11-19", 4000),
+        _option("EWZC130", "call", 130, "2026-11-19", 9999),
+    ]
+    exposure = build_gamma_exposure(rows, market_date=date(2026, 11, 5))
+
+    zones = build_price_zone_levels(exposure, reference_price=100)
+
+    assert [item["price"] for item in zones["defense"]] == [101]
+    assert [item["price"] for item in zones["acceleration"]] == [99]
+
+
+def test_daily_history_excludes_incomplete_current_session(monkeypatch):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 11, 5, 10, 0, tzinfo=tz)
+
+    class FakeTicker:
+        def history(self, **kwargs):
+            return pd.DataFrame(
+                {"Close": [30.0, 31.0, 32.0]},
+                index=pd.to_datetime(["2026-11-03", "2026-11-04", "2026-11-05"]),
+            )
+
+    monkeypatch.setattr(gamma_zones.yf, "Ticker", lambda symbol: FakeTicker())
+    monkeypatch.setattr(gamma_zones, "datetime", FrozenDateTime)
+    result = fetch_ewz_daily_history(as_of=date(2026, 11, 5))
+
+    assert result["last_close"] == 31.0
+    assert result["last_close_date"] == "2026-11-04"
 
 
 def test_invalid_or_missing_open_interest_rows_are_excluded():

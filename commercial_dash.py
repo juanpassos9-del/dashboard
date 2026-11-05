@@ -10037,6 +10037,30 @@ def _fetch_ewz_gamma_cached():
     return fetch_ewz_options(api_key)
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _fetch_ewz_daily_history_cached():
+    from execution.gamma_zones import fetch_ewz_daily_history
+
+    return fetch_ewz_daily_history(period="1y")
+
+
+def _get_dashboard_ewz_snapshot():
+    payload = fetch_app_state_cached("mercados_globais") or get_global_markets_data() or {}
+    categories = payload.get("categories", {}) if isinstance(payload, dict) else {}
+    for items in categories.values():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if str(item.get("symbol", "")).upper() == "EWZ" or str(item.get("ticker", "")).upper() == "EWZ":
+                return {
+                    "price": item.get("price"),
+                    "previous_close": item.get("prev_close") or item.get("previous_close"),
+                    "source": item.get("source") or "motor de cotações",
+                    "timestamp": item.get("source_timestamp") or item.get("updated_at"),
+                }
+    return {}
+
+
 def pagina_gama():
     """EWZ options gamma map, clearly labeled as a daily heuristic estimate."""
     import numpy as np
@@ -10056,14 +10080,23 @@ def pagina_gama():
         st.caption("Ativo: EWZ · Principal: Yahoo Finance (sem chave) · fallback opcional: brapi com BRAPI_API_KEY e acesso Pro.")
     if load:
         _fetch_ewz_gamma_cached.clear()
+        _fetch_ewz_daily_history_cached.clear()
         st.session_state.pop("ewz_gamma_data", None)
         st.session_state.pop("ewz_gamma_error", None)
+        st.session_state.pop("ewz_gamma_price_history", None)
+        st.session_state.pop("ewz_gamma_quote", None)
+        st.session_state.pop("ewz_gamma_history_error", None)
         with st.spinner("Consultando vencimentos e gregas do EWZ..."):
             try:
                 result = _fetch_ewz_gamma_cached()
                 st.session_state["ewz_gamma_data"] = result
             except Exception as exc:
                 st.session_state["ewz_gamma_error"] = str(exc)
+            try:
+                st.session_state["ewz_gamma_price_history"] = _fetch_ewz_daily_history_cached()
+                st.session_state["ewz_gamma_quote"] = _get_dashboard_ewz_snapshot()
+            except Exception as exc:
+                st.session_state["ewz_gamma_history_error"] = str(exc)
     if st.session_state.get("ewz_gamma_error"):
         st.error(f"Não foi possível calcular o GEX: {st.session_state['ewz_gamma_error']}")
     result = st.session_state.get("ewz_gamma_data")
@@ -10103,7 +10136,95 @@ def pagina_gama():
 
     strike_data = result["by_strike"]
     profile_data = result["profile"]
-    tab_zones, tab_scenarios, tab_contracts = st.tabs(["Zonas por strike", "Cenários de preço", "Séries e vencimentos"])
+    tab_price, tab_zones, tab_scenarios, tab_contracts = st.tabs(["Preço + zonas", "GEX por strike", "Cenários de preço", "Séries e vencimentos"])
+    with tab_price:
+        price_bundle = st.session_state.get("ewz_gamma_price_history") or {}
+        price_history = price_bundle.get("history")
+        if price_history is None or price_history.empty:
+            st.warning(f"Histórico de preço indisponível: {st.session_state.get('ewz_gamma_history_error', 'carregue os dados novamente para tentar buscar o histórico diário.')}")
+        else:
+            from execution.gamma_zones import build_price_zone_levels
+
+            last_close = float(price_bundle["last_close"])
+            motor_quote = st.session_state.get("ewz_gamma_quote") or {}
+            zones = build_price_zone_levels(result, last_close)
+            x_start = price_history.index[0]
+            x_end = price_history.index[-1]
+            price_fig = go.Figure()
+            price_fig.add_trace(go.Scatter(
+                x=price_history.index, y=price_history["Close"], mode="lines", name="Fechamento diário EWZ",
+                line=dict(color="#E5EAF2", width=2),
+                hovertemplate="%{x|%d/%m/%Y}<br>Fechamento: $%{y:.2f}<extra></extra>",
+            ))
+
+            def add_horizontal_level(value, name, color, dash, hover_label=None):
+                if value is None or not np.isfinite(float(value)):
+                    return
+                price_fig.add_trace(go.Scatter(
+                    x=[x_start, x_end], y=[float(value), float(value)], mode="lines", name=name,
+                    line=dict(color=color, width=1.7, dash=dash),
+                    hovertemplate=f"{hover_label or name}: $%{{y:.2f}}<extra></extra>",
+                ))
+
+            add_horizontal_level(last_close, f"Último fechamento · ${last_close:.2f}", "#F5C451", "solid")
+            dashboard_price = motor_quote.get("price")
+            try:
+                dashboard_price = float(dashboard_price)
+            except (TypeError, ValueError):
+                dashboard_price = None
+            if dashboard_price and abs(dashboard_price / last_close - 1) > 0.0005:
+                add_horizontal_level(dashboard_price, f"Motor agora · ${dashboard_price:.2f}", "#9AA7B8", "dot", "Cotação do motor")
+            add_horizontal_level(result.get("gamma_flip"), "Gamma flip estimado", "#B49AFF", "dash")
+            for wall_key, wall_name, wall_color in (("call_wall", "Call wall estimada", "#F5A742"), ("put_wall", "Put wall estimada", "#F27886")):
+                wall = result.get(wall_key) or {}
+                add_horizontal_level(wall.get("strike"), wall_name, wall_color, "dashdot")
+
+            for zone_key, zone_name, zone_color in (
+                ("defense", "Defesa / amortecimento potencial · GEX +", "#21C997"),
+                ("acceleration", "Aceleração potencial · GEX -", "#FF5A67"),
+            ):
+                zone_levels = zones[zone_key]
+                if not zone_levels:
+                    continue
+                zone_x, zone_y, zone_hover = [], [], []
+                for zone in zone_levels:
+                    band_half_width = zone["price"] * 0.0035
+                    band_fill = "rgba(33,201,151,0.12)" if zone_key == "defense" else "rgba(255,90,103,0.12)"
+                    price_fig.add_hrect(
+                        y0=zone["price"] - band_half_width,
+                        y1=zone["price"] + band_half_width,
+                        fillcolor=band_fill,
+                        line_width=0,
+                        layer="below",
+                    )
+                    zone_x.extend([x_start, x_end, None])
+                    zone_y.extend([zone["price"], zone["price"], None])
+                    zone_hover.extend([
+                        f"{zone_name}<br>Strike ${zone['price']:.2f}<br>GEX/1% ${zone['gex_usd_1pct'] / 1e6:.2f} mi",
+                        f"{zone_name}<br>Strike ${zone['price']:.2f}<br>GEX/1% ${zone['gex_usd_1pct'] / 1e6:.2f} mi",
+                        "",
+                    ])
+                price_fig.add_trace(go.Scatter(
+                    x=zone_x, y=zone_y, mode="lines", name=zone_name,
+                    line=dict(color=zone_color, width=1.5, dash="dot"), connectgaps=False,
+                    text=zone_hover, hovertemplate="%{text}<extra></extra>",
+                ))
+
+            price_fig.update_layout(
+                template="plotly_dark", title="EWZ · último fechamento e níveis estimados da cadeia de opções",
+                xaxis_title="Pregão", yaxis_title="Preço do EWZ (US$)", height=560,
+                margin=dict(l=20, r=20, t=58, b=20), hovermode="x unified",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+            )
+            price_fig.update_xaxes(rangeslider_visible=True)
+            st.plotly_chart(price_fig, use_container_width=True, config={"displayModeBar": True, "scrollZoom": True})
+            st.caption(
+                f"Último fechamento completo: ${last_close:.2f} em {price_bundle.get('last_close_date')} · "
+                f"{price_bundle.get('source', 'histórico diário')} · cotação do motor: "
+                f"${dashboard_price:.2f}" if dashboard_price else
+                f"Último fechamento completo: ${last_close:.2f} em {price_bundle.get('last_close_date')} · {price_bundle.get('source', 'histórico diário')} · cotação atual do motor indisponível."
+            )
+            st.caption("GEX + = hipótese de amortecimento/defesa; GEX - = hipótese de aceleração. Os strikes são níveis fixos da cadeia consultada, não suportes ou resistências garantidos.")
     with tab_zones:
         fig = go.Figure()
         colors = ["#21C997" if value >= 0 else "#FF5A67" for value in strike_data["gex_usd_1pct"]]
