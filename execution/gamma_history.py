@@ -12,6 +12,7 @@ def make_gamma_snapshot(result: dict[str, Any], observed_at: str) -> dict[str, A
     """Keep only reproducible headline values, not the full options chain."""
     market_date = str(result.get("market_date") or result.get("as_of") or observed_at)[:10]
     return {
+        "underlying": str(result.get("underlying") or "EWZ").upper(),
         "market_date": market_date,
         "observed_at": observed_at,
         "spot": _number(result.get("spot")),

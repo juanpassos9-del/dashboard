@@ -17,6 +17,8 @@ load_dotenv()
 
 BRAPI_BASE = "https://brapi.dev/api/v2/options"
 NEW_YORK = ZoneInfo("America/New_York")
+SUPPORTED_UNDERLYINGS = {"EWZ", "QQQ"}
+DIVIDEND_YIELD_ASSUMPTIONS = {"EWZ": 0.03, "QQQ": 0.006}
 
 
 def _get_yfinance():
@@ -105,15 +107,18 @@ def fetch_ewz_brapi_options(api_key: str, as_of: date | None = None, max_expirat
     return result
 
 
-def fetch_ewz_yahoo_options(as_of: date | None = None, max_expirations: int = 8) -> dict[str, Any]:
-    """Fetch Yahoo chains and calculate option gamma locally from IV."""
+def fetch_yahoo_options(underlying: str = "EWZ", as_of: date | None = None, max_expirations: int = 8) -> dict[str, Any]:
+    """Fetch a supported Yahoo chain and calculate option gamma locally from IV."""
+    underlying = str(underlying).upper()
+    if underlying not in SUPPORTED_UNDERLYINGS:
+        raise ValueError(f"Ativo não suportado no Gama: {underlying}.")
     market_date = as_of or datetime.now(NEW_YORK).date()
     ticker = None
     yahoo_expirations = ()
     yahoo_request_error = None
     for attempt in range(2):
         try:
-            ticker = _get_yfinance().Ticker("EWZ")
+            ticker = _get_yfinance().Ticker(underlying)
             yahoo_expirations = tuple(ticker.options or ())
             yahoo_request_error = None
         except Exception as exc:
@@ -126,8 +131,8 @@ def fetch_ewz_yahoo_options(as_of: date | None = None, max_expirations: int = 8)
     if not yahoo_expirations:
         if yahoo_request_error:
             detail = str(yahoo_request_error).strip().replace("\n", " ")[:180] or type(yahoo_request_error).__name__
-            raise RuntimeError(f"Yahoo não respondeu à cadeia do EWZ após duas consultas: {detail}") from None
-        raise ValueError("Yahoo retornou a cadeia do EWZ sem datas de vencimento após duas consultas.")
+            raise RuntimeError(f"Yahoo não respondeu à cadeia do {underlying} após duas consultas: {detail}") from None
+        raise ValueError(f"Yahoo retornou a cadeia do {underlying} sem datas de vencimento após duas consultas.")
     expirations = []
     for value in yahoo_expirations:
         try:
@@ -141,18 +146,18 @@ def fetch_ewz_yahoo_options(as_of: date | None = None, max_expirations: int = 8)
         valid_dates = sorted(str(value)[:10] for value in yahoo_expirations if str(value)[:10] >= market_date.isoformat())
         next_expiry = valid_dates[0] if valid_dates else "nenhum vencimento futuro listado"
         raise ValueError(
-            f"Yahoo listou {next_expiry} como próximo vencimento, fora da janela de 12 meses a partir de {market_date.isoformat()}."
+            f"Yahoo listou {next_expiry} como próximo vencimento do {underlying}, fora da janela de 12 meses a partir de {market_date.isoformat()}."
         )
 
     rows: list[dict[str, Any]] = []
     spot = None
     for expiry in expirations:
         chain = ticker.option_chain(expiry.isoformat())
-        underlying = getattr(chain, "underlying", None) or {}
+        underlying_quote = getattr(chain, "underlying", None) or {}
         if spot is None:
             for key in ("regularMarketPrice", "currentPrice", "regularMarketPreviousClose"):
                 try:
-                    candidate = float(underlying.get(key) or 0)
+                    candidate = float(underlying_quote.get(key) or 0)
                 except (TypeError, ValueError):
                     continue
                 if candidate > 0:
@@ -184,8 +189,8 @@ def fetch_ewz_yahoo_options(as_of: date | None = None, max_expirations: int = 8)
                     "impliedVolatility": iv,
                     "timeToExpirationYears": years,
                     "riskFreeRate": 0.04,
-                    "dividendYield": 0.03,
-                    "gamma": _bs_gamma(spot, strike, years, iv, 0.04, 0.03) if spot else 0,
+                    "dividendYield": DIVIDEND_YIELD_ASSUMPTIONS[underlying],
+                    "gamma": _bs_gamma(spot, strike, years, iv, 0.04, DIVIDEND_YIELD_ASSUMPTIONS[underlying]) if spot else 0,
                     "expirationDate": expiry.isoformat(),
                     "openInterestDate": "",
                     "confidence": "estimated from Yahoo IV",
@@ -195,25 +200,32 @@ def fetch_ewz_yahoo_options(as_of: date | None = None, max_expirations: int = 8)
                     "lastTradeDate": str(contract.get("lastTradeDate") or ""),
                 })
     if not spot or not rows:
-        raise ValueError("Yahoo não retornou spot, IV e open interest utilizáveis para o EWZ.")
-    result = build_gamma_exposure(rows, as_of=market_date.isoformat(), market_date=market_date)
+        raise ValueError(f"Yahoo não retornou spot, IV e open interest utilizáveis para o {underlying}.")
+    result = build_gamma_exposure(rows, as_of=market_date.isoformat(), market_date=market_date, underlying=underlying)
     result["expirations_requested"] = [item.isoformat() for item in expirations]
-    result["source"] = "Yahoo Finance via yfinance · cadeia de opções"
+    result["source"] = f"Yahoo Finance via yfinance · cadeia de opções · {underlying}"
     result["source_note"] = (
         "Yahoo pode fornecer cotações com atraso; open interest pode refletir a sessão anterior. "
-        "Gamma calculada localmente por Black-Scholes com taxa livre de risco de 4% e dividend yield de 3% assumidos."
+        f"Gamma calculada localmente por Black-Scholes com taxa livre de risco de 4% e dividend yield de {DIVIDEND_YIELD_ASSUMPTIONS[underlying] * 100:.1f}% assumidos."
     )
     result["notes"] = [result["source_note"]]
     return result
 
 
-def fetch_ewz_daily_history(period: str = "1y", as_of: date | None = None) -> dict[str, Any]:
-    """Return completed daily EWZ bars and the most recent regular-session close."""
+def fetch_ewz_yahoo_options(as_of: date | None = None, max_expirations: int = 8) -> dict[str, Any]:
+    return fetch_yahoo_options("EWZ", as_of=as_of, max_expirations=max_expirations)
+
+
+def fetch_underlying_daily_history(underlying: str = "EWZ", period: str = "1y", as_of: date | None = None) -> dict[str, Any]:
+    """Return completed daily bars and the most recent regular-session close."""
+    underlying = str(underlying).upper()
+    if underlying not in SUPPORTED_UNDERLYINGS:
+        raise ValueError(f"Ativo não suportado no Gama: {underlying}.")
     market_date = as_of or datetime.now(NEW_YORK).date()
     now_ny = datetime.now(NEW_YORK)
-    history = _fetch_yahoo_chart_frame(interval="1d", period=period)
+    history = _fetch_yahoo_chart_frame(underlying=underlying, interval="1d", period=period)
     if history is None or history.empty or "Close" not in history:
-        raise ValueError("Yahoo não retornou histórico diário de fechamento do EWZ.")
+        raise ValueError(f"Yahoo não retornou histórico diário de fechamento do {underlying}.")
     frame = history.dropna(subset=["Close"]).copy()
     index = pd.DatetimeIndex(pd.to_datetime(frame.index))
     if index.tz is None:
@@ -224,18 +236,25 @@ def fetch_ewz_daily_history(period: str = "1y", as_of: date | None = None) -> di
     if frame.index[-1].date() == market_date and now_ny.date() == market_date and now_ny.hour < 16 and len(frame) > 1:
         frame = frame.iloc[:-1]
     if frame.empty:
-        raise ValueError("Não há pregão completo no histórico diário do EWZ.")
+        raise ValueError(f"Não há pregão completo no histórico diário do {underlying}.")
     return {
         "history": frame.tail(260),
         "last_close": float(frame["Close"].iloc[-1]),
         "last_close_date": frame.index[-1].date().isoformat(),
-        "source": "Yahoo Finance · histórico diário",
+        "source": f"Yahoo Finance · histórico diário · {underlying}",
     }
 
 
-def _fetch_yahoo_chart_frame(interval: str, period: str, include_prepost: bool = False) -> pd.DataFrame:
+def fetch_ewz_daily_history(period: str = "1y", as_of: date | None = None) -> dict[str, Any]:
+    return fetch_underlying_daily_history("EWZ", period=period, as_of=as_of)
+
+
+def _fetch_yahoo_chart_frame(underlying: str, interval: str, period: str, include_prepost: bool = False) -> pd.DataFrame:
+    underlying = str(underlying).upper()
+    if underlying not in SUPPORTED_UNDERLYINGS:
+        raise ValueError(f"Ativo não suportado no Gama: {underlying}.")
     response = requests.get(
-        "https://query1.finance.yahoo.com/v8/finance/chart/EWZ",
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{underlying}",
         params={"interval": interval, "range": period, "includePrePost": str(include_prepost).lower(), "events": "history"},
         headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
         timeout=(5, 15),
@@ -244,14 +263,14 @@ def _fetch_yahoo_chart_frame(interval: str, period: str, include_prepost: bool =
     payload = response.json()
     chart = payload.get("chart") or {}
     if chart.get("error"):
-        raise ValueError("Yahoo retornou erro para as barras intradiárias do EWZ.")
+        raise ValueError(f"Yahoo retornou erro para as barras intradiárias do {underlying}.")
     result = (chart.get("result") or [None])[0]
     if not result:
-        raise ValueError("Yahoo não retornou histórico intradiário para EWZ.")
+        raise ValueError(f"Yahoo não retornou histórico intradiário para {underlying}.")
     timestamps = result.get("timestamp") or []
     quote = ((result.get("indicators") or {}).get("quote") or [{}])[0]
     if not timestamps or not quote:
-        raise ValueError("Resposta Yahoo sem candles intradiários para EWZ.")
+        raise ValueError(f"Resposta Yahoo sem candles intradiários para {underlying}.")
     return pd.DataFrame(
         {
             "Open": quote.get("open", []),
@@ -264,13 +283,14 @@ def _fetch_yahoo_chart_frame(interval: str, period: str, include_prepost: bool =
     )
 
 
-def fetch_ewz_intraday_bars(interval: str = "5m", period: str = "5d") -> dict[str, Any]:
-    """Fetch EWZ intraday OHLCV including Yahoo extended-hours bars when available."""
-    frame = _fetch_yahoo_chart_frame(interval=interval, period=period, include_prepost=True)
+def fetch_underlying_intraday_bars(underlying: str = "EWZ", interval: str = "5m", period: str = "5d") -> dict[str, Any]:
+    """Fetch intraday OHLCV including Yahoo extended-hours bars when available."""
+    underlying = str(underlying).upper()
+    frame = _fetch_yahoo_chart_frame(underlying=underlying, interval=interval, period=period, include_prepost=True)
     frame = frame.rename(columns=str.lower)
     frame = frame.dropna(subset=["open", "high", "low", "close"]).sort_index()
     if frame.empty:
-        raise ValueError("Yahoo não retornou candles OHLC completos para EWZ.")
+        raise ValueError(f"Yahoo não retornou candles OHLC completos para {underlying}.")
     frame["volume"] = pd.to_numeric(frame["volume"], errors="coerce").fillna(0.0)
     minutes = np.asarray([stamp.hour * 60 + stamp.minute for stamp in frame.index])
     regular = (minutes >= 9 * 60 + 30) & (minutes < 16 * 60)
@@ -291,7 +311,7 @@ def fetch_ewz_intraday_bars(interval: str = "5m", period: str = "5d") -> dict[st
     frame["vwap_d"] = (cum_value / cum_volume).where(regular)
     return {
         "bars": frame,
-        "source": "Yahoo Finance chart · intraday com horário estendido",
+        "source": f"Yahoo Finance chart · intraday com horário estendido · {underlying}",
         "interval": interval,
         "period": period,
         "last_bar_at": frame.index[-1].isoformat(),
@@ -299,6 +319,10 @@ def fetch_ewz_intraday_bars(interval: str = "5m", period: str = "5d") -> dict[st
         "sessions": sorted(frame["session"].dropna().unique().tolist()),
         "source_note": "Inclui pré e pós-mercado quando o Yahoo disponibiliza. Overnight só aparece se houver barras fornecidas pela fonte; não é garantido.",
     }
+
+
+def fetch_ewz_intraday_bars(interval: str = "5m", period: str = "5d") -> dict[str, Any]:
+    return fetch_underlying_intraday_bars("EWZ", interval=interval, period=period)
 
 
 def build_price_zone_levels(gex_result: dict[str, Any], reference_price: float, max_per_side: int = 3) -> dict[str, list[dict[str, float]]]:
@@ -334,16 +358,19 @@ def normalize_option_snapshot(options: Any) -> tuple[pd.DataFrame, set[str]]:
     return frame, present
 
 
-def fetch_ewz_options(api_key: str = "", as_of: date | None = None, max_expirations: int = 8) -> dict[str, Any]:
-    """Prefer Yahoo's free chain; fall back to brapi when Yahoo is unavailable."""
+def fetch_options(underlying: str = "EWZ", api_key: str = "", as_of: date | None = None, max_expirations: int = 8) -> dict[str, Any]:
+    """Prefer Yahoo; use the existing optional brapi fallback for EWZ only."""
+    underlying = str(underlying).upper()
     try:
-        return fetch_ewz_yahoo_options(as_of=as_of, max_expirations=max_expirations)
+        if underlying == "EWZ":
+            return fetch_ewz_yahoo_options(as_of=as_of, max_expirations=max_expirations)
+        return fetch_yahoo_options(underlying, as_of=as_of, max_expirations=max_expirations)
     except Exception as yahoo_error:
         yahoo_detail = str(yahoo_error).strip().replace("\n", " ")[:220] or type(yahoo_error).__name__
-        if not api_key:
+        if underlying != "EWZ" or not api_key:
             raise ValueError(
-                f"Yahoo não conseguiu carregar as opções do EWZ: {yahoo_detail}. "
-                "Sem BRAPI_API_KEY, o GEX fica indisponível; preços intraday continuam acessíveis."
+                f"Yahoo não conseguiu carregar as opções do {underlying}: {yahoo_detail}. "
+                f"{'QQQ usa Yahoo sem fallback pago.' if underlying == 'QQQ' else 'Sem BRAPI_API_KEY, o GEX fica indisponível; preços intraday continuam acessíveis.'}"
             ) from None
         result = fetch_ewz_brapi_options(api_key, as_of=as_of, max_expirations=max_expirations)
         result["source_note"] = f"Yahoo indisponível ({yahoo_detail}); usando fallback brapi. " + result["source_note"]
@@ -351,11 +378,16 @@ def fetch_ewz_options(api_key: str = "", as_of: date | None = None, max_expirati
         return result
 
 
+def fetch_ewz_options(api_key: str = "", as_of: date | None = None, max_expirations: int = 8) -> dict[str, Any]:
+    return fetch_options("EWZ", api_key=api_key, as_of=as_of, max_expirations=max_expirations)
+
+
 def build_gamma_exposure(
     option_rows: list[dict[str, Any]],
     as_of: str | None = None,
     market_date: date | None = None,
     grid_points: int = 241,
+    underlying: str = "EWZ",
 ) -> dict[str, Any]:
     """Build signed GEX estimates; calls positive / puts negative is an explicit heuristic."""
     normalized = []
@@ -450,7 +482,7 @@ def build_gamma_exposure(
     ).sort_values("expiration")
     profile = pd.DataFrame({"spot_scenario": price_grid, "gex_usd_1pct": curve})
     return {
-        "underlying": "EWZ",
+        "underlying": str(underlying).upper(),
         "spot": spot,
         "as_of": as_of or max(frame["open_interest_date"].dropna().tolist(), default=""),
         "market_date": current_date.isoformat(),

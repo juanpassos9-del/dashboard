@@ -187,6 +187,34 @@ def test_yahoo_is_primary_and_does_not_require_brapi_key(monkeypatch):
     assert result["zero_dte_available"] is True
 
 
+def test_qqq_chain_uses_yahoo_and_returns_asset_specific_gex(monkeypatch):
+    requested = []
+
+    class FakeTicker:
+        options = ("2026-11-12",)
+
+        def option_chain(self, expiry):
+            return _fake_chain(expiry)
+
+    monkeypatch.setattr(gamma_zones, "_get_yfinance", lambda: SimpleNamespace(Ticker=lambda symbol: (requested.append(symbol) or FakeTicker())))
+
+    result = gamma_zones.fetch_options("QQQ", as_of=date(2026, 11, 5))
+
+    assert requested == ["QQQ"]
+    assert result["underlying"] == "QQQ"
+    assert result["option_count"] == 2
+    assert "QQQ" in result["source"]
+    assert result["options"]["dividend"].iloc[0] == pytest.approx(0.006)
+
+
+def test_qqq_does_not_fall_back_to_brapi(monkeypatch):
+    monkeypatch.setattr(gamma_zones, "fetch_yahoo_options", lambda *args, **kwargs: (_ for _ in ()).throw(ConnectionError("Yahoo down")))
+    monkeypatch.setattr(gamma_zones, "fetch_ewz_brapi_options", lambda *args, **kwargs: pytest.fail("Brapi must not be called for QQQ"))
+
+    with pytest.raises(ValueError, match="QQQ usa Yahoo"):
+        gamma_zones.fetch_options("QQQ", api_key="ignored", as_of=date(2026, 11, 5))
+
+
 def test_yahoo_retries_empty_expirations_and_accepts_longer_dated_chain(monkeypatch):
     attempts = {"count": 0}
 
