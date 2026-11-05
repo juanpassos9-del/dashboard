@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from execution import gamma_zones
-from execution.gamma_zones import build_gamma_exposure, build_price_zone_levels, fetch_ewz_daily_history, fetch_ewz_intraday_bars, fetch_ewz_options
+from execution.gamma_zones import build_gamma_exposure, build_price_zone_levels, fetch_ewz_daily_history, fetch_ewz_intraday_bars, fetch_ewz_options, normalize_option_snapshot
 from execution.gamma_history import make_gamma_snapshot, merge_gamma_snapshots, recent_gamma_snapshots
 
 
@@ -291,3 +291,19 @@ def test_gamma_snapshot_keeps_only_compact_headline_fields():
     assert snapshot["gamma_flip"] == 51.2
     assert snapshot["call_wall"] == 55
     assert "options" not in snapshot
+
+
+def test_legacy_option_snapshot_gets_nullable_optional_quote_columns():
+    old_snapshot = pd.DataFrame([{
+        "side": "call",
+        "strike": 50.0,
+        "open_interest": 1200.0,
+    }])
+
+    normalized, originally_present = normalize_option_snapshot(old_snapshot)
+
+    assert "volume" not in originally_present
+    assert pd.isna(normalized.loc[0, "volume"])
+    assert pd.isna(normalized.loc[0, "bid"])
+    assert pd.isna(normalized.loc[0, "ask"])
+    assert normalized.loc[0, "last_trade_date"] == ""

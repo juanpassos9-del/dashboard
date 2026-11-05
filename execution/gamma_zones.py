@@ -321,6 +321,19 @@ def build_price_zone_levels(gex_result: dict[str, Any], reference_price: float, 
     return {"defense": rows(positive), "acceleration": rows(negative)}
 
 
+def normalize_option_snapshot(options: Any) -> tuple[pd.DataFrame, set[str]]:
+    """Add optional quote fields missing from snapshots cached by older app versions."""
+    frame = options.copy() if isinstance(options, pd.DataFrame) else pd.DataFrame()
+    present = set(frame.columns)
+    for column in ("volume", "bid", "ask"):
+        if column not in frame:
+            frame[column] = np.nan
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    if "last_trade_date" not in frame:
+        frame["last_trade_date"] = ""
+    return frame, present
+
+
 def fetch_ewz_options(api_key: str = "", as_of: date | None = None, max_expirations: int = 8) -> dict[str, Any]:
     """Prefer Yahoo's free chain; fall back to brapi when Yahoo is unavailable."""
     try:

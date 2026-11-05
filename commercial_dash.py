@@ -10038,7 +10038,7 @@ def _fetch_terminal_b3_profit_price_cached(symbol: str, ticker: str, period: str
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def _fetch_ewz_gamma_cached():
+def _fetch_ewz_gamma_cached(cache_schema: str = "gamma-chain-v2"):
     from execution.gamma_zones import fetch_ewz_options
 
     api_key = _get_secret_value("BRAPI_API_KEY", "BRAPI_TOKEN")
@@ -10134,7 +10134,7 @@ def pagina_gama():
         st.session_state.pop("ewz_gamma_intraday_error", None)
         with st.spinner("Consultando vencimentos e gregas do EWZ..."):
             try:
-                result = _fetch_ewz_gamma_cached()
+                result = _fetch_ewz_gamma_cached("gamma-chain-v2")
                 st.session_state["ewz_gamma_data"] = result
                 from execution.gamma_history import make_gamma_snapshot, merge_gamma_snapshots
 
@@ -10277,12 +10277,16 @@ def pagina_gama():
         stored_history, history_store = _load_ewz_gamma_history()
         st.session_state["ewz_gamma_history"] = stored_history
         st.session_state["ewz_gamma_history_store"] = history_store
-    options_frame = result.get("options", pd.DataFrame()).copy()
+    from execution.gamma_zones import normalize_option_snapshot
+
+    options_frame, available_option_fields = normalize_option_snapshot(result.get("options"))
+    if "volume" not in available_option_fields:
+        st.info("Este snapshot foi calculado por uma versão anterior e não contém volume/bid/ask. Clique em **Atualizar GEX + intraday** para buscar a cadeia completa.")
     calls = options_frame[options_frame["side"] == "call"] if not options_frame.empty else options_frame
     puts = options_frame[options_frame["side"] == "put"] if not options_frame.empty else options_frame
     total_oi = float(options_frame["open_interest"].sum()) if not options_frame.empty else 0.0
-    total_volume = float(options_frame["volume"].sum()) if not options_frame.empty and "volume" in options_frame else 0.0
-    volume_oi_pct = total_volume / total_oi * 100 if total_oi else 0.0
+    total_volume = float(options_frame["volume"].sum(min_count=1)) if not options_frame.empty else np.nan
+    volume_oi_pct = total_volume / total_oi * 100 if total_oi and np.isfinite(total_volume) else np.nan
     nearest_call = float(calls["open_interest"].sum()) if not calls.empty else 0.0
     nearest_put = float(puts["open_interest"].sum()) if not puts.empty else 0.0
     oi_put_call = nearest_put / nearest_call if nearest_call else None
@@ -10294,7 +10298,7 @@ def pagina_gama():
         read_cols[0].markdown(f"**Regime modelado**\n\n{'GEX positivo · hedge pode amortecer oscilações' if net_gex >= 0 else 'GEX negativo · hedge pode ampliar oscilações'}")
         read_cols[1].markdown(f"**Flip estimado**\n\n{f'${float(flip):.2f} · {distance_flip:+.2f}% do spot' if flip and distance_flip is not None else 'Sem cruzamento no intervalo calculado'}")
         read_cols[2].markdown(f"**OI puts / calls**\n\n{f'{oi_put_call:.2f}x' if oi_put_call is not None else 'Sem base suficiente'} · estoque agregado, não fluxo direcional")
-        read_cols[3].markdown(f"**Volume / OI**\n\n{volume_oi_pct:.1f}% · atividade observada na cadeia consultada")
+        read_cols[3].markdown(f"**Volume / OI**\n\n{f'{volume_oi_pct:.1f}%' if np.isfinite(volume_oi_pct) else 'Indisponível'} · atividade observada na cadeia consultada")
         if result.get("zero_dte_available"):
             st.caption(f"Há série 0DTE no snapshot. GEX 0DTE: ${result['gex_0dte_usd_1pct'] / 1e6:,.1f} mi; OI ainda pode ser do pregão anterior.")
         else:
