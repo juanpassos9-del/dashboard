@@ -185,6 +185,8 @@ def test_brapi_is_used_only_when_yahoo_fails(monkeypatch):
 
 
 def test_missing_yahoo_and_brapi_key_returns_clear_message(monkeypatch):
-    monkeypatch.setattr(gamma_zones, "fetch_ewz_yahoo_options", lambda **kwargs: (_ for _ in ()).throw(ConnectionError("down")))
-    with pytest.raises(ValueError, match="BRAPI_API_KEY"):
+    monkeypatch.setattr(gamma_zones, "fetch_ewz_yahoo_options", lambda **kwargs: (_ for _ in ()).throw(ConnectionError("Yahoo timeout")))
+    with pytest.raises(ValueError, match="BRAPI_API_KEY") as error:
         fetch_ewz_options("")
+    assert "Yahoo timeout" in str(error.value)
+    assert "preços intraday continuam acessíveis" in str(error.value)

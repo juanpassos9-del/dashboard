@@ -288,13 +288,14 @@ def fetch_ewz_options(api_key: str = "", as_of: date | None = None, max_expirati
     try:
         return fetch_ewz_yahoo_options(as_of=as_of, max_expirations=max_expirations)
     except Exception as yahoo_error:
+        yahoo_detail = str(yahoo_error).strip().replace("\n", " ")[:220] or type(yahoo_error).__name__
         if not api_key:
             raise ValueError(
-                f"Yahoo não conseguiu carregar as opções do EWZ ({type(yahoo_error).__name__}). "
-                "Sem BRAPI_API_KEY, não há fallback configurado."
+                f"Yahoo não conseguiu carregar as opções do EWZ: {yahoo_detail}. "
+                "Sem BRAPI_API_KEY, o GEX fica indisponível; preços intraday continuam acessíveis."
             ) from None
         result = fetch_ewz_brapi_options(api_key, as_of=as_of, max_expirations=max_expirations)
-        result["source_note"] = f"Yahoo indisponível ({type(yahoo_error).__name__}); usando fallback brapi. " + result["source_note"]
+        result["source_note"] = f"Yahoo indisponível ({yahoo_detail}); usando fallback brapi. " + result["source_note"]
         result["notes"] = [result["source_note"], *result.get("notes", [])]
         return result
 

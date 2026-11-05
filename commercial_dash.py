@@ -10141,7 +10141,48 @@ def pagina_gama():
         st.error(f"Não foi possível calcular o GEX: {st.session_state['ewz_gamma_error']}")
     result = st.session_state.get("ewz_gamma_data")
     if not result:
-        st.info("Clique em **Atualizar GEX + intraday** para buscar a cadeia de opções e os candles do motor.")
+        if not st.session_state.get("ewz_gamma_error"):
+            st.info("Clique em **Atualizar GEX + intraday** para buscar os dados do EWZ.")
+        intraday_bundle = st.session_state.get("ewz_gamma_intraday") or {}
+        intraday = intraday_bundle.get("bars")
+        if intraday is None or intraday.empty:
+            if st.session_state.get("ewz_gamma_intraday_error"):
+                st.warning(f"Gráfico intraday indisponível: {st.session_state['ewz_gamma_intraday_error']}")
+        else:
+            bars = intraday.copy()
+            chart_index = pd.DatetimeIndex(pd.to_datetime(bars.index))
+            chart_index = chart_index.tz_localize("America/Sao_Paulo") if chart_index.tz is None else chart_index
+            bars.index = chart_index.tz_convert("America/New_York")
+            session_date = bars.index[-1].date()
+            bars = bars[[stamp.date() == session_date for stamp in bars.index]].dropna(subset=["close"])
+            if not bars.empty:
+                fallback_fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.035, row_heights=[0.78, 0.22])
+                fallback_fig.add_trace(go.Candlestick(
+                    x=bars.index, open=bars["open"], high=bars["high"], low=bars["low"], close=bars["close"],
+                    name="EWZ · 5 min", increasing_line_color="#21C997", decreasing_line_color="#FF5A67",
+                ), row=1, col=1)
+                if "vwap_d" in bars:
+                    fallback_fig.add_trace(go.Scatter(x=bars.index, y=bars["vwap_d"], mode="lines", name="VWAP sessão", line=dict(color="#63B3ED", width=1.5)), row=1, col=1)
+                volume_colors = ["#21C997" if row.close >= row.open else "#FF5A67" for row in bars.itertuples()]
+                fallback_fig.add_trace(go.Bar(x=bars.index, y=bars["volume"], name="Volume", marker_color=volume_colors, opacity=0.65), row=2, col=1)
+                fallback_fig.update_layout(
+                    template="plotly_dark", title="EWZ intraday · sem zonas GEX (cadeia de opções indisponível)",
+                    height=650, margin=dict(l=20, r=20, t=58, b=20), hovermode="x unified",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+                )
+                fallback_fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
+                fallback_fig.update_xaxes(rangeslider_visible=True, row=2, col=1)
+                st.plotly_chart(fallback_fig, use_container_width=True, config={"displayModeBar": True, "scrollZoom": True})
+                st.caption(f"Fonte: {intraday_bundle.get('source', 'Yahoo Finance')} · candle mais recente: {bars.index[-1].strftime('%d/%m/%Y %H:%M %Z')}. Zonas de opções omitidas porque a cadeia não foi carregada.")
+        price_bundle = st.session_state.get("ewz_gamma_price_history") or {}
+        price_history = price_bundle.get("history")
+        if price_history is not None and not price_history.empty:
+            close_fig = go.Figure(go.Scatter(
+                x=price_history.index, y=price_history["Close"], mode="lines", name="EWZ · fechamento diário",
+                line=dict(color="#E5EAF2", width=2),
+            ))
+            close_fig.update_layout(template="plotly_dark", title="EWZ · histórico diário (sem zonas GEX)", xaxis_title="Pregão", yaxis_title="Preço (US$)", height=430, margin=dict(l=20, r=20, t=55, b=20))
+            st.plotly_chart(close_fig, use_container_width=True, config={"displayModeBar": True, "scrollZoom": True})
         return
 
     spot = float(result["spot"])
