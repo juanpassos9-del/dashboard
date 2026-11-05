@@ -10,13 +10,20 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 import requests
-import yfinance as yf
 from dotenv import load_dotenv
 
 load_dotenv()
 
 BRAPI_BASE = "https://brapi.dev/api/v2/options"
 NEW_YORK = ZoneInfo("America/New_York")
+
+
+def _get_yfinance():
+    try:
+        import yfinance
+    except ImportError as exc:
+        raise RuntimeError(f"yfinance indisponível: {exc}") from None
+    return yfinance
 
 
 def _normal_pdf(value: float) -> float:
@@ -100,7 +107,7 @@ def fetch_ewz_brapi_options(api_key: str, as_of: date | None = None, max_expirat
 def fetch_ewz_yahoo_options(as_of: date | None = None, max_expirations: int = 8) -> dict[str, Any]:
     """Fetch Yahoo chains and calculate option gamma locally from IV."""
     market_date = as_of or datetime.now(NEW_YORK).date()
-    ticker = yf.Ticker("EWZ")
+    ticker = _get_yfinance().Ticker("EWZ")
     expirations = []
     for value in ticker.options:
         try:
@@ -180,7 +187,7 @@ def fetch_ewz_daily_history(period: str = "1y", as_of: date | None = None) -> di
     """Return completed daily EWZ bars and the most recent regular-session close."""
     market_date = as_of or datetime.now(NEW_YORK).date()
     now_ny = datetime.now(NEW_YORK)
-    history = yf.Ticker("EWZ").history(period=period, interval="1d", auto_adjust=False, actions=False)
+    history = _fetch_yahoo_chart_frame(interval="1d", period=period)
     if history is None or history.empty or "Close" not in history:
         raise ValueError("Yahoo não retornou histórico diário de fechamento do EWZ.")
     frame = history.dropna(subset=["Close"]).copy()
@@ -202,8 +209,7 @@ def fetch_ewz_daily_history(period: str = "1y", as_of: date | None = None) -> di
     }
 
 
-def fetch_ewz_intraday_bars(interval: str = "5m", period: str = "5d") -> dict[str, Any]:
-    """Fetch real intraday OHLCV bars directly from Yahoo's chart endpoint."""
+def _fetch_yahoo_chart_frame(interval: str, period: str) -> pd.DataFrame:
     response = requests.get(
         "https://query1.finance.yahoo.com/v8/finance/chart/EWZ",
         params={"interval": interval, "range": period, "includePrePost": "false", "events": "history"},
@@ -222,16 +228,22 @@ def fetch_ewz_intraday_bars(interval: str = "5m", period: str = "5d") -> dict[st
     quote = ((result.get("indicators") or {}).get("quote") or [{}])[0]
     if not timestamps or not quote:
         raise ValueError("Resposta Yahoo sem candles intradiários para EWZ.")
-    frame = pd.DataFrame(
+    return pd.DataFrame(
         {
-            "open": quote.get("open", []),
-            "high": quote.get("high", []),
-            "low": quote.get("low", []),
-            "close": quote.get("close", []),
-            "volume": quote.get("volume", []),
+            "Open": quote.get("open", []),
+            "High": quote.get("high", []),
+            "Low": quote.get("low", []),
+            "Close": quote.get("close", []),
+            "Volume": quote.get("volume", []),
         },
         index=pd.to_datetime(timestamps, unit="s", utc=True).tz_convert(NEW_YORK),
     )
+
+
+def fetch_ewz_intraday_bars(interval: str = "5m", period: str = "5d") -> dict[str, Any]:
+    """Fetch real intraday OHLCV bars directly from Yahoo's chart endpoint."""
+    frame = _fetch_yahoo_chart_frame(interval=interval, period=period)
+    frame = frame.rename(columns=str.lower)
     frame = frame.dropna(subset=["open", "high", "low", "close"]).sort_index()
     if frame.empty:
         raise ValueError("Yahoo não retornou candles OHLC completos para EWZ.")

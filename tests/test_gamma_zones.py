@@ -85,14 +85,11 @@ def test_daily_history_excludes_incomplete_current_session(monkeypatch):
         def now(cls, tz=None):
             return cls(2026, 11, 5, 10, 0, tzinfo=tz)
 
-    class FakeTicker:
-        def history(self, **kwargs):
-            return pd.DataFrame(
-                {"Close": [30.0, 31.0, 32.0]},
-                index=pd.to_datetime(["2026-11-03", "2026-11-04", "2026-11-05"]),
-            )
-
-    monkeypatch.setattr(gamma_zones.yf, "Ticker", lambda symbol: FakeTicker())
+    history = pd.DataFrame(
+        {"Close": [30.0, 31.0, 32.0]},
+        index=pd.to_datetime(["2026-11-03", "2026-11-04", "2026-11-05"]).tz_localize("America/New_York"),
+    )
+    monkeypatch.setattr(gamma_zones, "_fetch_yahoo_chart_frame", lambda **kwargs: history)
     monkeypatch.setattr(gamma_zones, "datetime", FrozenDateTime)
     result = fetch_ewz_daily_history(as_of=date(2026, 11, 5))
 
@@ -168,7 +165,7 @@ def test_yahoo_is_primary_and_does_not_require_brapi_key(monkeypatch):
         def option_chain(self, expiry):
             return _fake_chain(expiry)
 
-    monkeypatch.setattr(gamma_zones.yf, "Ticker", lambda symbol: FakeTicker())
+    monkeypatch.setattr(gamma_zones, "_get_yfinance", lambda: SimpleNamespace(Ticker=lambda symbol: FakeTicker()))
     result = fetch_ewz_options("", as_of=date(2026, 11, 5))
 
     assert result["source"].startswith("Yahoo Finance")

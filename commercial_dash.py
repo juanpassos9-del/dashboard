@@ -10118,6 +10118,7 @@ def pagina_gama():
             try:
                 st.session_state["ewz_gamma_intraday"] = _fetch_ewz_intraday_cached()
             except Exception as yahoo_exc:
+                yahoo_detail = str(yahoo_exc).strip().replace("\n", " ")[:180] or type(yahoo_exc).__name__
                 try:
                     fallback = get_ewz_vwap_plotly_data()
                     fallback_source = get_source_health().get("EWZ VWAP Plotly", {}).get("source", "")
@@ -10130,11 +10131,11 @@ def pagina_gama():
                         "interval": "5 min",
                         "last_bar_at": fallback.index[-1].isoformat(),
                         "last_price": float(fallback["close"].iloc[-1]),
-                        "source_note": f"Yahoo indisponível ({type(yahoo_exc).__name__}); usando fallback do motor.",
+                        "source_note": f"Yahoo indisponível ({yahoo_detail}); usando fallback do motor.",
                     }
                 except Exception as fallback_exc:
                     st.session_state["ewz_gamma_intraday_error"] = (
-                        f"Yahoo: {type(yahoo_exc).__name__}; fallback do motor: {fallback_exc}"
+                        f"Yahoo: {yahoo_detail}; fallback do motor: {fallback_exc}"
                     )
     if st.session_state.get("ewz_gamma_error"):
         st.error(f"Não foi possível calcular o GEX: {st.session_state['ewz_gamma_error']}")
