@@ -10233,7 +10233,44 @@ def pagina_gama():
 
     strike_data = result["by_strike"]
     profile_data = result["profile"]
-    tab_intraday, tab_price, tab_zones, tab_scenarios, tab_contracts = st.tabs(["Intraday + zonas", "Fechamentos + zonas", "GEX por strike", "Cenários", "Séries"])
+    tab_tradingview, tab_intraday, tab_price, tab_zones, tab_scenarios, tab_contracts = st.tabs(["TradingView · EWZ", "Perfil GEX + preço", "Fechamentos + zonas", "GEX por strike", "Cenários", "Séries"])
+
+    with tab_tradingview:
+        st.caption("Gráfico nativo do TradingView · EWZ (NYSE American) · linha · intervalo de 5 min · janela de 5 dias.")
+        st.caption("A sessão estendida pode ser habilitada nas configurações do gráfico quando houver dados para o símbolo. A disponibilidade de overnight depende da cobertura do TradingView.")
+        tradingview_config = json.dumps({
+            "autosize": True,
+            "symbol": "AMEX:EWZ",
+            "interval": "5",
+            "range": "5D",
+            "timezone": "America/New_York",
+            "theme": "dark",
+            "style": "2",
+            "locale": "br",
+            "allow_symbol_change": False,
+            "hide_side_toolbar": True,
+            "hide_top_toolbar": False,
+            "hide_legend": False,
+            "hide_volume": False,
+            "withdateranges": True,
+            "details": False,
+            "calendar": False,
+            "save_image": False,
+            "support_host": "https://www.tradingview.com",
+        })
+        tradingview_html = f"""
+        <div class="tradingview-widget-container" style="height:680px;width:100%">
+          <div class="tradingview-widget-container__widget" style="height:calc(100% - 30px);width:100%"></div>
+          <div class="tradingview-widget-copyright" style="font-size:11px;color:#94a3b8;padding-top:5px">
+            <a href="https://www.tradingview.com/symbols/AMEX-EWZ/" rel="noopener nofollow" target="_blank" style="color:#70D7CE">EWZ chart</a> by TradingView
+          </div>
+          <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
+            {tradingview_config}
+          </script>
+        </div>
+        """
+        components.html(tradingview_html, height=700, scrolling=False)
+        st.info("Este widget não entrega candles ao dashboard: o gráfico combinado com perfil GEX e níveis calculados continua na aba **Perfil GEX + preço**. Os widgets TradingView podem ter cotações de ações/ETFs com atraso e não exportam dados.")
 
     from execution.gamma_zones import build_price_zone_levels
 
