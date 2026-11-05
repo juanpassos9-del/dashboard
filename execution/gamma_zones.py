@@ -233,10 +233,10 @@ def fetch_ewz_daily_history(period: str = "1y", as_of: date | None = None) -> di
     }
 
 
-def _fetch_yahoo_chart_frame(interval: str, period: str) -> pd.DataFrame:
+def _fetch_yahoo_chart_frame(interval: str, period: str, include_prepost: bool = False) -> pd.DataFrame:
     response = requests.get(
         "https://query1.finance.yahoo.com/v8/finance/chart/EWZ",
-        params={"interval": interval, "range": period, "includePrePost": "false", "events": "history"},
+        params={"interval": interval, "range": period, "includePrePost": str(include_prepost).lower(), "events": "history"},
         headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
         timeout=(5, 15),
     )
@@ -265,25 +265,39 @@ def _fetch_yahoo_chart_frame(interval: str, period: str) -> pd.DataFrame:
 
 
 def fetch_ewz_intraday_bars(interval: str = "5m", period: str = "5d") -> dict[str, Any]:
-    """Fetch real intraday OHLCV bars directly from Yahoo's chart endpoint."""
-    frame = _fetch_yahoo_chart_frame(interval=interval, period=period)
+    """Fetch EWZ intraday OHLCV including Yahoo extended-hours bars when available."""
+    frame = _fetch_yahoo_chart_frame(interval=interval, period=period, include_prepost=True)
     frame = frame.rename(columns=str.lower)
     frame = frame.dropna(subset=["open", "high", "low", "close"]).sort_index()
     if frame.empty:
         raise ValueError("Yahoo não retornou candles OHLC completos para EWZ.")
     frame["volume"] = pd.to_numeric(frame["volume"], errors="coerce").fillna(0.0)
-    frame["vwap_d"] = (
-        ((frame["high"] + frame["low"] + frame["close"]) / 3 * frame["volume"])
-        .groupby(frame.index.date).cumsum()
-        / frame["volume"].groupby(frame.index.date).cumsum().replace(0, np.nan)
+    minutes = np.asarray([stamp.hour * 60 + stamp.minute for stamp in frame.index])
+    regular = (minutes >= 9 * 60 + 30) & (minutes < 16 * 60)
+    frame["session"] = np.select(
+        [
+            (minutes >= 4 * 60) & (minutes < 9 * 60 + 30),
+            regular,
+            (minutes >= 16 * 60) & (minutes < 20 * 60),
+        ],
+        ["Pré-mercado", "Regular", "Pós-mercado"],
+        default="Overnight (barra fornecida pela fonte)",
     )
+    typical_price = (frame["high"] + frame["low"] + frame["close"]) / 3
+    regular_volume = frame["volume"].where(regular)
+    regular_value = (typical_price * frame["volume"]).where(regular)
+    cum_volume = regular_volume.groupby(frame.index.date).cumsum().replace(0, np.nan)
+    cum_value = regular_value.groupby(frame.index.date).cumsum()
+    frame["vwap_d"] = (cum_value / cum_volume).where(regular)
     return {
         "bars": frame,
-        "source": "Yahoo Finance chart · intraday direto",
+        "source": "Yahoo Finance chart · intraday com horário estendido",
         "interval": interval,
         "period": period,
         "last_bar_at": frame.index[-1].isoformat(),
         "last_price": float(frame["close"].iloc[-1]),
+        "sessions": sorted(frame["session"].dropna().unique().tolist()),
+        "source_note": "Inclui pré e pós-mercado quando o Yahoo disponibiliza. Overnight só aparece se houver barras fornecidas pela fonte; não é garantido.",
     }
 
 

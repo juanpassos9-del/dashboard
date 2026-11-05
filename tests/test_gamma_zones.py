@@ -98,6 +98,11 @@ def test_daily_history_excludes_incomplete_current_session(monkeypatch):
 
 
 def test_intraday_fetch_parses_yahoo_ohlcv_and_calculates_session_vwap(monkeypatch):
+    timestamps = [
+        int(pd.Timestamp(f"2026-11-05 {clock}", tz="America/New_York").timestamp())
+        for clock in ("04:00", "09:30", "16:00", "20:00")
+    ]
+
     class FakeResponse:
         def raise_for_status(self):
             return None
@@ -106,25 +111,33 @@ def test_intraday_fetch_parses_yahoo_ohlcv_and_calculates_session_vwap(monkeypat
             return {
                 "chart": {
                     "result": [{
-                        "timestamp": [1793899800, 1793900100],
+                        "timestamp": timestamps,
                         "indicators": {"quote": [{
-                            "open": [32.0, 32.1],
-                            "high": [32.2, 32.3],
-                            "low": [31.9, 32.0],
-                            "close": [32.1, 32.2],
-                            "volume": [1000, 2000],
+                            "open": [32.0, 32.1, 32.2, 32.3],
+                            "high": [32.2, 32.3, 32.4, 32.5],
+                            "low": [31.9, 32.0, 32.1, 32.2],
+                            "close": [32.1, 32.2, 32.3, 32.4],
+                            "volume": [1000, 2000, 3000, 4000],
                         }]},
                     }],
                     "error": None,
                 }
             }
 
-    monkeypatch.setattr(gamma_zones.requests, "get", lambda *args, **kwargs: FakeResponse())
+    request_params = {}
+
+    def fake_get(*args, **kwargs):
+        request_params.update(kwargs["params"])
+        return FakeResponse()
+
+    monkeypatch.setattr(gamma_zones.requests, "get", fake_get)
     result = fetch_ewz_intraday_bars()
 
-    assert len(result["bars"]) == 2
-    assert result["bars"].iloc[-1]["close"] == 32.2
-    assert result["bars"]["vwap_d"].notna().all()
+    assert len(result["bars"]) == 4
+    assert result["bars"].iloc[-1]["close"] == 32.4
+    assert result["bars"]["session"].tolist() == ["Pré-mercado", "Regular", "Pós-mercado", "Overnight (barra fornecida pela fonte)"]
+    assert result["bars"]["vwap_d"].notna().tolist() == [False, True, False, False]
+    assert request_params["includePrePost"] == "true"
     assert "Yahoo Finance" in result["source"]
 
 

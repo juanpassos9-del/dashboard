@@ -10153,27 +10153,43 @@ def pagina_gama():
             chart_index = pd.DatetimeIndex(pd.to_datetime(bars.index))
             chart_index = chart_index.tz_localize("America/Sao_Paulo") if chart_index.tz is None else chart_index
             bars.index = chart_index.tz_convert("America/New_York")
-            session_date = bars.index[-1].date()
-            bars = bars[[stamp.date() == session_date for stamp in bars.index]].dropna(subset=["close"])
+            bars = bars.dropna(subset=["close"])
             if not bars.empty:
                 fallback_fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.035, row_heights=[0.78, 0.22])
-                fallback_fig.add_trace(go.Candlestick(
-                    x=bars.index, open=bars["open"], high=bars["high"], low=bars["low"], close=bars["close"],
-                    name="EWZ · 5 min", increasing_line_color="#21C997", decreasing_line_color="#FF5A67",
+                line_x, line_y, previous_stamp = [], [], None
+                for stamp, value in zip(bars.index, bars["close"]):
+                    if previous_stamp is not None and stamp - previous_stamp > pd.Timedelta(minutes=10):
+                        line_x.append(None)
+                        line_y.append(None)
+                    line_x.append(stamp)
+                    line_y.append(float(value))
+                    previous_stamp = stamp
+                fallback_fig.add_trace(go.Scatter(
+                    x=line_x, y=line_y, mode="lines", name="EWZ · histórico 5 min",
+                    line=dict(color="#70D7CE", width=2.5), connectgaps=False,
                 ), row=1, col=1)
                 if "vwap_d" in bars:
-                    fallback_fig.add_trace(go.Scatter(x=bars.index, y=bars["vwap_d"], mode="lines", name="VWAP sessão", line=dict(color="#63B3ED", width=1.5)), row=1, col=1)
+                    fallback_fig.add_trace(go.Scatter(x=bars.index, y=bars["vwap_d"], mode="lines", name="VWAP sessão regular", line=dict(color="#63B3ED", width=1.5)), row=1, col=1)
+                if "session" in bars:
+                    for session_label, marker_color in (("Pré-mercado", "#F5A742"), ("Pós-mercado", "#A879FF"), ("Overnight (barra fornecida pela fonte)", "#43C6D8")):
+                        session_bars = bars[bars["session"] == session_label]
+                        if not session_bars.empty:
+                            fallback_fig.add_trace(go.Scatter(
+                                x=session_bars.index, y=session_bars["close"], mode="markers", name=session_label,
+                                marker=dict(color=marker_color, size=5),
+                                hovertemplate=f"{session_label}<br>%{{x|%d/%m %H:%M %Z}}<br>EWZ: $%{{y:.2f}}<extra></extra>",
+                            ), row=1, col=1)
                 volume_colors = ["#21C997" if row.close >= row.open else "#FF5A67" for row in bars.itertuples()]
                 fallback_fig.add_trace(go.Bar(x=bars.index, y=bars["volume"], name="Volume", marker_color=volume_colors, opacity=0.65), row=2, col=1)
                 fallback_fig.update_layout(
-                    template="plotly_dark", title="EWZ intraday · sem zonas GEX (cadeia de opções indisponível)",
+                    template="plotly_dark", title="EWZ · histórico intraday e horário estendido (sem zonas GEX)",
                     height=650, margin=dict(l=20, r=20, t=58, b=20), hovermode="x unified",
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
                 )
                 fallback_fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
                 fallback_fig.update_xaxes(rangeslider_visible=True, row=2, col=1)
                 st.plotly_chart(fallback_fig, use_container_width=True, config={"displayModeBar": True, "scrollZoom": True})
-                st.caption(f"Fonte: {intraday_bundle.get('source', 'Yahoo Finance')} · candle mais recente: {bars.index[-1].strftime('%d/%m/%Y %H:%M %Z')}. Zonas de opções omitidas porque a cadeia não foi carregada.")
+                st.caption(f"Fonte: {intraday_bundle.get('source', 'Yahoo Finance')} · série disponível de {bars.index[0].strftime('%d/%m %H:%M %Z')} a {bars.index[-1].strftime('%d/%m %H:%M %Z')}. Horário estendido e overnight dependem das barras fornecidas pela fonte; zonas GEX omitidas porque a cadeia não carregou.")
         price_bundle = st.session_state.get("ewz_gamma_price_history") or {}
         price_history = price_bundle.get("history")
         if price_history is not None and not price_history.empty:
@@ -10287,8 +10303,7 @@ def pagina_gama():
                 chart_index = chart_index.tz_localize("America/Sao_Paulo")
             chart_index = chart_index.tz_convert("America/New_York")
             bars.index = chart_index
-            session_date = bars.index[-1].date()
-            bars = bars[[stamp.date() == session_date for stamp in bars.index]].dropna(subset=["close"])
+            bars = bars.dropna(subset=["close"])
             if bars.empty:
                 st.info("O motor ainda não trouxe barras para a sessão mais recente.")
             else:
@@ -10312,7 +10327,8 @@ def pagina_gama():
                     horizontal_spacing=0.018,
                     vertical_spacing=0.035,
                 )
-                visible_low, visible_high = intraday_price * 0.92, intraday_price * 1.08
+                visible_low = min(float(bars["low"].min()), intraday_price * 0.92)
+                visible_high = max(float(bars["high"].max()), intraday_price * 1.08)
                 profile = strike_data[
                     strike_data["strike"].between(visible_low, visible_high)
                 ].copy()
@@ -10335,14 +10351,29 @@ def pagina_gama():
                     ),
                 ), row=1, col=1)
                 intraday_fig.add_vline(x=0, line_color="#718096", line_width=1, row=1, col=1)
-                intraday_fig.add_trace(go.Candlestick(
-                    x=bars.index, open=bars["open"], high=bars["high"], low=bars["low"], close=bars["close"],
-                    name="EWZ · 5 min", increasing_line_color="#21C997", decreasing_line_color="#FF5A67",
-                    increasing_fillcolor="#21C997", decreasing_fillcolor="#FF5A67",
-                    hoverlabel=dict(namelength=0),
+                line_x, line_y, previous_stamp = [], [], None
+                for stamp, value in zip(bars.index, bars["close"]):
+                    if previous_stamp is not None and stamp - previous_stamp > pd.Timedelta(minutes=10):
+                        line_x.append(None)
+                        line_y.append(None)
+                    line_x.append(stamp)
+                    line_y.append(float(value))
+                    previous_stamp = stamp
+                intraday_fig.add_trace(go.Scatter(
+                    x=line_x, y=line_y, mode="lines", name="EWZ · linha 5 min",
+                    line=dict(color="#70D7CE", width=2.6), connectgaps=False,
+                    hovertemplate="%{x|%d/%m/%Y %H:%M %Z}<br>EWZ: $%{y:.2f}<extra></extra>",
                 ), row=1, col=2)
+                for session_label, marker_color in (("Pré-mercado", "#F5A742"), ("Pós-mercado", "#A879FF"), ("Overnight (barra fornecida pela fonte)", "#43C6D8")):
+                    session_bars = bars[bars["session"] == session_label] if "session" in bars else bars.iloc[0:0]
+                    if not session_bars.empty:
+                        intraday_fig.add_trace(go.Scatter(
+                            x=session_bars.index, y=session_bars["close"], mode="markers", name=session_label,
+                            marker=dict(color=marker_color, size=5),
+                            hovertemplate=f"{session_label}<br>%{{x|%d/%m %H:%M %Z}}<br>EWZ: $%{{y:.2f}}<extra></extra>",
+                        ), row=1, col=2)
                 if "vwap_d" in bars:
-                    intraday_fig.add_trace(go.Scatter(x=bars.index, y=bars["vwap_d"], mode="lines", name="VWAP sessão", line=dict(color="#63B3ED", width=1.5)), row=1, col=2)
+                    intraday_fig.add_trace(go.Scatter(x=bars.index, y=bars["vwap_d"], mode="lines", name="VWAP sessão regular", line=dict(color="#63B3ED", width=1.5)), row=1, col=2)
                 volume_colors = ["#21C997" if row.close >= row.open else "#FF5A67" for row in bars.itertuples()]
                 intraday_fig.add_trace(go.Bar(x=bars.index, y=bars["volume"], name="Volume", marker_color=volume_colors, opacity=0.65), row=2, col=2)
 
@@ -10403,7 +10434,7 @@ def pagina_gama():
                 intraday_fig.update_yaxes(title_text="Volume", row=2, col=2)
                 st.plotly_chart(intraday_fig, use_container_width=True, config={"displayModeBar": True, "scrollZoom": True})
                 source_note = intraday_bundle.get("source_note")
-                st.caption(f"Intraday: {provider_label} · candles de 5 min · horário de Nova York · última barra há {latest_age_minutes:.0f} min. O atraso do provedor pode variar; as zonas são da última cadeia e ficam fixas até nova atualização. {source_note or ''}")
+                st.caption(f"Intraday: {provider_label} · linha de 5 min · {bars.index[0].strftime('%d/%m %H:%M')}–{bars.index[-1].strftime('%d/%m %H:%M')} NY · última barra há {latest_age_minutes:.0f} min. Pré/pós-mercado e overnight aparecem quando fornecidos pelo Yahoo; as zonas são da última cadeia e ficam fixas até nova atualização. {source_note or ''}")
                 st.caption("Defesa/amortecimento (GEX +) e aceleração (GEX -) dependem da convenção de posicionamento; o open interest pode ser do pregão anterior. Confirme reação do preço e liquidez, não opere apenas pelo nível.")
     with tab_price:
         price_bundle = st.session_state.get("ewz_gamma_price_history") or {}
