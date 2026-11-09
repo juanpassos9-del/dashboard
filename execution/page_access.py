@@ -9,6 +9,7 @@ RESTRICTED_PAGE_ACCESS = {
         "🇧🇷 MONITOR BR",
         "RENDAFIXABR",
         "Crypto Terminal",
+        "CRIPTODASH",
     }),
     "fccarne@terra.com.br": frozenset({
         "📉 Terminal de Trading",
@@ -18,6 +19,7 @@ RESTRICTED_PAGE_ACCESS = {
         "🇧🇷 MONITOR BR",
         "RENDAFIXABR",
         "Crypto Terminal",
+        "CRIPTODASH",
         "WATCHLIST",
     }),
 }

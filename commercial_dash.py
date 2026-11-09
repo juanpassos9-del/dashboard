@@ -11723,6 +11723,13 @@ def load_crypto_terminal_payload(refresh_key: int = 0):
     }
 
 
+@st.cache_data(ttl=30, show_spinner=False)
+def load_cryptodash_quotes(refresh_key: int = 0):
+    from execution.cryptodash import fetch_cryptodash_quotes
+
+    return fetch_cryptodash_quotes()
+
+
 @st.cache_data(ttl=21600, show_spinner=False)
 def load_crypto_mvrv_history(refresh_key: int = 0):
     """Load MVRV history lazily so this optional chart never blocks app boot."""
@@ -14598,13 +14605,85 @@ def _plot_rentabilidade_df(df: "pd.DataFrame", titulo: str = "Curva de Capital")
                     zerolinecolor="#444", tickprefix="R$ "),
     )
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Total Trades",  n)
     c2.metric("Win Rate",      f"{wr:.1f}%")
     c3.metric("Resultado",     f"R$ {ultimo:+,.2f}")
     c4.metric("Profit Factor", pf_str)
     c5.metric("Max Drawdown",  f"R$ {max_dd:,.2f}")
+
+
+def pagina_cryptodash():
+    """Exchange-driven quote board using Binance, BingX, then OKX."""
+    import pandas as pd
+
+    st.title("CRIPTODASH")
+    st.caption("Mercado cripto 24/7 | Binance principal, BingX e OKX como fallback | cotações spot USDT")
+    refresh_col, info_col = st.columns([1, 4])
+    with refresh_col:
+        if st.button("Atualizar cotações", type="primary", key="cryptodash_refresh"):
+            st.session_state["cryptodash_refresh_key"] = st.session_state.get("cryptodash_refresh_key", 0) + 1
+            load_cryptodash_quotes.clear()
+    with info_col:
+        st.caption("Variação e volume são janelas móveis de 24h reportadas por cada exchange. Fonte e instrumento aparecem por ativo.")
+
+    try:
+        snapshot = load_cryptodash_quotes(int(st.session_state.get("cryptodash_refresh_key", 0)))
+    except Exception as exc:
+        st.error(f"Não foi possível carregar as cotações: {exc}")
+        return
+
+    quotes = snapshot.get("quotes", [])
+    unsupported = snapshot.get("unsupported", [])
+    providers_used = {q.get("exchange") for q in quotes}
+    binance_count = sum(q.get("exchange") == "Binance" for q in quotes)
+    fallback_count = len(quotes) - binance_count
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Ativos com cotação", len(quotes))
+    m2.metric("Binance", binance_count)
+    m3.metric("Fallback BingX / OKX", fallback_count)
+    m4.metric("Não listados", len(unsupported))
+
+    if not quotes:
+        st.error("Nenhuma cotação disponível nas fontes consultadas.")
+        errors = snapshot.get("provider_errors", {})
+        for provider, message in errors.items():
+            st.caption(f"{provider}: {message}")
+        return
+
+    frame = pd.DataFrame(quotes)
+    filter_col, sort_col = st.columns([2, 1])
+    with filter_col:
+        selected = st.multiselect("Ativos", frame["asset"].tolist(), default=frame["asset"].tolist(), key="cryptodash_assets")
+    with sort_col:
+        sort_by = st.selectbox("Ordenar por", ["Volume 24h", "Variação 24h", "Símbolo"], key="cryptodash_sort")
+    frame = frame[frame["asset"].isin(selected)].copy()
+    if sort_by == "Volume 24h":
+        frame = frame.sort_values("quote_volume_24h", ascending=False)
+    elif sort_by == "Variação 24h":
+        frame = frame.sort_values("change_pct_24h", ascending=False)
+    else:
+        frame = frame.sort_values("asset")
+    display = frame[["asset", "price", "quote_volume_24h", "change_pct_24h", "exchange", "instrument", "age_seconds"]].rename(columns={
+        "asset": "Ativo", "price": "Preço USDT", "quote_volume_24h": "Volume 24h USDT",
+        "change_pct_24h": "Variação 24h %", "exchange": "Fonte", "instrument": "Par", "age_seconds": "Idade (s)",
+    })
+    st.dataframe(
+        display.style.format({
+            "Preço USDT": "{:,.8f}", "Volume 24h USDT": "{:,.0f}",
+            "Variação 24h %": "{:+.2f}%", "Idade (s)": "{:.0f}",
+        }, na_rep="—"),
+        use_container_width=True, hide_index=True,
+    )
+    if unsupported:
+        st.warning("Sem par spot USDT encontrado nas três fontes: " + ", ".join(unsupported))
+    errors = snapshot.get("provider_errors", {})
+    if errors:
+        with st.expander("Avisos das fontes"):
+            for provider, message in errors.items():
+                st.caption(f"{provider}: {message}")
+    if providers_used:
+        st.caption("Fontes efetivamente utilizadas: " + " · ".join(sorted(providers_used)))
 
 
 def _plot_rentabilidade(resultados: list, acumulado: list):
@@ -15007,7 +15086,7 @@ with st.sidebar:
         _clear_auth_session()
         _auth_rerun()
     st.markdown("### 🧭 Navegação")
-    all_pages = ["📉 Terminal de Trading", "🇧🇷 Terminal B3", "Gama", "🌎 Terminal Global", "FX COMMAND CENTER", "MONITOR MACRO", "🇧🇷 MONITOR BR", "RENDAFIXABR", "Crypto Terminal", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"]
+    all_pages = ["📉 Terminal de Trading", "🇧🇷 Terminal B3", "Gama", "🌎 Terminal Global", "FX COMMAND CENTER", "MONITOR MACRO", "🇧🇷 MONITOR BR", "RENDAFIXABR", "Crypto Terminal", "CRIPTODASH", "📺 Terminal Bloomberg", "📰 Market Report", "Market Moving", "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados", "⚖️ Painel de Correlação", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"]
     allowed_pages = pages_for_user(_auth_user_email(auth_user), all_pages)
     default_page = "🌎 Terminal Global" if "🌎 Terminal Global" in allowed_pages else allowed_pages[0]
     nav_key = "main_page_navigation"
@@ -15055,6 +15134,8 @@ elif page == "RENDAFIXABR":
     pagina_renda_fixa_br()
 elif page == "Crypto Terminal":
     pagina_crypto_terminal()
+elif page == "CRIPTODASH":
+    pagina_cryptodash()
 elif page == "📺 Terminal Bloomberg":
     pagina_terminal_bloomberg()
 elif page == "📰 Market Report":
