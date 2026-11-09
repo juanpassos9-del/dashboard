@@ -35,12 +35,22 @@ def test_failed_provider_is_reported_and_remaining_sources_are_used(monkeypatch)
 
 def test_commodity_contracts_are_requested_by_default():
     assert cryptodash.COMMODITIES == ["XAU", "XAG", "BZ", "CL", "XPD", "XPT", "COPPER", "NATGAS"]
+    assert cryptodash.FX_ASSETS == ["USDBRL"]
     assert cryptodash.SECURITIES == [
         "SPY", "QQQ", "NVDA", "TSLA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "V", "BE", "BX",
         "GS", "HD", "KO", "MP", "MU", "ZM", "ZS", "ACN", "AMC", "AMD", "APP", "ARM",
         "SOXL", "SNDK", "SKHYNIX", "SOXS", "KORU", "SPCX", "SKHY", "SNXX", "INTC", "MSTR", "TQQQ", "EWY",
         "SAMSUNG", "DRAM",
     ]
+
+
+def test_asset_classes_match_dashboard_groups():
+    assert cryptodash.asset_class("BTC") == "Cripto"
+    assert cryptodash.asset_class("AAPL") == "7 Magníficas"
+    assert cryptodash.asset_class("SPY") == "Índices"
+    assert cryptodash.asset_class("XAU") == "Commodities"
+    assert cryptodash.asset_class("USDBRL") == "FX"
+    assert cryptodash.asset_class("GS") == "Ações/ETFs"
 
 
 def test_bingx_is_used_only_after_binance_and_okx(monkeypatch):
@@ -67,3 +77,32 @@ def test_old_last_trade_is_kept_and_marked_stale_when_no_fresh_fallback(monkeypa
     assert result["quotes"][0]["asset"] == "HD"
     assert result["quotes"][0]["stale"] is True
     assert result["unsupported"] == []
+
+
+def test_binance_spot_retries_official_hosts_and_keeps_spot_if_futures_fail(monkeypatch):
+    def fake_request(url, timeout):
+        if "data-api.binance.vision" in url:
+            raise RuntimeError("network blocked")
+        if url.startswith("https://api.binance.com/"):
+            return ([{"symbol": "BTCUSDT", "lastPrice": "60000", "priceChangePercent": "1", "quoteVolume": "10", "closeTime": "1000"}], 12)
+        raise RuntimeError("USD-M offline")
+
+    monkeypatch.setattr(cryptodash, "request_json", fake_request)
+    result = cryptodash._binance_tickers()
+
+    assert result["BTC"]["instrument"] == "BTCUSDT"
+    assert "_warnings" in result
+    assert any("USDⓈ-M" in warning for warning in result["_warnings"])
+
+
+def test_binance_futures_survive_spot_endpoint_outage(monkeypatch):
+    def fake_request(url, timeout):
+        if "fapi.binance.com" in url:
+            return ([{"symbol": "XAUUSDT", "lastPrice": "4100", "priceChangePercent": "0.5", "quoteVolume": "100", "highPrice": "4120", "lowPrice": "4050", "closeTime": "1000"}], 15)
+        raise RuntimeError("spot offline")
+
+    monkeypatch.setattr(cryptodash, "request_json", fake_request)
+    result = cryptodash._binance_tickers()
+
+    assert result["XAU"]["instrument"] == "XAUUSDT"
+    assert "Spot Binance indisponível" in result["_warnings"][0]

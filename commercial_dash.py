@@ -14616,6 +14616,7 @@ def _plot_rentabilidade_df(df: "pd.DataFrame", titulo: str = "Curva de Capital")
 def pagina_cryptodash():
     """Exchange-driven quote board using Binance, BingX, then OKX."""
     import pandas as pd
+    from execution.cryptodash import asset_class
 
     st.title("CRIPTODASH")
     st.caption("Cripto, ações/ETFs e commodities | Prioridade: Binance → OKX → BingX")
@@ -14635,6 +14636,7 @@ def pagina_cryptodash():
 
     quotes = snapshot.get("quotes", [])
     unsupported = snapshot.get("unsupported", [])
+    provider_issues = snapshot.get("provider_errors", {})
     providers_used = {q.get("exchange") for q in quotes}
     binance_count = sum(q.get("exchange") == "Binance" for q in quotes)
     fallback_count = len(quotes) - binance_count
@@ -14643,6 +14645,12 @@ def pagina_cryptodash():
     m2.metric("Binance", binance_count)
     m3.metric("Fallback BingX / OKX", fallback_count)
     m4.metric("Não listados", len(unsupported))
+    if provider_issues.get("Binance"):
+        st.warning("Binance com falha parcial; o painel usa os dados disponíveis e tenta os fallbacks. " + provider_issues["Binance"])
+    elif binance_count == 0:
+        st.info("Nenhuma cotação atual veio da Binance; verificando OKX e BingX como fallback.")
+    else:
+        st.caption(f"Binance principal ativa: {binance_count} ativos selecionados.")
 
     if not quotes:
         st.error("Nenhuma cotação disponível nas fontes consultadas.")
@@ -14652,45 +14660,42 @@ def pagina_cryptodash():
         return
 
     frame = pd.DataFrame(quotes)
-    commodity_assets = {"XAU", "XAG", "BZ", "CL", "XPD", "XPT", "COPPER", "NATGAS"}
-    security_assets = {
-        "SPY", "QQQ", "NVDA", "TSLA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "V", "BE", "BX",
-        "GS", "HD", "KO", "MP", "MU", "ZM", "ZS", "ACN", "AMC", "AMD", "APP", "ARM",
-        "SOXL", "SNDK", "SKHYNIX", "SOXS", "KORU", "SPCX", "SKHY", "SNXX", "INTC", "MSTR", "TQQQ", "EWY",
-        "SAMSUNG", "DRAM",
-    }
-    frame["category"] = frame["asset"].map(
-        lambda asset: "Commodity" if asset in commodity_assets
-        else "Ação/ETF" if asset in security_assets
-        else "Cripto"
-    )
-    filter_col, sort_col = st.columns([2, 1])
-    with filter_col:
-        selected = st.multiselect("Ativos", frame["asset"].tolist(), default=frame["asset"].tolist(), key="cryptodash_assets")
-    with sort_col:
-        sort_by = st.selectbox("Ordenar por", ["Volume 24h", "Variação 24h", "Símbolo"], key="cryptodash_sort")
-    frame = frame[frame["asset"].isin(selected)].copy()
-    if sort_by == "Volume 24h":
-        frame = frame.sort_values("quote_volume_24h", ascending=False)
-    elif sort_by == "Variação 24h":
-        frame = frame.sort_values("change_pct_24h", ascending=False)
-    else:
-        frame = frame.sort_values("asset")
-    frame["quality"] = frame["stale"].map({True: "Atrasada", False: "Atual"})
-    display = frame[["category", "asset", "price", "quote_volume_24h", "change_pct_24h", "exchange", "market_type", "instrument", "age_seconds", "quality"]].rename(columns={
+    frame["category"] = frame["asset"].map(asset_class)
+    sort_by = st.selectbox("Ordenar por", ["Volume 24h", "Variação 24h", "Símbolo"], key="cryptodash_sort")
+    class_names = ["Todos", "Cripto", "7 Magníficas", "Ações/ETFs", "Índices", "Commodities", "FX"]
+    tabs = st.tabs(class_names)
+    columns = ["category", "asset", "price", "quote_volume_24h", "change_pct_24h", "exchange", "market_type", "instrument", "age_seconds", "stale"]
+    headers = {
         "category": "Classe", "asset": "Ativo", "price": "Preço USDT", "quote_volume_24h": "Volume 24h (fonte)",
-        "change_pct_24h": "Variação 24h %", "exchange": "Fonte", "market_type": "Mercado", "instrument": "Instrumento", "age_seconds": "Idade (s)", "quality": "Atualidade",
-    })
-    st.dataframe(
-        display.style.format({
-            "Preço USDT": "{:,.8f}", "Volume 24h (fonte)": "{:,.2f}",
-            "Variação 24h %": "{:+.2f}%", "Idade (s)": "{:.0f}",
-        }, na_rep="—"),
-        use_container_width=True, hide_index=True,
-    )
-    if unsupported:
-        st.warning("Sem instrumento USDT encontrado nas três fontes: " + ", ".join(unsupported))
-    errors = snapshot.get("provider_errors", {})
+        "change_pct_24h": "Variação 24h %", "exchange": "Fonte", "market_type": "Mercado", "instrument": "Instrumento",
+        "age_seconds": "Idade (s)", "stale": "Atualidade",
+    }
+    for class_name, tab in zip(class_names, tabs):
+        with tab:
+            subset = frame if class_name == "Todos" else frame[frame["category"] == class_name]
+            if not subset.empty:
+                if sort_by == "Volume 24h":
+                    subset = subset.sort_values("quote_volume_24h", ascending=False)
+                elif sort_by == "Variação 24h":
+                    subset = subset.sort_values("change_pct_24h", ascending=False)
+                else:
+                    subset = subset.sort_values("asset")
+                display = subset[columns].copy()
+                display["stale"] = display["stale"].map({True: "Atrasada", False: "Atual"})
+                display = display.rename(columns=headers)
+                st.dataframe(
+                    display.style.format({
+                        "Preço USDT": "{:,.8f}", "Volume 24h (fonte)": "{:,.2f}",
+                        "Variação 24h %": "{:+.2f}%", "Idade (s)": "{:.0f}",
+                    }, na_rep="—"),
+                    use_container_width=True, hide_index=True,
+                )
+            else:
+                st.info(f"Nenhuma cotação disponível na classe {class_name}.")
+            missing = unsupported if class_name == "Todos" else [asset for asset in unsupported if asset_class(asset) == class_name]
+            if missing:
+                st.warning("Sem instrumento USDT nas exchanges consultadas: " + ", ".join(missing))
+    errors = provider_issues
     if errors:
         with st.expander("Avisos das fontes"):
             for provider, message in errors.items():

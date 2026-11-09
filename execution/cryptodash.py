@@ -12,37 +12,85 @@ ASSETS = [
     "BNB", "ON", "AVAX", "ENA", "SUI", "UNI", "WLD", "PUMP", "AIOT", "HOT",
 ]
 COMMODITIES = ["XAU", "XAG", "BZ", "CL", "XPD", "XPT", "COPPER", "NATGAS"]
+FX_ASSETS = ["USDBRL"]
+SEVEN_MAGNIFICAS = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"]
+INDEX_ASSETS = ["SPY", "QQQ", "KORU", "EWY", "TQQQ"]
 SECURITIES = [
     "SPY", "QQQ", "NVDA", "TSLA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "V", "BE", "BX",
     "GS", "HD", "KO", "MP", "MU", "ZM", "ZS", "ACN", "AMC", "AMD", "APP", "ARM",
     "SOXL", "SNDK", "SKHYNIX", "SOXS", "KORU", "SPCX", "SKHY", "SNXX", "INTC", "MSTR", "TQQQ", "EWY",
     "SAMSUNG", "DRAM",
 ]
-TRADFI_ASSETS = set(COMMODITIES + SECURITIES)
+TRADFI_ASSETS = set(COMMODITIES + SECURITIES + FX_ASSETS)
 PROVIDERS = ("Binance", "OKX", "BingX")
 MAX_QUOTE_AGE_SECONDS = 180
 
 
-def _binance_tickers() -> dict[str, dict[str, Any]]:
-    spot_rows, _ = request_json("https://data-api.binance.vision/api/v3/ticker/24hr", timeout=10)
-    result = {}
-    for row in spot_rows if isinstance(spot_rows, list) else []:
-        symbol = str(row.get("symbol") or "")
-        if symbol.endswith("USDT"):
-            base = symbol[:-4]
-            result[base] = {
-                "price": safe_float(row.get("lastPrice")),
-                "change_pct_24h": safe_float(row.get("priceChangePercent")),
-                "quote_volume_24h": safe_float(row.get("quoteVolume")),
-                "high_24h": safe_float(row.get("highPrice")),
-                "low_24h": safe_float(row.get("lowPrice")),
-                "timestamp_ms": int(safe_float(row.get("closeTime"))),
-                "instrument": symbol,
-                "market_type": "Spot",
-            }
+def asset_class(asset: str) -> str:
+    if asset in ASSETS:
+        return "Cripto"
+    if asset in SEVEN_MAGNIFICAS:
+        return "7 Magníficas"
+    if asset in INDEX_ASSETS:
+        return "Índices"
+    if asset in COMMODITIES:
+        return "Commodities"
+    if asset in FX_ASSETS:
+        return "FX"
+    return "Ações/ETFs"
 
-    futures_rows, _ = request_json("https://fapi.binance.com/fapi/v1/ticker/24hr", timeout=10)
-    for row in futures_rows if isinstance(futures_rows, list) else []:
+
+def _binance_tickers() -> dict[str, dict[str, Any]]:
+    result = {}
+    warnings = []
+
+    spot_urls = (
+        "https://data-api.binance.vision/api/v3/ticker/24hr",
+        "https://api.binance.com/api/v3/ticker/24hr",
+        "https://api-gcp.binance.com/api/v3/ticker/24hr",
+        "https://api1.binance.com/api/v3/ticker/24hr",
+        "https://api2.binance.com/api/v3/ticker/24hr",
+    )
+    spot_rows = None
+    spot_errors = []
+    for url in spot_urls:
+        try:
+            spot_rows, _ = request_json(url, timeout=8)
+            if isinstance(spot_rows, list):
+                break
+            spot_errors.append(f"{url}: resposta inesperada")
+            spot_rows = None
+        except Exception as exc:
+            spot_errors.append(f"{url}: {str(exc)[:120]}")
+    if spot_rows is None:
+        warnings.append("Spot Binance indisponível; " + " | ".join(spot_errors[-2:]))
+    else:
+        if spot_errors:
+            warnings.append("Host primário de Spot falhou; conexão feita por host alternativo.")
+        for row in spot_rows:
+            symbol = str(row.get("symbol") or "")
+            if symbol.endswith("USDT"):
+                base = symbol[:-4]
+                result[base] = {
+                    "price": safe_float(row.get("lastPrice")),
+                    "change_pct_24h": safe_float(row.get("priceChangePercent")),
+                    "quote_volume_24h": safe_float(row.get("quoteVolume")),
+                    "high_24h": safe_float(row.get("highPrice")),
+                    "low_24h": safe_float(row.get("lowPrice")),
+                    "timestamp_ms": int(safe_float(row.get("closeTime"))),
+                    "instrument": symbol,
+                    "market_type": "Spot",
+                }
+
+    try:
+        futures_rows, _ = request_json("https://fapi.binance.com/fapi/v1/ticker/24hr", timeout=10)
+        if not isinstance(futures_rows, list):
+            raise ValueError("resposta inesperada do endpoint USDⓈ-M")
+    except Exception as exc:
+        futures_rows = None
+        warnings.append(f"Futuros USDⓈ-M Binance indisponível: {str(exc)[:180]}")
+
+    for row in futures_rows or []:
         symbol = str(row.get("symbol") or "")
         if not symbol.endswith("USDT"):
             continue
@@ -59,6 +107,10 @@ def _binance_tickers() -> dict[str, dict[str, Any]]:
             "instrument": symbol,
             "market_type": "Perpétuo USDⓈ-M",
         }
+    if not result:
+        raise RuntimeError("Binance Spot e USDⓈ-M sem dados. " + " | ".join(warnings))
+    if warnings:
+        result["_warnings"] = warnings
     return result
 
 
@@ -125,13 +177,17 @@ def _okx_tickers() -> dict[str, dict[str, Any]]:
 
 def fetch_cryptodash_quotes(assets: list[str] | None = None) -> dict[str, Any]:
     """Fetch each exchange in priority order and fill missing/stale quotes."""
-    assets = [str(asset).upper() for asset in (assets or ASSETS + COMMODITIES + SECURITIES)]
+    assets = [str(asset).upper() for asset in (assets or ASSETS + COMMODITIES + SECURITIES + FX_ASSETS)]
     loaders = (("Binance", _binance_tickers), ("OKX", _okx_tickers), ("BingX", _bingx_tickers))
     provider_data: dict[str, dict[str, dict[str, Any]]] = {}
     provider_errors: dict[str, str] = {}
     for provider, loader in loaders:
         try:
-            provider_data[provider] = loader()
+            loaded = loader()
+            warnings = loaded.pop("_warnings", [])
+            provider_data[provider] = loaded
+            if warnings:
+                provider_errors[provider] = " | ".join(str(warning) for warning in warnings)
         except Exception as exc:
             provider_errors[provider] = str(exc)[:240]
             provider_data[provider] = {}
