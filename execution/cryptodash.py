@@ -11,14 +11,22 @@ ASSETS = [
     "BTC", "ETH", "ZEC", "SOL", "JCT", "XRP", "HYPE", "1000PEPE", "DOGE", "NEAR",
     "BNB", "ON", "AVAX", "ENA", "SUI", "UNI", "WLD", "PUMP", "AIOT", "HOT",
 ]
-PROVIDERS = ("Binance", "BingX", "OKX")
+COMMODITIES = ["XAU", "XAG", "BZ", "CL", "XPD", "XPT", "COPPER", "NATGAS"]
+SECURITIES = [
+    "SPY", "QQQ", "NVDA", "TSLA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "V", "BE", "BX",
+    "GS", "HD", "KO", "MP", "MU", "ZM", "ZS", "ACN", "AMC", "AMD", "APP", "ARM",
+    "SOXL", "SNDK", "SKHYNIX", "SOXS", "KORU", "SPCX", "SKHY", "SNXX", "INTC", "MSTR", "TQQQ", "EWY",
+    "SAMSUNG", "DRAM",
+]
+TRADFI_ASSETS = set(COMMODITIES + SECURITIES)
+PROVIDERS = ("Binance", "OKX", "BingX")
 MAX_QUOTE_AGE_SECONDS = 180
 
 
 def _binance_tickers() -> dict[str, dict[str, Any]]:
-    rows, _ = request_json("https://data-api.binance.vision/api/v3/ticker/24hr", timeout=10)
+    spot_rows, _ = request_json("https://data-api.binance.vision/api/v3/ticker/24hr", timeout=10)
     result = {}
-    for row in rows if isinstance(rows, list) else []:
+    for row in spot_rows if isinstance(spot_rows, list) else []:
         symbol = str(row.get("symbol") or "")
         if symbol.endswith("USDT"):
             base = symbol[:-4]
@@ -30,18 +38,46 @@ def _binance_tickers() -> dict[str, dict[str, Any]]:
                 "low_24h": safe_float(row.get("lowPrice")),
                 "timestamp_ms": int(safe_float(row.get("closeTime"))),
                 "instrument": symbol,
+                "market_type": "Spot",
             }
+
+    futures_rows, _ = request_json("https://fapi.binance.com/fapi/v1/ticker/24hr", timeout=10)
+    for row in futures_rows if isinstance(futures_rows, list) else []:
+        symbol = str(row.get("symbol") or "")
+        if not symbol.endswith("USDT"):
+            continue
+        base = symbol[:-4]
+        if base not in TRADFI_ASSETS and base in result:
+            continue
+        result[base] = {
+            "price": safe_float(row.get("lastPrice")),
+            "change_pct_24h": safe_float(row.get("priceChangePercent")),
+            "quote_volume_24h": safe_float(row.get("quoteVolume")),
+            "high_24h": safe_float(row.get("highPrice")),
+            "low_24h": safe_float(row.get("lowPrice")),
+            "timestamp_ms": int(safe_float(row.get("closeTime"))),
+            "instrument": symbol,
+            "market_type": "Perpétuo USDⓈ-M",
+        }
     return result
 
 
 def _bingx_tickers() -> dict[str, dict[str, Any]]:
-    data, _ = request_json("https://open-api.bingx.com/openApi/spot/v1/ticker/24hr", timeout=10)
-    rows = data.get("data", []) if isinstance(data, dict) else []
     result = {}
-    for row in rows if isinstance(rows, list) else []:
-        symbol = str(row.get("symbol") or "")
-        if symbol.endswith("-USDT"):
+    endpoints = (
+        ("https://open-api.bingx.com/openApi/spot/v1/ticker/24hr", "Spot"),
+        ("https://open-api.bingx.com/openApi/swap/v2/quote/ticker", "Perpétuo"),
+    )
+    for url, market_type in endpoints:
+        data, _ = request_json(url, timeout=10)
+        rows = data.get("data", []) if isinstance(data, dict) else []
+        for row in rows if isinstance(rows, list) else []:
+            symbol = str(row.get("symbol") or "")
+            if not symbol.endswith("-USDT"):
+                continue
             base = symbol[:-5]
+            if market_type == "Perpétuo" and base in result:
+                continue
             result[base] = {
                 "price": safe_float(row.get("lastPrice")),
                 "change_pct_24h": safe_float(row.get("priceChangePercent")),
@@ -50,36 +86,47 @@ def _bingx_tickers() -> dict[str, dict[str, Any]]:
                 "low_24h": safe_float(row.get("lowPrice")),
                 "timestamp_ms": int(safe_float(row.get("closeTime") or row.get("time"))),
                 "instrument": symbol,
+                "market_type": market_type,
             }
     return result
 
 
 def _okx_tickers() -> dict[str, dict[str, Any]]:
-    data, _ = request_json("https://www.okx.com/api/v5/market/tickers", params={"instType": "SPOT"}, timeout=10)
-    rows = data.get("data", []) if isinstance(data, dict) else []
     result = {}
-    for row in rows if isinstance(rows, list) else []:
-        symbol = str(row.get("instId") or "")
-        if symbol.endswith("-USDT"):
-            base = symbol[:-5]
+    for inst_type in ("SPOT", "SWAP"):
+        data, _ = request_json(
+            "https://www.okx.com/api/v5/market/tickers",
+            params={"instType": inst_type},
+            timeout=10,
+        )
+        rows = data.get("data", []) if isinstance(data, dict) else []
+        for row in rows if isinstance(rows, list) else []:
+            symbol = str(row.get("instId") or "")
+            suffix = "-USDT-SWAP" if inst_type == "SWAP" else "-USDT"
+            if not symbol.endswith(suffix):
+                continue
+            base = symbol[:-len(suffix)]
+            if inst_type == "SWAP" and base in result:
+                continue
             last = safe_float(row.get("last"))
             open_24h = safe_float(row.get("open24h"))
             result[base] = {
                 "price": last,
                 "change_pct_24h": ((last / open_24h) - 1) * 100 if open_24h else 0.0,
-                "quote_volume_24h": safe_float(row.get("volCcy24h")) * last,
+                "quote_volume_24h": safe_float(row.get("volCcy24h")),
                 "high_24h": safe_float(row.get("high24h")),
                 "low_24h": safe_float(row.get("low24h")),
                 "timestamp_ms": int(safe_float(row.get("ts"))),
                 "instrument": symbol,
+                "market_type": "Spot" if inst_type == "SPOT" else "Perpétuo",
             }
     return result
 
 
 def fetch_cryptodash_quotes(assets: list[str] | None = None) -> dict[str, Any]:
     """Fetch each exchange in priority order and fill missing/stale quotes."""
-    assets = [str(asset).upper() for asset in (assets or ASSETS)]
-    loaders = (("Binance", _binance_tickers), ("BingX", _bingx_tickers), ("OKX", _okx_tickers))
+    assets = [str(asset).upper() for asset in (assets or ASSETS + COMMODITIES + SECURITIES)]
+    loaders = (("Binance", _binance_tickers), ("OKX", _okx_tickers), ("BingX", _bingx_tickers))
     provider_data: dict[str, dict[str, dict[str, Any]]] = {}
     provider_errors: dict[str, str] = {}
     for provider, loader in loaders:
@@ -94,6 +141,7 @@ def fetch_cryptodash_quotes(assets: list[str] | None = None) -> dict[str, Any]:
     unsupported = []
     for asset in assets:
         selected = None
+        last_known = None
         for provider in PROVIDERS:
             item = provider_data[provider].get(asset)
             if not item or item.get("price", 0) <= 0:
@@ -101,6 +149,14 @@ def fetch_cryptodash_quotes(assets: list[str] | None = None) -> dict[str, Any]:
             stamp = int(item.get("timestamp_ms") or 0)
             age = max(0, (now_ms - stamp) / 1000) if stamp else 0
             if stamp and age > MAX_QUOTE_AGE_SECONDS:
+                if last_known is None or age < last_known["age_seconds"]:
+                    last_known = {
+                        "asset": asset,
+                        **item,
+                        "exchange": provider,
+                        "age_seconds": round(age),
+                        "stale": True,
+                    }
                 continue
             selected = {
                 "asset": asset,
@@ -110,6 +166,8 @@ def fetch_cryptodash_quotes(assets: list[str] | None = None) -> dict[str, Any]:
                 "stale": False,
             }
             break
+        if selected is None:
+            selected = last_known
         if selected:
             quotes.append(selected)
         else:

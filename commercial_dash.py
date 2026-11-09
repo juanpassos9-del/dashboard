@@ -14618,14 +14618,14 @@ def pagina_cryptodash():
     import pandas as pd
 
     st.title("CRIPTODASH")
-    st.caption("Mercado cripto 24/7 | Binance principal, BingX e OKX como fallback | cotações spot USDT")
+    st.caption("Cripto, ações/ETFs e commodities | Prioridade: Binance → OKX → BingX")
     refresh_col, info_col = st.columns([1, 4])
     with refresh_col:
         if st.button("Atualizar cotações", type="primary", key="cryptodash_refresh"):
             st.session_state["cryptodash_refresh_key"] = st.session_state.get("cryptodash_refresh_key", 0) + 1
             load_cryptodash_quotes.clear()
     with info_col:
-        st.caption("Variação e volume são janelas móveis de 24h reportadas por cada exchange. Fonte e instrumento aparecem por ativo.")
+        st.caption("Variação e volume são janelas móveis de 24h. Instrumentos perpétuos são derivados; unidades de volume podem variar por exchange.")
 
     try:
         snapshot = load_cryptodash_quotes(int(st.session_state.get("cryptodash_refresh_key", 0)))
@@ -14652,6 +14652,18 @@ def pagina_cryptodash():
         return
 
     frame = pd.DataFrame(quotes)
+    commodity_assets = {"XAU", "XAG", "BZ", "CL", "XPD", "XPT", "COPPER", "NATGAS"}
+    security_assets = {
+        "SPY", "QQQ", "NVDA", "TSLA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "V", "BE", "BX",
+        "GS", "HD", "KO", "MP", "MU", "ZM", "ZS", "ACN", "AMC", "AMD", "APP", "ARM",
+        "SOXL", "SNDK", "SKHYNIX", "SOXS", "KORU", "SPCX", "SKHY", "SNXX", "INTC", "MSTR", "TQQQ", "EWY",
+        "SAMSUNG", "DRAM",
+    }
+    frame["category"] = frame["asset"].map(
+        lambda asset: "Commodity" if asset in commodity_assets
+        else "Ação/ETF" if asset in security_assets
+        else "Cripto"
+    )
     filter_col, sort_col = st.columns([2, 1])
     with filter_col:
         selected = st.multiselect("Ativos", frame["asset"].tolist(), default=frame["asset"].tolist(), key="cryptodash_assets")
@@ -14664,19 +14676,20 @@ def pagina_cryptodash():
         frame = frame.sort_values("change_pct_24h", ascending=False)
     else:
         frame = frame.sort_values("asset")
-    display = frame[["asset", "price", "quote_volume_24h", "change_pct_24h", "exchange", "instrument", "age_seconds"]].rename(columns={
-        "asset": "Ativo", "price": "Preço USDT", "quote_volume_24h": "Volume 24h USDT",
-        "change_pct_24h": "Variação 24h %", "exchange": "Fonte", "instrument": "Par", "age_seconds": "Idade (s)",
+    frame["quality"] = frame["stale"].map({True: "Atrasada", False: "Atual"})
+    display = frame[["category", "asset", "price", "quote_volume_24h", "change_pct_24h", "exchange", "market_type", "instrument", "age_seconds", "quality"]].rename(columns={
+        "category": "Classe", "asset": "Ativo", "price": "Preço USDT", "quote_volume_24h": "Volume 24h (fonte)",
+        "change_pct_24h": "Variação 24h %", "exchange": "Fonte", "market_type": "Mercado", "instrument": "Instrumento", "age_seconds": "Idade (s)", "quality": "Atualidade",
     })
     st.dataframe(
         display.style.format({
-            "Preço USDT": "{:,.8f}", "Volume 24h USDT": "{:,.0f}",
+            "Preço USDT": "{:,.8f}", "Volume 24h (fonte)": "{:,.2f}",
             "Variação 24h %": "{:+.2f}%", "Idade (s)": "{:.0f}",
         }, na_rep="—"),
         use_container_width=True, hide_index=True,
     )
     if unsupported:
-        st.warning("Sem par spot USDT encontrado nas três fontes: " + ", ".join(unsupported))
+        st.warning("Sem instrumento USDT encontrado nas três fontes: " + ", ".join(unsupported))
     errors = snapshot.get("provider_errors", {})
     if errors:
         with st.expander("Avisos das fontes"):
