@@ -35,7 +35,9 @@ def test_failed_provider_is_reported_and_remaining_sources_are_used(monkeypatch)
 
 def test_commodity_contracts_are_requested_by_default():
     assert cryptodash.COMMODITIES == ["XAU", "XAG", "BZ", "CL", "XPD", "XPT", "COPPER", "NATGAS"]
-    assert cryptodash.FX_ASSETS == ["USDBRL"]
+    assert "USDBRL" in cryptodash.FX_ASSETS
+    assert "EURUSD" in cryptodash.FX_ASSETS
+    assert len(cryptodash.FX_ASSETS) == len(cryptodash.BINGX_FX_INSTRUMENTS)
     assert cryptodash.SECURITIES == [
         "SPY", "QQQ", "NVDA", "TSLA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "V", "BE", "BX",
         "GS", "HD", "KO", "MP", "MU", "ZM", "ZS", "ACN", "AMC", "AMD", "APP", "ARM",
@@ -72,6 +74,38 @@ def test_bingx_is_used_only_after_binance_and_okx(monkeypatch):
     result = cryptodash.fetch_cryptodash_quotes(["COPPER"])
 
     assert result["quotes"][0]["exchange"] == "BingX"
+
+
+def test_bingx_forex_contracts_are_normalized_to_currency_pairs(monkeypatch):
+    def fake_request(url, timeout):
+        if "spot" in url:
+            return ({"data": []}, 1)
+        return ({"data": [{
+            "symbol": "NCFXEUR2USD-USDT", "lastPrice": "1.12", "priceChangePercent": "0.7",
+            "quoteVolume": "1234", "highPrice": "1.13", "lowPrice": "1.11", "time": "1710000000000",
+        }]}, 1)
+
+    monkeypatch.setattr(cryptodash, "request_json", fake_request)
+    result = cryptodash._bingx_tickers()
+
+    assert result["EURUSD"]["price"] == 1.12
+    assert result["EURUSD"]["instrument"] == "NCFXEUR2USD-USDT"
+    assert result["EURUSD"]["market_type"] == "Índice Forex perpétuo"
+
+
+def test_bingx_has_priority_for_forex_only(monkeypatch):
+    monkeypatch.setattr(cryptodash, "_binance_tickers", lambda: {
+        "EURUSD": {"price": 1.1, "change_pct_24h": 0, "timestamp_ms": 0, "instrument": "EURUSDUSDT"}
+    })
+    monkeypatch.setattr(cryptodash, "_okx_tickers", lambda: {})
+    monkeypatch.setattr(cryptodash, "_bingx_tickers", lambda: {
+        "EURUSD": {"price": 1.12, "change_pct_24h": 0.7, "timestamp_ms": 0, "instrument": "NCFXEUR2USD-USDT"}
+    })
+
+    result = cryptodash.fetch_cryptodash_quotes(["EURUSD"])
+
+    assert result["quotes"][0]["exchange"] == "BingX"
+    assert result["quotes"][0]["price"] == 1.12
 
 
 def test_old_last_trade_is_kept_and_marked_stale_when_no_fresh_fallback(monkeypatch):

@@ -12,7 +12,26 @@ ASSETS = [
     "BNB", "ON", "AVAX", "ENA", "SUI", "UNI", "WLD", "PUMP", "AIOT", "HOT",
 ]
 COMMODITIES = ["XAU", "XAG", "BZ", "CL", "XPD", "XPT", "COPPER", "NATGAS"]
-FX_ASSETS = ["USDBRL"]
+FX_ASSETS = [
+    "AUDJPY", "AUDUSD", "CADCHF", "CADJPY", "CHFJPY", "EURCAD", "EURCHF", "EURGBP", "EURJPY",
+    "EURNZD", "EURUSD", "EURSGD", "GBPAUD", "GBPCAD", "GBPCHF", "GBPJPY", "GBPNZD", "GBPUSD",
+    "GBPSGD", "NZDCAD", "NZDJPY", "NZDUSD", "USDCAD", "USDCHF", "USDDKK", "USDJPY", "USDKRW",
+    "USDMXN", "USDNOK", "USDPLN", "USDSEK", "USDTHB", "USDTRY", "USDZAR", "USDBRL", "USDSGD",
+]
+BINGX_FX_INSTRUMENTS = {
+    "AUDJPY": "NCFXAUD2JPY-USDT", "AUDUSD": "NCFXAUD2USD-USDT", "CADCHF": "NCFXCAD2CHF-USDT",
+    "CADJPY": "NCFXCAD2JPY-USDT", "CHFJPY": "NCFXCHF2JPY-USDT", "EURCAD": "NCFXEUR2CAD-USDT",
+    "EURCHF": "NCFXEUR2CHF-USDT", "EURGBP": "NCFXEUR2GBP-USDT", "EURJPY": "NCFXEUR2JPY-USDT",
+    "EURNZD": "NCFXEUR2NZD-USDT", "EURUSD": "NCFXEUR2USD-USDT", "EURSGD": "NCFXEURSGD2USD-USDT",
+    "GBPAUD": "NCFXGBP2AUD-USDT", "GBPCAD": "NCFXGBP2CAD-USDT", "GBPCHF": "NCFXGBP2CHF-USDT",
+    "GBPJPY": "NCFXGBP2JPY-USDT", "GBPNZD": "NCFXGBP2NZD-USDT", "GBPUSD": "NCFXGBP2USD-USDT",
+    "GBPSGD": "NCFXGBPSGD2USD-USDT", "NZDCAD": "NCFXNZD2CAD-USDT", "NZDJPY": "NCFXNZD2JPY-USDT",
+    "NZDUSD": "NCFXNZD2USD-USDT", "USDCAD": "NCFXUSD2CAD-USDT", "USDCHF": "NCFXUSD2CHF-USDT",
+    "USDDKK": "NCFXUSD2DKK-USDT", "USDJPY": "NCFXUSD2JPY-USDT", "USDKRW": "NCFXUSD2KRW-USDT",
+    "USDMXN": "NCFXUSD2MXN-USDT", "USDNOK": "NCFXUSD2NOK-USDT", "USDPLN": "NCFXUSD2PLN-USDT",
+    "USDSEK": "NCFXUSD2SEK-USDT", "USDTHB": "NCFXUSD2THB-USDT", "USDTRY": "NCFXUSD2TRY-USDT",
+    "USDZAR": "NCFXUSD2ZAR-USDT", "USDBRL": "NCFXUSDBRL2USD-USDT", "USDSGD": "NCFXUSDSGD2USD-USDT",
+}
 SEVEN_MAGNIFICAS = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"]
 INDEX_ASSETS = ["SPY", "QQQ", "KORU", "EWY", "TQQQ"]
 ASSET_NAMES = {
@@ -21,7 +40,21 @@ ASSET_NAMES = {
     "NEAR": "NEAR Protocol", "BNB": "BNB Chain", "ON": "ON Semiconductor", "AVAX": "Avalanche", "ENA": "Ethena",
     "SUI": "Sui", "UNI": "Uniswap", "WLD": "Worldcoin", "PUMP": "Pump.fun", "AIOT": "AIOT", "HOT": "Holo",
     "XAU": "Ouro", "XAG": "Prata", "BZ": "Brent", "CL": "Petróleo WTI", "XPD": "Paládio",
-    "XPT": "Platina", "COPPER": "Cobre", "NATGAS": "Gás Natural", "USDBRL": "Dólar / Real",
+    "XPT": "Platina", "COPPER": "Cobre", "NATGAS": "Gás Natural",
+    "AUDJPY": "Dólar Australiano / Iene", "AUDUSD": "Dólar Australiano / Dólar",
+    "CADCHF": "Dólar Canadense / Franco", "CADJPY": "Dólar Canadense / Iene", "CHFJPY": "Franco / Iene",
+    "EURCAD": "Euro / Dólar Canadense", "EURCHF": "Euro / Franco", "EURGBP": "Euro / Libra",
+    "EURJPY": "Euro / Iene", "EURNZD": "Euro / Dólar Neozelandês", "EURUSD": "Euro / Dólar",
+    "EURSGD": "Euro / Dólar de Singapura", "GBPAUD": "Libra / Dólar Australiano",
+    "GBPCAD": "Libra / Dólar Canadense", "GBPCHF": "Libra / Franco", "GBPJPY": "Libra / Iene",
+    "GBPNZD": "Libra / Dólar Neozelandês", "GBPUSD": "Libra / Dólar", "GBPSGD": "Libra / Dólar de Singapura",
+    "NZDCAD": "Dólar Neozelandês / Dólar Canadense", "NZDJPY": "Dólar Neozelandês / Iene",
+    "NZDUSD": "Dólar Neozelandês / Dólar", "USDCAD": "Dólar / Dólar Canadense",
+    "USDCHF": "Dólar / Franco Suíço", "USDDKK": "Dólar / Coroa Dinamarquesa", "USDJPY": "Dólar / Iene",
+    "USDKRW": "Dólar / Won Sul-Coreano", "USDMXN": "Dólar / Peso Mexicano", "USDNOK": "Dólar / Coroa Norueguesa",
+    "USDPLN": "Dólar / Zloty", "USDSEK": "Dólar / Coroa Sueca", "USDTHB": "Dólar / Baht",
+    "USDTRY": "Dólar / Lira Turca", "USDZAR": "Dólar / Rand", "USDBRL": "Dólar / Real",
+    "USDSGD": "Dólar / Dólar de Singapura",
     "SPY": "S&P 500", "QQQ": "Nasdaq 100", "KORU": "Coreia do Sul", "EWY": "Coreia do Sul",
     "TQQQ": "Nasdaq 100 3x", "AAPL": "Apple", "MSFT": "Microsoft", "GOOGL": "Alphabet",
     "AMZN": "Amazon", "META": "Meta", "NVDA": "NVIDIA", "TSLA": "Tesla", "V": "Visa",
@@ -60,6 +93,15 @@ COMPANY_DOMAINS = {
 ASSET_FALLBACK_MARKS = {
     "SPY": "🇺🇸", "QQQ": "🇺🇸", "KORU": "🇰🇷", "EWY": "🇰🇷", "TQQQ": "🇺🇸", "USDBRL": "🇧🇷",
     "XPD": "Pd", "XPT": "Pt", "COPPER": "Cu", "BZ": "Br", "XAU": "Au", "XAG": "Ag", "CL": "◉", "NATGAS": "N",
+    "AUDJPY": "🇦🇺🇯🇵", "AUDUSD": "🇦🇺🇺🇸", "CADCHF": "🇨🇦🇨🇭", "CADJPY": "🇨🇦🇯🇵",
+    "CHFJPY": "🇨🇭🇯🇵", "EURCAD": "🇪🇺🇨🇦", "EURCHF": "🇪🇺🇨🇭", "EURGBP": "🇪🇺🇬🇧",
+    "EURJPY": "🇪🇺🇯🇵", "EURNZD": "🇪🇺🇳🇿", "EURUSD": "🇪🇺🇺🇸", "EURSGD": "🇪🇺🇸🇬",
+    "GBPAUD": "🇬🇧🇦🇺", "GBPCAD": "🇬🇧🇨🇦", "GBPCHF": "🇬🇧🇨🇭", "GBPJPY": "🇬🇧🇯🇵",
+    "GBPNZD": "🇬🇧🇳🇿", "GBPUSD": "🇬🇧🇺🇸", "GBPSGD": "🇬🇧🇸🇬", "NZDCAD": "🇳🇿🇨🇦",
+    "NZDJPY": "🇳🇿🇯🇵", "NZDUSD": "🇳🇿🇺🇸", "USDCAD": "🇺🇸🇨🇦", "USDCHF": "🇺🇸🇨🇭",
+    "USDDKK": "🇺🇸🇩🇰", "USDJPY": "🇺🇸🇯🇵", "USDKRW": "🇺🇸🇰🇷", "USDMXN": "🇺🇸🇲🇽",
+    "USDNOK": "🇺🇸🇳🇴", "USDPLN": "🇺🇸🇵🇱", "USDSEK": "🇺🇸🇸🇪", "USDTHB": "🇺🇸🇹🇭",
+    "USDTRY": "🇺🇸🇹🇷", "USDZAR": "🇺🇸🇿🇦", "USDSGD": "🇺🇸🇸🇬",
 }
 SECURITIES = [
     "SPY", "QQQ", "NVDA", "TSLA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "V", "BE", "BX",
@@ -190,6 +232,19 @@ def _bingx_tickers() -> dict[str, dict[str, Any]]:
         rows = data.get("data", []) if isinstance(data, dict) else []
         for row in rows if isinstance(rows, list) else []:
             symbol = str(row.get("symbol") or "")
+            fx_asset = next((asset for asset, instrument in BINGX_FX_INSTRUMENTS.items() if instrument == symbol), None)
+            if fx_asset:
+                result[fx_asset] = {
+                    "price": safe_float(row.get("lastPrice")),
+                    "change_pct_24h": safe_float(row.get("priceChangePercent")),
+                    "quote_volume_24h": safe_float(row.get("quoteVolume")),
+                    "high_24h": safe_float(row.get("highPrice")),
+                    "low_24h": safe_float(row.get("lowPrice")),
+                    "timestamp_ms": int(safe_float(row.get("closeTime") or row.get("time"))),
+                    "instrument": symbol,
+                    "market_type": "Índice Forex perpétuo",
+                }
+                continue
             if not symbol.endswith("-USDT"):
                 continue
             base = symbol[:-5]
@@ -263,7 +318,8 @@ def fetch_cryptodash_quotes(assets: list[str] | None = None) -> dict[str, Any]:
     for asset in assets:
         selected = None
         last_known = None
-        for provider in PROVIDERS:
+        provider_order = ("BingX", "Binance", "OKX") if asset in FX_ASSETS else PROVIDERS
+        for provider in provider_order:
             item = provider_data[provider].get(asset)
             if not item or item.get("price", 0) <= 0:
                 continue
