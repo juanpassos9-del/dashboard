@@ -11723,7 +11723,7 @@ def load_crypto_terminal_payload(refresh_key: int = 0):
     }
 
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=10, show_spinner=False)
 def load_cryptodash_quotes(refresh_key: int = 0):
     from execution.cryptodash import fetch_cryptodash_quotes
 
@@ -14613,6 +14613,7 @@ def _plot_rentabilidade_df(df: "pd.DataFrame", titulo: str = "Curva de Capital")
     c5.metric("Max Drawdown",  f"R$ {max_dd:,.2f}")
 
 
+@st.fragment(run_every=5)
 def pagina_cryptodash():
     """Exchange-driven quote board using Binance, BingX, then OKX."""
     import html as html_lib
@@ -14627,7 +14628,9 @@ def pagina_cryptodash():
         asset_display_name,
         asset_fallback_mark,
         asset_logo_url,
+        quote_change_direction,
     )
+    import time
 
     st.title("CRIPTODASH")
     st.caption("Mercado 24h · Cripto, ações, índices, commodities e câmbio")
@@ -14637,7 +14640,7 @@ def pagina_cryptodash():
             st.session_state["cryptodash_refresh_key"] = st.session_state.get("cryptodash_refresh_key", 0) + 1
             load_cryptodash_quotes.clear()
     with info_col:
-        st.caption("Preço USDT · variação móvel de 24h · contratos perpétuos não representam posse do ativo-objeto")
+        st.caption("Atualização automática a cada 10 s · variação móvel de 24h · perpétuos não representam posse do ativo-objeto")
 
     try:
         snapshot = load_cryptodash_quotes(int(st.session_state.get("cryptodash_refresh_key", 0)))
@@ -14672,6 +14675,10 @@ def pagina_cryptodash():
     ]
     palette = ["#F7931A", "#22C55E", "#38BDF8", "#F97316", "#A78BFA", "#14B8A6", "#F43F5E", "#EAB308"]
     board_columns = []
+    now_monotonic = time.monotonic()
+    last_prices = dict(st.session_state.get("cryptodash_last_prices", {}))
+    flash_until = dict(st.session_state.get("cryptodash_flash_until", {}))
+    flash_direction = dict(st.session_state.get("cryptodash_flash_direction", {}))
     for heading, assets in groups:
         rows_html = []
         for asset in assets:
@@ -14682,6 +14689,14 @@ def pagina_cryptodash():
                     rows_html.append(f"<div class='cd-missing'><span>{label}</span><small>sem cotação</small></div>")
                 continue
             price = float(quote.get("price") or 0)
+            direction = quote_change_direction(last_prices.get(asset), price)
+            if direction:
+                flash_until[asset] = now_monotonic + 1.5
+                flash_direction[asset] = direction
+            last_prices[asset] = price
+            pulse_class = ""
+            if now_monotonic < flash_until.get(asset, 0):
+                pulse_class = f" cd-flash-{flash_direction.get(asset, '')}"
             decimals = 2 if price >= 1 else min(10, max(4, int(math.ceil(-math.log10(price))) + 2)) if price > 0 else 2
             price_text = f"{price:,.{decimals}f}".replace(",", "_").replace(".", ",").replace("_", ".")
             change = float(quote.get("change_pct_24h") or 0)
@@ -14700,7 +14715,7 @@ def pagina_cryptodash():
                 f"<img src='{logo_url}' alt='' loading='lazy' onerror='this.style.display=\"none\"'></span>"
             )
             rows_html.append(
-                f"<div class='cd-row' title='{title}'>"
+                f"<div class='cd-row{pulse_class}' title='{title}'>"
                 f"{logo}<span class='cd-name'>{name}</span>"
                 f"<span class='cd-numbers'><b>{price_text}</b><small class='{change_class}'>{change_text}</small></span>"
                 "</div>"
@@ -14708,6 +14723,9 @@ def pagina_cryptodash():
         board_columns.append(
             f"<section class='cd-class'><h3>{html_lib.escape(heading)}</h3>{''.join(rows_html) or '<div class=\"cd-empty\">Sem ativos</div>'}</section>"
         )
+    st.session_state["cryptodash_last_prices"] = last_prices
+    st.session_state["cryptodash_flash_until"] = flash_until
+    st.session_state["cryptodash_flash_direction"] = flash_direction
 
     board_css = """
     <style>
@@ -14718,6 +14736,12 @@ def pagina_cryptodash():
       .cd-class h3{height:32px;margin:0 0 3px;display:flex;align-items:center;justify-content:center;border-bottom:1px solid #252b34;color:#8d9aab;font-size:10px;font-weight:800;letter-spacing:1.2px;}
       .cd-row{min-height:43px;display:grid;grid-template-columns:28px minmax(48px,1fr) max-content;align-items:center;column-gap:8px;border-bottom:1px solid #1e242c;padding:5px 2px;}
       .cd-row:last-child{border-bottom:0;}
+      @keyframes cd-pulse-green{0%,100%{background:transparent}14%,42%,70%{background:rgba(22,199,132,.28)}28%,56%,84%{background:rgba(22,199,132,.06)}}
+      @keyframes cd-pulse-red{0%,100%{background:transparent}14%,42%,70%{background:rgba(234,57,67,.3)}28%,56%,84%{background:rgba(234,57,67,.06)}}
+      .cd-flash-up{animation:cd-pulse-green 1.2s ease-out both}.cd-flash-down{animation:cd-pulse-red 1.2s ease-out both}
+      .cd-flash-up .cd-numbers b,.cd-flash-up .cd-numbers small{color:#16c784!important}
+      .cd-flash-down .cd-numbers b,.cd-flash-down .cd-numbers small{color:#ea3943!important}
+      @media(prefers-reduced-motion:reduce){.cd-flash-up,.cd-flash-down{animation:none}}
       .cd-brand,.cd-mark{position:relative;width:26px;height:26px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:#202731;color:#f3f6fa;font-size:10px;font-weight:800;overflow:hidden;}
       .cd-mark{background:color-mix(in srgb,var(--mark-color) 24%,#141a22);color:#f7f9fb;}
       .cd-brand .cd-mark{position:absolute;inset:0;}

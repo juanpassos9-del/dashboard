@@ -147,6 +147,12 @@ def asset_fallback_mark(asset: str) -> str:
     return ASSET_FALLBACK_MARKS.get(asset, "ETF" if asset in SECURITIES or asset in INDEX_ASSETS else "◆")
 
 
+def quote_change_direction(previous: float | None, current: float) -> str:
+    if previous is None or current == previous:
+        return ""
+    return "up" if current > previous else "down"
+
+
 def _binance_tickers() -> dict[str, dict[str, Any]]:
     result = {}
     warnings = []

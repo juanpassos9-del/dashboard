@@ -64,6 +64,13 @@ def test_board_labels_and_logos_use_asset_names_not_instrument_ids():
     assert cryptodash.asset_logo_url("AAPL").startswith("https://www.google.com/s2/favicons?")
 
 
+def test_quote_direction_for_flash_feedback():
+    assert cryptodash.quote_change_direction(None, 10) == ""
+    assert cryptodash.quote_change_direction(10, 11) == "up"
+    assert cryptodash.quote_change_direction(11, 10) == "down"
+    assert cryptodash.quote_change_direction(10, 10) == ""
+
+
 def test_bingx_is_used_only_after_binance_and_okx(monkeypatch):
     monkeypatch.setattr(cryptodash, "_binance_tickers", lambda: {})
     monkeypatch.setattr(cryptodash, "_okx_tickers", lambda: {})
