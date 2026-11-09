@@ -14620,7 +14620,7 @@ def _plot_rentabilidade_df(df: "pd.DataFrame", titulo: str = "Curva de Capital")
     c5.metric("Max Drawdown",  f"R$ {max_dd:,.2f}")
 
 
-@st.fragment(run_every=1)
+@st.fragment(run_every=2)
 def pagina_cryptodash():
     """Exchange-driven quote board using Binance, BingX, then OKX."""
     import html as html_lib
@@ -14647,7 +14647,7 @@ def pagina_cryptodash():
             st.session_state["cryptodash_refresh_key"] = st.session_state.get("cryptodash_refresh_key", 0) + 1
             load_cryptodash_quotes.clear()
     with info_col:
-        st.caption("Atualização automática a cada 10 s · variação móvel de 24h · perpétuos não representam posse do ativo-objeto")
+        st.caption("WebSocket contínuo · painel atualiza a cada 2 s · REST a cada 30 s como reserva · derivativos não representam posse do ativo-objeto")
 
     try:
         snapshot = load_cryptodash_quotes(int(st.session_state.get("cryptodash_refresh_key", 0)))
@@ -14682,6 +14682,15 @@ def pagina_cryptodash():
     fallback_count = len(quotes) - binance_count
     ws_connected = sum(status.get("state") == "conectado" for status in ws_status.values())
     st.caption(f"{len(quotes)} ativos · WebSocket {len(live_assets)}/{len(quotes)} · {ws_connected} conexões ativas · REST como fallback")
+    counts = snapshot.get("universe_counts", {})
+    st.caption(
+        "Universo: "
+        f"{counts.get('Cripto', 0)} cripto · {counts.get('7 Magníficas', 0)} 7 Magníficas · "
+        f"{counts.get('Índices', 0)} índices · {counts.get('Ações/ETFs', 0)} ações/ETFs · "
+        f"{counts.get('Commodities', 0)} commodities · {counts.get('FX', 0)} pares FX"
+    )
+    if not any(any(code in str(row.get("display_name", "")).upper() for code in ("IBOV", "BOVESPA", "BOVA11")) for row in quotes):
+        st.caption("Ibovespa/BOVA11: sem contrato perpétuo correspondente nas listas públicas atuais das exchanges consultadas.")
     if provider_issues.get("Binance"):
         st.warning("Binance com falha parcial; o painel usa os dados disponíveis e tenta os fallbacks. " + provider_issues["Binance"])
     elif binance_count == 0:
@@ -14690,15 +14699,25 @@ def pagina_cryptodash():
         st.caption(f"Binance principal ativa: {binance_count} ativos selecionados.")
 
     quote_by_asset = {row.get("asset"): row for row in quotes}
+    catalog = snapshot.get("asset_catalog", {})
+    dynamic_by_class = {}
+    for asset, metadata in catalog.items():
+        if metadata.get("dynamic") and asset in quote_by_asset:
+            dynamic_by_class.setdefault(metadata.get("asset_class", "Cripto"), []).append(asset)
+    for category, assets in dynamic_by_class.items():
+        assets.sort(
+            key=lambda asset: float(quote_by_asset[asset].get("quote_volume_24h") or 0),
+            reverse=True,
+        )
     index_set = set(INDEX_ASSETS)
     seven_set = set(SEVEN_MAGNIFICAS)
     other_securities = [asset for asset in SECURITIES if asset not in seven_set and asset not in index_set]
     groups = [
-        ("CRIPTO", ASSETS),
-        ("7 MAGNÍFICAS", SEVEN_MAGNIFICAS),
-        ("ÍNDICES", INDEX_ASSETS),
-        ("AÇÕES / ETFs", other_securities),
-        ("COMMODITIES", COMMODITIES),
+        ("CRIPTO", ASSETS + dynamic_by_class.get("Cripto", [])),
+        ("7 MAGNÍFICAS", SEVEN_MAGNIFICAS + dynamic_by_class.get("7 Magníficas", [])),
+        ("ÍNDICES", INDEX_ASSETS + dynamic_by_class.get("Índices", [])),
+        ("AÇÕES / ETFs", other_securities + dynamic_by_class.get("Ações/ETFs", [])),
+        ("COMMODITIES", COMMODITIES + dynamic_by_class.get("Commodities", [])),
         ("FX", FX_ASSETS),
     ]
     palette = ["#F7931A", "#22C55E", "#38BDF8", "#F97316", "#A78BFA", "#14B8A6", "#F43F5E", "#EAB308"]
@@ -14730,9 +14749,9 @@ def pagina_cryptodash():
             change = float(quote.get("change_pct_24h") or 0)
             change_class = "cd-up" if change >= 0 else "cd-down"
             change_text = f"{change:+.2f}%".replace(".", ",")
-            name = html_lib.escape(asset_display_name(asset))
-            logo_url = html_lib.escape(asset_logo_url(asset), quote=True)
-            mark = html_lib.escape(asset_fallback_mark(asset))
+            name = html_lib.escape(quote.get("display_name") or asset_display_name(asset))
+            logo_url = html_lib.escape(quote.get("logo_url") or asset_logo_url(asset), quote=True)
+            mark = html_lib.escape(quote.get("fallback_mark") or asset_fallback_mark(asset))
             color = palette[sum(ord(char) for char in asset) % len(palette)]
             freshness = "WebSocket ao vivo" if quote.get("source") == "WebSocket" else "REST atrasado" if quote.get("stale") else "REST fallback"
             title = html_lib.escape(f"{quote.get('exchange', '')} · {quote.get('market_type', '')} · {freshness}", quote=True)
@@ -14759,7 +14778,7 @@ def pagina_cryptodash():
     <style>
       .cd-scroll{width:100%;overflow-x:auto;scrollbar-color:#394354 #11151b;}
       .cd-board{display:grid;grid-template-columns:repeat(6,minmax(205px,1fr));min-width:1320px;background:#0d1015;color:#eef2f6;}
-      .cd-class{min-width:0;padding:0 12px 8px;border-right:1px solid #252b34;}
+      .cd-class{min-width:0;max-height:72vh;overflow-y:auto;overscroll-behavior:contain;padding:0 12px 8px;border-right:1px solid #252b34;scrollbar-color:#394354 #11151b;}
       .cd-class:last-child{border-right:0;}
       .cd-class h3{height:32px;margin:0 0 3px;display:flex;align-items:center;justify-content:center;border-bottom:1px solid #252b34;color:#8d9aab;font-size:10px;font-weight:800;letter-spacing:1.2px;}
       .cd-row{min-height:43px;display:grid;grid-template-columns:28px minmax(48px,1fr) max-content;align-items:center;column-gap:8px;border-bottom:1px solid #1e242c;padding:5px 2px;}

@@ -31,6 +31,7 @@ class CryptoDashRealtimeHub:
     """Maintains one public connection per provider/market and shares latest ticks."""
 
     _MARKETS = ("binance_spot", "binance_swap", "bingx_spot", "bingx_swap", "okx")
+    _BINGX_SUBSCRIPTIONS_PER_CONNECTION = 100
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -66,7 +67,21 @@ class CryptoDashRealtimeHub:
                         "market_type": market_type,
                     })
 
-        for key, rows in grouped.items():
+        desired: dict[str, list[dict[str, str]]] = {
+            "binance_spot": grouped["binance_spot"],
+            "binance_swap": grouped["binance_swap"],
+            "okx": grouped["okx"],
+        }
+        for base_key in ("bingx_spot", "bingx_swap"):
+            rows = grouped[base_key]
+            for offset in range(0, len(rows), self._BINGX_SUBSCRIPTIONS_PER_CONNECTION):
+                shard = offset // self._BINGX_SUBSCRIPTIONS_PER_CONNECTION
+                desired[f"{base_key}_{shard:02d}"] = rows[offset:offset + self._BINGX_SUBSCRIPTIONS_PER_CONNECTION]
+
+        with self._lock:
+            existing_keys = set(self._signatures) | set(self._threads)
+        for key in existing_keys | set(desired):
+            rows = desired.get(key, [])
             rows.sort(key=lambda row: (row["instrument"], row["asset"]))
             signature = tuple((row["asset"], row["instrument"]) for row in rows)
             socket_to_close = None
@@ -76,10 +91,12 @@ class CryptoDashRealtimeHub:
                 self._desired[key] = rows
                 self._signatures[key] = signature
                 socket_to_close = self._sockets.get(key)
-                if key not in self._threads or not self._threads[key].is_alive():
+                if rows and (key not in self._threads or not self._threads[key].is_alive()):
                     thread = threading.Thread(target=self._run, args=(key,), daemon=True, name=f"cryptodash-{key}")
                     self._threads[key] = thread
                     thread.start()
+                if not rows:
+                    self._status[key] = {"state": "sem instrumentos", "last_message_at": None, "error": ""}
             if socket_to_close:
                 try:
                     socket_to_close.close()
@@ -95,8 +112,7 @@ class CryptoDashRealtimeHub:
             if not rows:
                 with self._lock:
                     self._status[key] = {"state": "sem instrumentos", "last_message_at": None, "error": ""}
-                time.sleep(5)
-                continue
+                return
 
             try:
                 import websocket
@@ -127,8 +143,7 @@ class CryptoDashRealtimeHub:
     def _url(self, key: str, rows: list[dict[str, str]]) -> str:
         if key.startswith("binance_"):
             base = "wss://stream.binance.com:9443" if key == "binance_spot" else "wss://fstream.binance.com"
-            streams = "/".join(f"{row['instrument'].lower()}@ticker" for row in rows)
-            return f"{base}/stream?streams={streams}"
+            return f"{base}/ws"
         if key == "bingx_spot":
             return "wss://open-api-ws.bingx.com/market"
         if key == "bingx_swap":
@@ -139,7 +154,15 @@ class CryptoDashRealtimeHub:
         with self._lock:
             self._status[key] = {"state": "conectado", "last_message_at": None, "error": ""}
         try:
-            if key.startswith("bingx_"):
+            if key.startswith("binance_"):
+                streams = [f"{row['instrument'].lower()}@ticker" for row in rows]
+                for offset in range(0, len(streams), 200):
+                    ws.send(json.dumps({
+                        "method": "SUBSCRIBE",
+                        "params": streams[offset:offset + 200],
+                        "id": offset // 200 + 1,
+                    }))
+            elif key.startswith("bingx_"):
                 for row in rows:
                     ws.send(json.dumps({
                         "id": str(uuid.uuid4()),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import re
 from typing import Any
 
 from execution.crypto_common import request_json, safe_float
@@ -112,6 +113,84 @@ SECURITIES = [
 TRADFI_ASSETS = set(COMMODITIES + SECURITIES + FX_ASSETS)
 PROVIDERS = ("Binance", "OKX", "BingX")
 MAX_QUOTE_AGE_SECONDS = 180
+
+BINGX_INDEX_NAMES = {
+    "DOWJONES": "Dow Jones", "DXY": "Índice do Dólar", "EWJ": "Ações do Japão",
+    "EWY": "Ações da Coreia do Sul", "FLKR": "Ações da Coreia do Sul",
+    "H100": "Hang Seng", "KOSPI1": "Kospi 200", "KOSPI": "Kospi",
+    "NASDAQ100": "Nasdaq 100", "NIKKEI225": "Nikkei 225",
+    "RUSSELL2000": "Russell 2000", "SP500": "S&P 500",
+}
+BINGX_COMMODITY_NAMES = {
+    "NCCO1OILBRENT2USD": ("BRENT", "Petróleo Brent"),
+    "NCCO1OILWTI2USD": ("WTI", "Petróleo WTI"),
+    "NCCO7241NATGAS2USD": ("NATGAS", "Gás Natural"),
+    "NCCO724COPPER2USD": ("COPPER", "Cobre"),
+    "NCCOGOLD2USD": ("GOLD", "Ouro"),
+    "NCCOHEATINGOIL2USD": ("HEATINGOIL", "Óleo de Aquecimento"),
+    "NCCOPALLADIUM2USD": ("PALLADIUM", "Paládio"),
+    "NCCOXAG2USD": ("SILVER", "Prata"),
+    "NCCOXAGEUR2USD": ("SILVER_EUR", "Prata / Euro"),
+    "NCCOXAGJPYUSD": ("SILVER_JPY", "Prata / Iene"),
+    "NCCOXAUAUD2USD": ("GOLD_AUD", "Ouro / Dólar Australiano"),
+    "NCCOXAUCAD2USD": ("GOLD_CAD", "Ouro / Dólar Canadense"),
+    "NCCOXAUCHF2USD": ("GOLD_CHF", "Ouro / Franco Suíço"),
+    "NCCOXAUEUR2USD": ("GOLD_EUR", "Ouro / Euro"),
+    "NCCOXAUGBP2USD": ("GOLD_GBP", "Ouro / Libra"),
+    "NCCOXAUJPY2USD": ("GOLD_JPY", "Ouro / Iene"),
+    "NCCOXAUKRW2USD": ("GOLD_KRW", "Ouro / Won Sul-Coreano"),
+    "NCCOXAUSGD2USD": ("GOLD_SGD", "Ouro / Dólar de Singapura"),
+    "NCCOXAUXAG2USD": ("GOLD_SILVER_RATIO", "Relação Ouro / Prata"),
+    "NCCOXAUXPT2USD": ("GOLD_PLATINUM_RATIO", "Relação Ouro / Platina"),
+    "NCCOXPT2USD": ("PLATINUM", "Platina"),
+    "NCCOXAUZAR2USD": ("GOLD_ZAR", "Ouro / Rand Sul-Africano"),
+}
+
+
+def _bingx_tradfi_identity(instrument: str) -> dict[str, str] | None:
+    """Turn BingX's opaque synthetic contract IDs into stable internal assets."""
+    symbol = str(instrument).split("-", 1)[0].upper()
+    if symbol.startswith("NCSK"):
+        ticker = re.sub(r"(?:2(?:USD|JPY|KRW)|USDT)$", "", symbol[4:])
+        if not ticker:
+            return None
+        label = ASSET_NAMES.get(ticker, ticker)
+        category = "7 Magníficas" if ticker in SEVEN_MAGNIFICAS else "Ações/ETFs"
+        return {
+            "asset": f"BINGX_STOCK_{ticker}",
+            "display_name": f"{label} · BingX perpétuo",
+            "asset_class": category,
+            "underlying": ticker,
+            "mark": ticker[:2],
+        }
+    if symbol.startswith("NCSI"):
+        code = re.sub(r"2(?:USD|JPY|KRW)$", "", symbol[4:])
+        if not code:
+            return None
+        return {
+            "asset": f"BINGX_INDEX_{code}",
+            "display_name": f"{BINGX_INDEX_NAMES.get(code, code)} · BingX perpétuo",
+            "asset_class": "Índices",
+            "underlying": code,
+            "mark": "IDX",
+        }
+    if symbol.startswith("NCCO"):
+        identity = BINGX_COMMODITY_NAMES.get(symbol)
+        if identity:
+            code, label = identity
+        else:
+            code = re.sub(r"2(?:USD|JPY|KRW)$", "", symbol[4:])
+            label = code.replace("_", " ").title()
+        if not code:
+            return None
+        return {
+            "asset": f"BINGX_COMMODITY_{code}",
+            "display_name": f"{label} · BingX perpétuo",
+            "asset_class": "Commodities",
+            "underlying": code,
+            "mark": "CMD",
+        }
+    return None
 
 
 def asset_class(asset: str) -> str:
@@ -303,7 +382,7 @@ def _okx_tickers() -> dict[str, dict[str, Any]]:
 
 def fetch_cryptodash_quotes(assets: list[str] | None = None) -> dict[str, Any]:
     """Fetch each exchange in priority order and fill missing/stale quotes."""
-    assets = [str(asset).upper() for asset in (assets or ASSETS + COMMODITIES + SECURITIES + FX_ASSETS)]
+    requested_assets = [str(asset).upper() for asset in assets] if assets is not None else None
     loaders = (("Binance", _binance_tickers), ("OKX", _okx_tickers), ("BingX", _bingx_tickers))
     provider_data: dict[str, dict[str, dict[str, Any]]] = {}
     provider_errors: dict[str, str] = {}
@@ -317,6 +396,54 @@ def fetch_cryptodash_quotes(assets: list[str] | None = None) -> dict[str, Any]:
         except Exception as exc:
             provider_errors[provider] = str(exc)[:240]
             provider_data[provider] = {}
+
+    asset_catalog: dict[str, dict[str, Any]] = {}
+    dynamic_crypto_assets: set[str] = set()
+    core_assets = list(dict.fromkeys(ASSETS + COMMODITIES + SECURITIES + FX_ASSETS))
+    for raw_asset, item in list(provider_data.get("BingX", {}).items()):
+        identity = _bingx_tradfi_identity(str(item.get("instrument") or raw_asset))
+        if not identity:
+            continue
+        alias = identity["asset"]
+        provider_data["BingX"][alias] = item
+        asset_catalog[alias] = {**identity, "dynamic": True, "exchange": "BingX"}
+
+    if requested_assets is None:
+        known_tradfi = set(core_assets)
+        non_crypto_prefixes = ("NCSK", "NCSI", "NCCO", "NCFX", "BINGX_")
+        crypto_assets = set()
+        for rows in provider_data.values():
+            for asset, item in rows.items():
+                if asset.startswith("_") or asset in known_tradfi or asset.startswith(non_crypto_prefixes):
+                    continue
+                if item.get("price", 0) > 0:
+                    crypto_assets.add(asset)
+        dynamic_crypto = sorted(
+            crypto_assets,
+            key=lambda asset: max(
+                (safe_float(rows.get(asset, {}).get("quote_volume_24h")) for rows in provider_data.values()),
+                default=0,
+            ),
+            reverse=True,
+        )
+        dynamic_crypto_assets = set(dynamic_crypto) - set(core_assets)
+        assets = list(dict.fromkeys(core_assets + dynamic_crypto + list(asset_catalog)))
+    else:
+        assets = requested_assets
+
+    for asset in assets:
+        if asset not in asset_catalog:
+            category = "Cripto" if asset in dynamic_crypto_assets else asset_class(asset)
+            asset_catalog[asset] = {
+                "display_name": asset_display_name(asset),
+                "asset_class": category,
+                "dynamic": asset not in core_assets,
+                "logo_url": asset_logo_url(asset),
+                "mark": asset_fallback_mark(asset),
+            }
+        else:
+            underlying = asset_catalog[asset].get("underlying")
+            asset_catalog[asset]["logo_url"] = asset_logo_url(underlying) if underlying else ""
 
     now_ms = int(time.time() * 1000)
     quotes = []
@@ -352,6 +479,13 @@ def fetch_cryptodash_quotes(assets: list[str] | None = None) -> dict[str, Any]:
         if selected is None:
             selected = last_known
         if selected:
+            selected.update({
+                "display_name": asset_catalog.get(asset, {}).get("display_name", asset_display_name(asset)),
+                "asset_class": asset_catalog.get(asset, {}).get("asset_class", asset_class(asset)),
+                "logo_url": asset_catalog.get(asset, {}).get("logo_url", asset_logo_url(asset)),
+                "fallback_mark": asset_catalog.get(asset, {}).get("mark", asset_fallback_mark(asset)),
+                "dynamic": asset_catalog.get(asset, {}).get("dynamic", False),
+            })
             quotes.append(selected)
         else:
             unsupported.append(asset)
@@ -360,15 +494,20 @@ def fetch_cryptodash_quotes(assets: list[str] | None = None) -> dict[str, Any]:
         "quotes": quotes,
         "unsupported": unsupported,
         "provider_errors": provider_errors,
+        "asset_catalog": asset_catalog,
+        "universe_counts": {
+            category: sum(info.get("asset_class") == category for info in asset_catalog.values())
+            for category in ("Cripto", "7 Magníficas", "Índices", "Ações/ETFs", "Commodities", "FX")
+        },
         "realtime_subscriptions": {
             provider: [
                 {
-                    "asset": asset,
-                    "instrument": str(item.get("instrument") or ""),
-                    "market_type": str(item.get("market_type") or ""),
+                    "asset": quote.get("asset"),
+                    "instrument": str(quote.get("instrument") or ""),
+                    "market_type": str(quote.get("market_type") or ""),
                 }
-                for asset, item in provider_data.get(provider, {}).items()
-                if asset in assets and item.get("instrument") and item.get("price", 0) > 0
+                for quote in quotes
+                if quote.get("exchange") == provider and quote.get("instrument") and quote.get("price", 0) > 0
             ]
             for provider in PROVIDERS
         },

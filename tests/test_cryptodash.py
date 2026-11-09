@@ -68,6 +68,46 @@ def test_board_labels_and_logos_use_asset_names_not_instrument_ids():
     assert cryptodash.asset_logo_url("AAPL").startswith("https://www.google.com/s2/favicons?")
 
 
+def test_bingx_tradfi_contracts_get_readable_identity():
+    stock = cryptodash._bingx_tradfi_identity("NCSKAAPL2USD-USDT")
+    index = cryptodash._bingx_tradfi_identity("NCSISP5002USD-USDT")
+    commodity = cryptodash._bingx_tradfi_identity("NCCO1OILWTI2USD-USDT")
+
+    assert stock["asset"] == "BINGX_STOCK_AAPL"
+    assert stock["asset_class"] == "7 Magníficas"
+    assert stock["display_name"] == "Apple · BingX perpétuo"
+    assert index["asset"] == "BINGX_INDEX_SP500"
+    assert index["asset_class"] == "Índices"
+    assert index["display_name"] == "S&P 500 · BingX perpétuo"
+    assert commodity["asset"] == "BINGX_COMMODITY_WTI"
+    assert commodity["asset_class"] == "Commodities"
+    assert commodity["display_name"] == "Petróleo WTI · BingX perpétuo"
+
+
+def test_default_universe_discovers_crypto_and_bingx_tradfi(monkeypatch):
+    monkeypatch.setattr(cryptodash, "_binance_tickers", lambda: {
+        "BTC": {"price": 60000, "quote_volume_24h": 100, "timestamp_ms": 0, "instrument": "BTCUSDT", "market_type": "Spot"},
+        "NEWCOIN": {"price": 2, "quote_volume_24h": 500, "timestamp_ms": 0, "instrument": "NEWCOINUSDT", "market_type": "Spot"},
+    })
+    monkeypatch.setattr(cryptodash, "_okx_tickers", lambda: {})
+    monkeypatch.setattr(cryptodash, "_bingx_tickers", lambda: {
+        "NCSISP500": {"price": 6000, "quote_volume_24h": 20, "timestamp_ms": 0, "instrument": "NCSISP5002USD-USDT", "market_type": "Perpétuo"},
+        "NCCO1OILWTI": {"price": 75, "quote_volume_24h": 30, "timestamp_ms": 0, "instrument": "NCCO1OILWTI2USD-USDT", "market_type": "Perpétuo"},
+    })
+
+    result = cryptodash.fetch_cryptodash_quotes()
+    catalog = result["asset_catalog"]
+    quotes = {row["asset"]: row for row in result["quotes"]}
+
+    assert "NEWCOIN" in catalog
+    assert catalog["NEWCOIN"]["asset_class"] == "Cripto"
+    assert catalog["BINGX_INDEX_SP500"]["asset_class"] == "Índices"
+    assert catalog["BINGX_COMMODITY_WTI"]["asset_class"] == "Commodities"
+    assert quotes["BINGX_INDEX_SP500"]["exchange"] == "BingX"
+    assert quotes["BINGX_COMMODITY_WTI"]["display_name"] == "Petróleo WTI · BingX perpétuo"
+    assert result["universe_counts"]["Cripto"] >= 1
+
+
 def test_quote_direction_for_flash_feedback():
     assert cryptodash.quote_change_direction(None, 10) == ""
     assert cryptodash.quote_change_direction(10, 11) == "up"
