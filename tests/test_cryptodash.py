@@ -53,6 +53,15 @@ def test_asset_classes_match_dashboard_groups():
     assert cryptodash.asset_class("GS") == "Ações/ETFs"
 
 
+def test_board_labels_and_logos_use_asset_names_not_instrument_ids():
+    assert cryptodash.asset_display_name("BTC") == "Bitcoin"
+    assert cryptodash.asset_display_name("AAPL") == "Apple"
+    assert cryptodash.asset_display_name("XAU") == "Ouro"
+    assert "BTCUSDT" not in cryptodash.asset_logo_url("BTC")
+    assert "tradingview" not in cryptodash.asset_logo_url("BTC")
+    assert cryptodash.asset_logo_url("AAPL").startswith("https://www.google.com/s2/favicons?")
+
+
 def test_bingx_is_used_only_after_binance_and_okx(monkeypatch):
     monkeypatch.setattr(cryptodash, "_binance_tickers", lambda: {})
     monkeypatch.setattr(cryptodash, "_okx_tickers", lambda: {})

@@ -14615,18 +14615,29 @@ def _plot_rentabilidade_df(df: "pd.DataFrame", titulo: str = "Curva de Capital")
 
 def pagina_cryptodash():
     """Exchange-driven quote board using Binance, BingX, then OKX."""
-    import pandas as pd
-    from execution.cryptodash import asset_class
+    import html as html_lib
+    import math
+    from execution.cryptodash import (
+        ASSETS,
+        COMMODITIES,
+        FX_ASSETS,
+        INDEX_ASSETS,
+        SECURITIES,
+        SEVEN_MAGNIFICAS,
+        asset_display_name,
+        asset_fallback_mark,
+        asset_logo_url,
+    )
 
     st.title("CRIPTODASH")
-    st.caption("Cripto, ações/ETFs e commodities | Prioridade: Binance → OKX → BingX")
+    st.caption("Mercado 24h · Cripto, ações, índices, commodities e câmbio")
     refresh_col, info_col = st.columns([1, 4])
     with refresh_col:
         if st.button("Atualizar cotações", type="primary", key="cryptodash_refresh"):
             st.session_state["cryptodash_refresh_key"] = st.session_state.get("cryptodash_refresh_key", 0) + 1
             load_cryptodash_quotes.clear()
     with info_col:
-        st.caption("Variação e volume são janelas móveis de 24h. Instrumentos perpétuos são derivados; unidades de volume podem variar por exchange.")
+        st.caption("Preço USDT · variação móvel de 24h · contratos perpétuos não representam posse do ativo-objeto")
 
     try:
         snapshot = load_cryptodash_quotes(int(st.session_state.get("cryptodash_refresh_key", 0)))
@@ -14637,14 +14648,9 @@ def pagina_cryptodash():
     quotes = snapshot.get("quotes", [])
     unsupported = snapshot.get("unsupported", [])
     provider_issues = snapshot.get("provider_errors", {})
-    providers_used = {q.get("exchange") for q in quotes}
     binance_count = sum(q.get("exchange") == "Binance" for q in quotes)
     fallback_count = len(quotes) - binance_count
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Ativos com cotação", len(quotes))
-    m2.metric("Binance", binance_count)
-    m3.metric("Fallback BingX / OKX", fallback_count)
-    m4.metric("Não listados", len(unsupported))
+    st.caption(f"{len(quotes)} ativos · Binance {binance_count} · fallbacks {fallback_count}")
     if provider_issues.get("Binance"):
         st.warning("Binance com falha parcial; o painel usa os dados disponíveis e tenta os fallbacks. " + provider_issues["Binance"])
     elif binance_count == 0:
@@ -14652,56 +14658,88 @@ def pagina_cryptodash():
     else:
         st.caption(f"Binance principal ativa: {binance_count} ativos selecionados.")
 
+    quote_by_asset = {row.get("asset"): row for row in quotes}
+    index_set = set(INDEX_ASSETS)
+    seven_set = set(SEVEN_MAGNIFICAS)
+    other_securities = [asset for asset in SECURITIES if asset not in seven_set and asset not in index_set]
+    groups = [
+        ("CRIPTO", ASSETS),
+        ("7 MAGNÍFICAS", SEVEN_MAGNIFICAS),
+        ("ÍNDICES", INDEX_ASSETS),
+        ("AÇÕES / ETFs", other_securities),
+        ("COMMODITIES", COMMODITIES),
+        ("FX", FX_ASSETS),
+    ]
+    palette = ["#F7931A", "#22C55E", "#38BDF8", "#F97316", "#A78BFA", "#14B8A6", "#F43F5E", "#EAB308"]
+    board_columns = []
+    for heading, assets in groups:
+        rows_html = []
+        for asset in assets:
+            quote = quote_by_asset.get(asset)
+            if not quote:
+                if asset in unsupported:
+                    label = html_lib.escape(asset_display_name(asset))
+                    rows_html.append(f"<div class='cd-missing'><span>{label}</span><small>sem cotação</small></div>")
+                continue
+            price = float(quote.get("price") or 0)
+            decimals = 2 if price >= 1 else min(10, max(4, int(math.ceil(-math.log10(price))) + 2)) if price > 0 else 2
+            price_text = f"{price:,.{decimals}f}".replace(",", "_").replace(".", ",").replace("_", ".")
+            change = float(quote.get("change_pct_24h") or 0)
+            change_class = "cd-up" if change >= 0 else "cd-down"
+            change_text = f"{change:+.2f}%".replace(".", ",")
+            name = html_lib.escape(asset_display_name(asset))
+            logo_url = html_lib.escape(asset_logo_url(asset), quote=True)
+            mark = html_lib.escape(asset_fallback_mark(asset))
+            color = palette[sum(ord(char) for char in asset) % len(palette)]
+            freshness = "cotação atrasada" if quote.get("stale") else "cotação atual"
+            title = html_lib.escape(f"{quote.get('exchange', '')} · {quote.get('market_type', '')} · {freshness}", quote=True)
+            logo = (
+                f"<span class='cd-mark' style='--mark-color:{color}'>{mark}</span>"
+                if not logo_url else
+                f"<span class='cd-brand' style='--mark-color:{color}'><span class='cd-mark'>{mark}</span>"
+                f"<img src='{logo_url}' alt='' loading='lazy' onerror='this.style.display=\"none\"'></span>"
+            )
+            rows_html.append(
+                f"<div class='cd-row' title='{title}'>"
+                f"{logo}<span class='cd-name'>{name}</span>"
+                f"<span class='cd-numbers'><b>{price_text}</b><small class='{change_class}'>{change_text}</small></span>"
+                "</div>"
+            )
+        board_columns.append(
+            f"<section class='cd-class'><h3>{html_lib.escape(heading)}</h3>{''.join(rows_html) or '<div class=\"cd-empty\">Sem ativos</div>'}</section>"
+        )
+
+    board_css = """
+    <style>
+      .cd-scroll{width:100%;overflow-x:auto;scrollbar-color:#394354 #11151b;}
+      .cd-board{display:grid;grid-template-columns:repeat(6,minmax(205px,1fr));min-width:1320px;background:#0d1015;color:#eef2f6;}
+      .cd-class{min-width:0;padding:0 12px 8px;border-right:1px solid #252b34;}
+      .cd-class:last-child{border-right:0;}
+      .cd-class h3{height:32px;margin:0 0 3px;display:flex;align-items:center;justify-content:center;border-bottom:1px solid #252b34;color:#8d9aab;font-size:10px;font-weight:800;letter-spacing:1.2px;}
+      .cd-row{min-height:43px;display:grid;grid-template-columns:28px minmax(48px,1fr) max-content;align-items:center;column-gap:8px;border-bottom:1px solid #1e242c;padding:5px 2px;}
+      .cd-row:last-child{border-bottom:0;}
+      .cd-brand,.cd-mark{position:relative;width:26px;height:26px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:#202731;color:#f3f6fa;font-size:10px;font-weight:800;overflow:hidden;}
+      .cd-mark{background:color-mix(in srgb,var(--mark-color) 24%,#141a22);color:#f7f9fb;}
+      .cd-brand .cd-mark{position:absolute;inset:0;}
+      .cd-brand img{position:absolute;inset:0;width:26px;height:26px;object-fit:contain;border-radius:50%;background:#171c23;}
+      .cd-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:700;color:#e5eaf0;}
+      .cd-numbers{text-align:right;white-space:nowrap;}
+      .cd-numbers b{display:block;font-size:12px;line-height:1.2;font-weight:750;color:#f3f5f8;font-variant-numeric:tabular-nums;}
+      .cd-numbers small{display:block;margin-top:2px;font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;}
+      .cd-up{color:#16c784;}.cd-down{color:#ea3943;}
+      .cd-missing{display:flex;align-items:center;justify-content:space-between;min-height:38px;border-bottom:1px solid #1e242c;color:#bbc4cf;font-size:11px;}
+      .cd-missing small,.cd-empty{color:#687586;font-size:10px;}
+      @media(max-width:1550px){.cd-board{grid-template-columns:repeat(3,minmax(220px,1fr));min-width:0}.cd-class:nth-child(3){border-right:0}.cd-class:nth-child(n+4){margin-top:16px}}
+      @media(max-width:760px){.cd-board{grid-template-columns:repeat(2,minmax(150px,1fr));min-width:0}.cd-class:nth-child(3){border-right:1px solid #252b34}.cd-class:nth-child(even){border-right:0}.cd-class:nth-child(n+3){margin-top:14px}.cd-class{padding:0 8px 6px}.cd-row{grid-template-columns:25px minmax(42px,1fr) max-content;column-gap:6px}.cd-brand,.cd-mark,.cd-brand img{width:23px;height:23px}.cd-name{font-size:11px}.cd-numbers b{font-size:11px}}
+    </style>
+    """
+    st.markdown(board_css + "<div class='cd-scroll'><div class='cd-board'>" + "".join(board_columns) + "</div></div>", unsafe_allow_html=True)
     if not quotes:
         st.error("Nenhuma cotação disponível nas fontes consultadas.")
-        errors = snapshot.get("provider_errors", {})
-        for provider, message in errors.items():
-            st.caption(f"{provider}: {message}")
-        return
-
-    frame = pd.DataFrame(quotes)
-    frame["category"] = frame["asset"].map(asset_class)
-    sort_by = st.selectbox("Ordenar por", ["Volume 24h", "Variação 24h", "Símbolo"], key="cryptodash_sort")
-    class_names = ["Todos", "Cripto", "7 Magníficas", "Ações/ETFs", "Índices", "Commodities", "FX"]
-    tabs = st.tabs(class_names)
-    columns = ["category", "asset", "price", "quote_volume_24h", "change_pct_24h", "exchange", "market_type", "instrument", "age_seconds", "stale"]
-    headers = {
-        "category": "Classe", "asset": "Ativo", "price": "Preço USDT", "quote_volume_24h": "Volume 24h (fonte)",
-        "change_pct_24h": "Variação 24h %", "exchange": "Fonte", "market_type": "Mercado", "instrument": "Instrumento",
-        "age_seconds": "Idade (s)", "stale": "Atualidade",
-    }
-    for class_name, tab in zip(class_names, tabs):
-        with tab:
-            subset = frame if class_name == "Todos" else frame[frame["category"] == class_name]
-            if not subset.empty:
-                if sort_by == "Volume 24h":
-                    subset = subset.sort_values("quote_volume_24h", ascending=False)
-                elif sort_by == "Variação 24h":
-                    subset = subset.sort_values("change_pct_24h", ascending=False)
-                else:
-                    subset = subset.sort_values("asset")
-                display = subset[columns].copy()
-                display["stale"] = display["stale"].map({True: "Atrasada", False: "Atual"})
-                display = display.rename(columns=headers)
-                st.dataframe(
-                    display.style.format({
-                        "Preço USDT": "{:,.8f}", "Volume 24h (fonte)": "{:,.2f}",
-                        "Variação 24h %": "{:+.2f}%", "Idade (s)": "{:.0f}",
-                    }, na_rep="—"),
-                    use_container_width=True, hide_index=True,
-                )
-            else:
-                st.info(f"Nenhuma cotação disponível na classe {class_name}.")
-            missing = unsupported if class_name == "Todos" else [asset for asset in unsupported if asset_class(asset) == class_name]
-            if missing:
-                st.warning("Sem instrumento USDT nas exchanges consultadas: " + ", ".join(missing))
-    errors = provider_issues
-    if errors:
+    if provider_issues:
         with st.expander("Avisos das fontes"):
-            for provider, message in errors.items():
+            for provider, message in provider_issues.items():
                 st.caption(f"{provider}: {message}")
-    if providers_used:
-        st.caption("Fontes efetivamente utilizadas: " + " · ".join(sorted(providers_used)))
 
 
 def _plot_rentabilidade(resultados: list, acumulado: list):

@@ -15,6 +15,52 @@ COMMODITIES = ["XAU", "XAG", "BZ", "CL", "XPD", "XPT", "COPPER", "NATGAS"]
 FX_ASSETS = ["USDBRL"]
 SEVEN_MAGNIFICAS = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"]
 INDEX_ASSETS = ["SPY", "QQQ", "KORU", "EWY", "TQQQ"]
+ASSET_NAMES = {
+    "BTC": "Bitcoin", "ETH": "Ethereum", "ZEC": "Zcash", "SOL": "Solana", "JCT": "JCT",
+    "XRP": "XRP", "HYPE": "Hyperliquid", "1000PEPE": "Pepe", "DOGE": "Dogecoin",
+    "NEAR": "NEAR Protocol", "BNB": "BNB Chain", "ON": "ON Semiconductor", "AVAX": "Avalanche", "ENA": "Ethena",
+    "SUI": "Sui", "UNI": "Uniswap", "WLD": "Worldcoin", "PUMP": "Pump.fun", "AIOT": "AIOT", "HOT": "Holo",
+    "XAU": "Ouro", "XAG": "Prata", "BZ": "Brent", "CL": "Petróleo WTI", "XPD": "Paládio",
+    "XPT": "Platina", "COPPER": "Cobre", "NATGAS": "Gás Natural", "USDBRL": "Dólar / Real",
+    "SPY": "S&P 500", "QQQ": "Nasdaq 100", "KORU": "Coreia do Sul", "EWY": "Coreia do Sul",
+    "TQQQ": "Nasdaq 100 3x", "AAPL": "Apple", "MSFT": "Microsoft", "GOOGL": "Alphabet",
+    "AMZN": "Amazon", "META": "Meta", "NVDA": "NVIDIA", "TSLA": "Tesla", "V": "Visa",
+    "BE": "Bloom Energy", "BX": "Blackstone", "GS": "Goldman Sachs", "HD": "Home Depot",
+    "KO": "Coca-Cola", "MP": "MP Materials", "MU": "Micron", "ZM": "Zoom", "ZS": "Zscaler",
+    "ACN": "Accenture", "AMC": "AMC", "AMD": "AMD", "APP": "AppLovin", "ARM": "Arm",
+    "SOXL": "Semicondutores 3x", "SNDK": "SanDisk", "SKHYNIX": "SK Hynix", "SOXS": "Semicondutores -3x",
+    "SPCX": "SPCX", "SKHY": "SKHY", "SNXX": "SanDisk 2x", "INTC": "Intel", "MSTR": "Strategy",
+    "SAMSUNG": "Samsung", "DRAM": "DRAM",
+}
+ASSET_LOGO_SLUGS = {
+    "XAU": "gold", "XAG": "silver", "CL": "crude-oil", "NATGAS": "natural-gas",
+    "AAPL": "apple", "MSFT": "microsoft", "GOOGL": "alphabet", "AMZN": "amazon", "META": "meta",
+    "NVDA": "nvidia", "TSLA": "tesla", "V": "visa", "BE": "bloom-energy", "BX": "blackstone",
+    "GS": "goldman-sachs", "HD": "home-depot", "KO": "coca-cola", "MP": "mp-materials",
+    "MU": "micron-technology", "ZM": "zoom-video-communications", "ZS": "zscaler", "ACN": "accenture",
+    "AMD": "advanced-micro-devices", "APP": "applovin", "SNDK": "sandisk", "INTC": "intel",
+    "AMC": "amctheatres", "ARM": "arm", "SKHYNIX": "skhynix", "MSTR": "strategy",
+    "SAMSUNG": "samsung", "SOXL": "direxion", "SOXS": "direxion", "TQQQ": "proshares",
+    "SPY": "ssga", "QQQ": "invesco", "KORU": "ishares", "EWY": "ishares",
+}
+CRYPTO_LOGO_IDS = {
+    "BTC": "btc", "ETH": "eth", "ZEC": "zec", "SOL": "sol", "XRP": "xrp", "HYPE": "hype",
+    "1000PEPE": "pepe", "DOGE": "doge", "NEAR": "near", "BNB": "bnb", "AVAX": "avax",
+    "ENA": "ena", "SUI": "sui", "UNI": "uni", "WLD": "wld", "PUMP": "pump", "HOT": "hot",
+}
+COMPANY_DOMAINS = {
+    "AAPL": "apple.com", "MSFT": "microsoft.com", "GOOGL": "google.com", "AMZN": "amazon.com",
+    "META": "meta.com", "NVDA": "nvidia.com", "TSLA": "tesla.com", "V": "visa.com",
+    "BE": "bloomenergy.com", "BX": "blackstone.com", "GS": "goldmansachs.com", "HD": "homedepot.com",
+    "KO": "coca-cola.com", "MP": "mpmaterials.com", "MU": "micron.com", "ZM": "zoom.us",
+    "ZS": "zscaler.com", "ACN": "accenture.com", "AMC": "amctheatres.com", "AMD": "amd.com",
+    "APP": "applovin.com", "ARM": "arm.com", "SNDK": "sandisk.com", "SKHYNIX": "skhynix.com",
+    "INTC": "intel.com", "MSTR": "strategy.com", "SAMSUNG": "samsung.com",
+}
+ASSET_FALLBACK_MARKS = {
+    "SPY": "🇺🇸", "QQQ": "🇺🇸", "KORU": "🇰🇷", "EWY": "🇰🇷", "TQQQ": "🇺🇸", "USDBRL": "🇧🇷",
+    "XPD": "Pd", "XPT": "Pt", "COPPER": "Cu", "BZ": "Br", "XAU": "Au", "XAG": "Ag", "CL": "◉", "NATGAS": "N",
+}
 SECURITIES = [
     "SPY", "QQQ", "NVDA", "TSLA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "V", "BE", "BX",
     "GS", "HD", "KO", "MP", "MU", "ZM", "ZS", "ACN", "AMC", "AMD", "APP", "ARM",
@@ -38,6 +84,25 @@ def asset_class(asset: str) -> str:
     if asset in FX_ASSETS:
         return "FX"
     return "Ações/ETFs"
+
+
+def asset_display_name(asset: str) -> str:
+    return ASSET_NAMES.get(asset, asset)
+
+
+def asset_logo_url(asset: str) -> str:
+    if asset in ASSETS:
+        logo_id = CRYPTO_LOGO_IDS.get(asset)
+        return f"https://assets.coincap.io/assets/icons/{logo_id}@2x.png" if logo_id else ""
+    domain = COMPANY_DOMAINS.get(asset)
+    if domain:
+        return f"https://www.google.com/s2/favicons?domain={domain}&sz=64"
+    slug = ASSET_LOGO_SLUGS.get(asset)
+    return f"https://www.google.com/s2/favicons?domain={slug}.com&sz=64" if slug else ""
+
+
+def asset_fallback_mark(asset: str) -> str:
+    return ASSET_FALLBACK_MARKS.get(asset, "ETF" if asset in SECURITIES or asset in INDEX_ASSETS else "◆")
 
 
 def _binance_tickers() -> dict[str, dict[str, Any]]:
