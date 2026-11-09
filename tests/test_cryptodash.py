@@ -1,4 +1,8 @@
+import gzip
+import json
+
 from execution import cryptodash
+from execution.cryptodash_ws import CryptoDashRealtimeHub
 
 
 def test_provider_priority_binance_then_okx_then_bingx(monkeypatch):
@@ -69,6 +73,46 @@ def test_quote_direction_for_flash_feedback():
     assert cryptodash.quote_change_direction(10, 11) == "up"
     assert cryptodash.quote_change_direction(11, 10) == "down"
     assert cryptodash.quote_change_direction(10, 10) == ""
+
+
+def test_snapshot_includes_exchange_instruments_for_websocket_subscriptions(monkeypatch):
+    monkeypatch.setattr(cryptodash, "_binance_tickers", lambda: {
+        "BTC": {"price": 60000, "timestamp_ms": 0, "instrument": "BTCUSDT", "market_type": "Spot"}
+    })
+    monkeypatch.setattr(cryptodash, "_okx_tickers", lambda: {})
+    monkeypatch.setattr(cryptodash, "_bingx_tickers", lambda: {})
+
+    result = cryptodash.fetch_cryptodash_quotes(["BTC"])
+
+    assert result["realtime_subscriptions"]["Binance"] == [
+        {"asset": "BTC", "instrument": "BTCUSDT", "market_type": "Spot"}
+    ]
+
+
+def test_bingx_compressed_websocket_ticker_updates_live_quote_store():
+    hub = CryptoDashRealtimeHub()
+    row = {"asset": "EURUSD", "instrument": "NCFXEUR2USD-USDT", "market_type": "Índice Forex perpétuo"}
+    payload = {
+        "dataType": "NCFXEUR2USD-USDT@ticker",
+        "data": {"s": "NCFXEUR2USD-USDT", "c": "1.12", "P": "0.7", "v": "12", "h": "1.13", "l": "1.11", "T": 1710000000000},
+    }
+
+    hub._on_message("bingx_swap", gzip.compress(json.dumps(payload).encode()), [row])
+
+    quote = hub.latest_quotes()[("BingX", "EURUSD", "Índice Forex perpétuo")]
+    assert quote["price"] == 1.12
+    assert quote["source"] == "WebSocket"
+
+
+def test_binance_combined_stream_ticker_updates_live_quote_store():
+    hub = CryptoDashRealtimeHub()
+    row = {"asset": "BTC", "instrument": "BTCUSDT", "market_type": "Spot"}
+    payload = {"stream": "btcusdt@ticker", "data": {"s": "BTCUSDT", "c": "61000", "P": "1.5", "q": "100", "h": "62000", "l": "59000", "E": 1710000000000}}
+
+    hub._on_message("binance_spot", json.dumps(payload), [row])
+
+    quote = hub.latest_quotes()[("Binance", "BTC", "Spot")]
+    assert quote["price"] == 61000
 
 
 def test_bingx_is_used_only_after_binance_and_okx(monkeypatch):

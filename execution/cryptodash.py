@@ -360,6 +360,18 @@ def fetch_cryptodash_quotes(assets: list[str] | None = None) -> dict[str, Any]:
         "quotes": quotes,
         "unsupported": unsupported,
         "provider_errors": provider_errors,
+        "realtime_subscriptions": {
+            provider: [
+                {
+                    "asset": asset,
+                    "instrument": str(item.get("instrument") or ""),
+                    "market_type": str(item.get("market_type") or ""),
+                }
+                for asset, item in provider_data.get(provider, {}).items()
+                if asset in assets and item.get("instrument") and item.get("price", 0) > 0
+            ]
+            for provider in PROVIDERS
+        },
         "updated_at": time.time(),
         "providers": list(PROVIDERS),
     }

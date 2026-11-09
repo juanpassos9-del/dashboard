@@ -11723,11 +11723,18 @@ def load_crypto_terminal_payload(refresh_key: int = 0):
     }
 
 
-@st.cache_data(ttl=10, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def load_cryptodash_quotes(refresh_key: int = 0):
     from execution.cryptodash import fetch_cryptodash_quotes
 
     return fetch_cryptodash_quotes()
+
+
+@st.cache_resource(show_spinner=False)
+def get_cryptodash_realtime_hub():
+    from execution.cryptodash_ws import CryptoDashRealtimeHub
+
+    return CryptoDashRealtimeHub()
 
 
 @st.cache_data(ttl=21600, show_spinner=False)
@@ -14613,7 +14620,7 @@ def _plot_rentabilidade_df(df: "pd.DataFrame", titulo: str = "Curva de Capital")
     c5.metric("Max Drawdown",  f"R$ {max_dd:,.2f}")
 
 
-@st.fragment(run_every=5)
+@st.fragment(run_every=1)
 def pagina_cryptodash():
     """Exchange-driven quote board using Binance, BingX, then OKX."""
     import html as html_lib
@@ -14649,11 +14656,32 @@ def pagina_cryptodash():
         return
 
     quotes = snapshot.get("quotes", [])
+    realtime_hub = get_cryptodash_realtime_hub()
+    realtime_hub.configure(snapshot.get("realtime_subscriptions", {}))
+    live_quotes = realtime_hub.latest_quotes()
+    live_assets = set()
+    realtime_snapshot = []
+    for quote in quotes:
+        quote = dict(quote)
+        live_key = (quote.get("exchange"), quote.get("asset"), quote.get("market_type"))
+        live_quote = live_quotes.get(live_key)
+        if live_quote and time.time() - live_quote["received_at"] <= 15:
+            quote.update({key: live_quote[key] for key in (
+                "price", "change_pct_24h", "quote_volume_24h", "high_24h", "low_24h", "timestamp_ms"
+            )})
+            quote["source"] = "WebSocket"
+            quote["age_seconds"] = max(0, round(time.time() - live_quote["received_at"]))
+            quote["stale"] = False
+            live_assets.add(quote.get("asset"))
+        realtime_snapshot.append(quote)
+    quotes = realtime_snapshot
+    ws_status = realtime_hub.statuses()
     unsupported = snapshot.get("unsupported", [])
     provider_issues = snapshot.get("provider_errors", {})
     binance_count = sum(q.get("exchange") == "Binance" for q in quotes)
     fallback_count = len(quotes) - binance_count
-    st.caption(f"{len(quotes)} ativos · Binance {binance_count} · fallbacks {fallback_count}")
+    ws_connected = sum(status.get("state") == "conectado" for status in ws_status.values())
+    st.caption(f"{len(quotes)} ativos · WebSocket {len(live_assets)}/{len(quotes)} · {ws_connected} conexões ativas · REST como fallback")
     if provider_issues.get("Binance"):
         st.warning("Binance com falha parcial; o painel usa os dados disponíveis e tenta os fallbacks. " + provider_issues["Binance"])
     elif binance_count == 0:
@@ -14706,7 +14734,7 @@ def pagina_cryptodash():
             logo_url = html_lib.escape(asset_logo_url(asset), quote=True)
             mark = html_lib.escape(asset_fallback_mark(asset))
             color = palette[sum(ord(char) for char in asset) % len(palette)]
-            freshness = "cotação atrasada" if quote.get("stale") else "cotação atual"
+            freshness = "WebSocket ao vivo" if quote.get("source") == "WebSocket" else "REST atrasado" if quote.get("stale") else "REST fallback"
             title = html_lib.escape(f"{quote.get('exchange', '')} · {quote.get('market_type', '')} · {freshness}", quote=True)
             logo = (
                 f"<span class='cd-mark' style='--mark-color:{color}'>{mark}</span>"
