@@ -1036,6 +1036,25 @@ def get_global_markets_data():
         overlaid = apply_global_realtime_overlay(data, live_quotes)
         overlay_meta = (overlaid.get("metadata") or {}).get("realtime_overlay") or {}
         live_count = int(overlay_meta.get("quotes_updated") or 0)
+        statuses = hub.statuses()
+        now_ts = time.time()
+        connected = sum(status.get("state") == "conectado" for status in statuses.values())
+        recent_messages = sum(
+            status.get("last_message_at") is not None
+            and now_ts - float(status["last_message_at"]) <= 30
+            for status in statuses.values()
+        )
+        errors = [
+            str(status.get("error"))[:120]
+            for status in statuses.values()
+            if status.get("error")
+        ]
+        overlay_meta.update({
+            "connections_connected": connected,
+            "connections_with_recent_ticks": recent_messages,
+            "connection_states": {key: value.get("state") for key, value in statuses.items()},
+            "connection_error": errors[0] if errors else "",
+        })
         if live_count:
             mark_source(
                 "Exchange WebSocket",
@@ -9155,6 +9174,18 @@ def sidebar_mercados():
             pass
         max_tick_age = int(realtime_meta.get("max_tick_age_seconds") or 0)
         update_label = f"AO VIVO {live_clock} · {live_count} ativos · janela de tick ≤{max_tick_age}s"
+    elif realtime_meta:
+        ws_connections = int(realtime_meta.get("connections_connected") or 0)
+        ws_ticks = int(realtime_meta.get("connections_with_recent_ticks") or 0)
+        if ws_ticks:
+            realtime_state = f"WebSocket ativo ({ws_ticks} conexões com ticks), mas sem cotação mapeada recente"
+        elif ws_connections:
+            realtime_state = f"WebSocket conectado ({ws_connections} conexões), aguardando ticks"
+        else:
+            connection_error = str(realtime_meta.get("connection_error") or "")
+            realtime_state = "WebSocket reconectando" + (f": {connection_error}" if connection_error else "")
+        update_color = "#FF9F43"
+        update_label = f"SEM COTAÇÃO AO VIVO · snapshot {last_upd} · {realtime_state}"
     st.markdown(
         f"<div style='text-align:right; font-size:0.62rem; color:{update_color}; margin-bottom:6px;'>{html.escape(update_label)}</div>",
         unsafe_allow_html=True,
