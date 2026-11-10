@@ -9215,11 +9215,15 @@ def sidebar_mercados():
         .sidebar-quote-row.flash-down { animation: sidebar-quote-down .9s ease-out 2; }
         .sidebar-quote-row.flash-up .sidebar-quote-price { animation: sidebar-price-up .9s ease-out 2; }
         .sidebar-quote-row.flash-down .sidebar-quote-price { animation: sidebar-price-down .9s ease-out 2; }
+        .sidebar-quote-row.live-up { animation: sidebar-quote-up 1.4s ease-in-out infinite; }
+        .sidebar-quote-row.live-down { animation: sidebar-quote-down 1.4s ease-in-out infinite; }
+        .sidebar-quote-row.live-up .sidebar-quote-price { animation: sidebar-price-up 1.4s ease-in-out infinite; }
+        .sidebar-quote-row.live-down .sidebar-quote-price { animation: sidebar-price-down 1.4s ease-in-out infinite; }
         @keyframes sidebar-quote-up { 0%,100% { background:transparent; } 35%,70% { background:rgba(0,229,168,.16); } }
         @keyframes sidebar-quote-down { 0%,100% { background:transparent; } 35%,70% { background:rgba(255,92,112,.16); } }
         @keyframes sidebar-price-up { 0%,100% { color:#F8FAFC; } 35%,70% { color:#00E5A8; } }
         @keyframes sidebar-price-down { 0%,100% { color:#F8FAFC; } 35%,70% { color:#FF5C70; } }
-        @media (prefers-reduced-motion: reduce) { .sidebar-quote-row.flash-up, .sidebar-quote-row.flash-down, .sidebar-quote-row.flash-up .sidebar-quote-price, .sidebar-quote-row.flash-down .sidebar-quote-price { animation:none; } }
+        @media (prefers-reduced-motion: reduce) { .sidebar-quote-row.flash-up, .sidebar-quote-row.flash-down, .sidebar-quote-row.flash-up .sidebar-quote-price, .sidebar-quote-row.flash-down .sidebar-quote-price, .sidebar-quote-row.live-up, .sidebar-quote-row.live-down, .sidebar-quote-row.live-up .sidebar-quote-price, .sidebar-quote-row.live-down .sidebar-quote-price { animation:none; } }
         .sidebar-quote-symbol { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#D7E0EC; font-size:.76rem; font-weight:850; }
         .sidebar-quote-price { text-align:right; white-space:nowrap; color:#F8FAFC; font-size:.76rem; font-weight:850; }
         .sidebar-quote-change { text-align:right; white-space:nowrap; font-size:.70rem; font-weight:900; }
@@ -9279,6 +9283,12 @@ def sidebar_mercados():
             displayed_change = change_val
             change_fmt = f"{displayed_change:+.2f}%".replace(".", ",")
             color = "#00E5A8" if displayed_change > 0 else ("#FF5C70" if displayed_change < 0 else "#94A3B8")
+            try:
+                tick_age = float(item.get("age_seconds"))
+            except (TypeError, ValueError):
+                tick_age = float("inf")
+            if item.get("is_realtime") and tick_age <= 20:
+                pulse_class = " live-up" if displayed_change >= 0 else " live-down"
 
             extended_change = item.get("extended_change")
             market_state = str(item.get("market_state") or "")
