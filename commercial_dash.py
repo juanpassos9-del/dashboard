@@ -9225,6 +9225,8 @@ def sidebar_mercados():
         @keyframes sidebar-price-down { 0%,100% { color:#F8FAFC; } 35%,70% { color:#FF5C70; } }
         @media (prefers-reduced-motion: reduce) { .sidebar-quote-row.flash-up, .sidebar-quote-row.flash-down, .sidebar-quote-row.flash-up .sidebar-quote-price, .sidebar-quote-row.flash-down .sidebar-quote-price, .sidebar-quote-row.live-up, .sidebar-quote-row.live-down, .sidebar-quote-row.live-up .sidebar-quote-price, .sidebar-quote-row.live-down .sidebar-quote-price { animation:none; } }
         .sidebar-quote-symbol { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#D7E0EC; font-size:.76rem; font-weight:850; }
+        .sidebar-quote-source { display:inline-block; margin-left:4px; padding:1px 3px; border-radius:2px; font-size:.48rem; line-height:1.2; font-weight:900; vertical-align:1px; color:#9AA6B2; background:#1A222D; }
+        .sidebar-quote-source.ws { color:#00E5A8; background:rgba(0,229,168,.10); }
         .sidebar-quote-price { text-align:right; white-space:nowrap; color:#F8FAFC; font-size:.76rem; font-weight:850; }
         .sidebar-quote-change { text-align:right; white-space:nowrap; font-size:.70rem; font-weight:900; }
         .sidebar-quote-extended { text-align:right; white-space:nowrap; font-size:.70rem; font-weight:900; }
@@ -9287,7 +9289,8 @@ def sidebar_mercados():
                 tick_age = float(item.get("age_seconds"))
             except (TypeError, ValueError):
                 tick_age = float("inf")
-            if item.get("is_realtime") and tick_age <= 20:
+            live_tick = bool(item.get("is_realtime")) and tick_age <= 20
+            if live_tick:
                 pulse_class = " live-up" if displayed_change >= 0 else " live-down"
 
             extended_change = item.get("extended_change")
@@ -9313,10 +9316,22 @@ def sidebar_mercados():
             ]
             item_source = html.escape(" | ".join(value for value in source_details if value))
             symbol_label = html.escape(sidebar_symbol(item))
+            source_name = str(item.get("source") or "")
+            source_short = "WS" if live_tick else (
+                "YF" if "yahoo" in source_name.lower()
+                else "TV" if "tradingview" in source_name.lower()
+                else "FRED" if "fred" in source_name.lower()
+                else "LSE" if "london" in source_name.lower()
+                else "REST" if source_name else "SNAP"
+            )
+            source_class = "ws" if live_tick else "rest"
+            source_marker = (
+                f'<span class="sidebar-quote-source {source_class}" title="Fonte: {html.escape(source_name or "snapshot", quote=True)}">{source_short}</span>'
+            )
             table_parts.append(
                 f'<div class="sidebar-quote-grid sidebar-quote-row{pulse_class}" '
                 f'title="{item_name} | {item_source}">'
-                f'<span class="sidebar-quote-symbol">{symbol_label}</span>'
+                f'<span class="sidebar-quote-symbol">{symbol_label}{source_marker}</span>'
                 f'<span class="sidebar-quote-price">{price_fmt}</span>'
                 f'<span class="sidebar-quote-change" style="color:{color};">{change_fmt}</span>'
                 f'<span class="sidebar-quote-extended" style="color:{extended_color};">{extended_fmt}</span>'

@@ -53,6 +53,8 @@ def test_overlay_updates_only_fresh_quotes_and_preserves_fallback_rows():
     assert spx["price"] == 5010
     assert spx["change"] == 0.4
     assert spx["is_realtime"] is True
+    assert spx["source"] == "BingX WebSocket"
+    assert spx["source_symbol"] == "NCSISP5002USD-USDT"
     assert spx["reference_type"] == "synthetic_reference"
     assert "sintético" in spx["mapping_note"]
     assert vix["price"] == 18
