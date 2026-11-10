@@ -22,6 +22,12 @@ def test_global_subscriptions_cover_live_markets_without_faking_unavailable_asse
     assert "DI1F27" not in GLOBAL_REALTIME_MAP
     assert "6L=F" not in GLOBAL_REALTIME_MAP
     assert any(row["instrument"] == "NCSINASDAQ1002USD-USDT" for row in subscriptions["BingX"])
+    for asset in ("ZEC", "XRP", "HYPE", "DOGE", "BNB", "AVAX", "SUI", "UNI", "WLD"):
+        assert f"TOKENIZED_CRYPTO:{asset}" in GLOBAL_REALTIME_MAP
+    for ticker in ("AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"):
+        assert f"TOKENIZED_STOCK:{ticker}" in GLOBAL_REALTIME_MAP
+    assert "TOKENIZED_INDEX:BINGX_INDEX_H100" in GLOBAL_REALTIME_MAP
+    assert "TOKENIZED_INDEX:BINGX_INDEX_KOSPI" in GLOBAL_REALTIME_MAP
 
 
 def test_overlay_updates_only_fresh_quotes_and_preserves_fallback_rows():
@@ -49,7 +55,8 @@ def test_overlay_updates_only_fresh_quotes_and_preserves_fallback_rows():
         now=1_800_000_005,
     )
 
-    spx, vix = result["categories"]["Índices"]
+    spx = result["categories"]["🌍 ÍNDICES TOKENIZADOS"][0]
+    vix = result["categories"]["Índices"][0]
     assert spx["price"] == 5010
     assert spx["change"] == 0.4
     assert spx["is_realtime"] is True
@@ -72,6 +79,34 @@ def test_overlay_updates_only_fresh_quotes_and_preserves_fallback_rows():
         now=1_800_000_000,
     )
     assert stale["categories"]["Índices"][0]["price"] == 5000
+
+
+def test_overlay_adds_crypto_stocks_and_world_indices_only_from_fresh_websocket_ticks():
+    result = apply_global_realtime_overlay(
+        {"categories": {}, "metadata": {}},
+        {
+            ("Binance", "ZEC", "Spot"): {"price": 1150, "change_pct_24h": 2.0, "received_at": 1000},
+            ("Binance", "AAPL", "Perpétuo USDⓈ-M"): {"price": 350, "change_pct_24h": -1.0, "received_at": 1000},
+            ("BingX", "BINGX_INDEX_KOSPI", "Perpétuo"): {"price": 800, "change_pct_24h": 0.5, "received_at": 1000},
+        },
+        now=1002,
+    )
+
+    crypto = result["categories"]["🪙 CRIPTOMOEDAS · WEBSOCKET"][0]
+    stock = result["categories"]["🇺🇸 7 MAGNÍFICAS · TOKENIZADAS"][0]
+    index = result["categories"]["🌍 ÍNDICES TOKENIZADOS"][0]
+    assert (crypto["name"], crypto["price"], crypto["source"]) == ("ZEC", 1150, "Binance WebSocket")
+    assert crypto["display_symbol"] == "ZEC"
+    assert (stock["name"], stock["price"], stock["source"]) == ("AAPL", 350, "Binance WebSocket")
+    assert stock["display_symbol"] == "AAPL"
+    assert (index["name"], index["price"], index["source"]) == ("KOSPI", 800, "BingX WebSocket")
+
+    stale = apply_global_realtime_overlay(
+        {"categories": {}, "metadata": {}},
+        {("Binance", "ZEC", "Spot"): {"price": 1150, "received_at": 900}},
+        now=1000,
+    )
+    assert "🪙 CRIPTOMOEDAS · WEBSOCKET" not in stale["categories"]
 
 
 def test_hub_keeps_subscriptions_from_independent_dashboard_groups(monkeypatch):

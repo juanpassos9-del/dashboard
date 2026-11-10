@@ -111,12 +111,126 @@ for _symbol, _aliases in (
     ]
 
 
+for _asset, _instrument, _market_type in (
+    ("ZEC", "ZECUSDT", "Spot"),
+    ("JCT", "JCTUSDT", "Perpétuo USDⓈ-M"),
+    ("XRP", "XRPUSDT", "Spot"),
+    ("HYPE", "HYPEUSDT", "Spot"),
+    ("1000PEPE", "1000PEPEUSDT", "Perpétuo USDⓈ-M"),
+    ("DOGE", "DOGEUSDT", "Spot"),
+    ("NEAR", "NEARUSDT", "Spot"),
+    ("BNB", "BNBUSDT", "Spot"),
+    ("AVAX", "AVAXUSDT", "Spot"),
+    ("ENA", "ENAUSDT", "Spot"),
+    ("SUI", "SUIUSDT", "Spot"),
+    ("UNI", "UNIUSDT", "Spot"),
+    ("WLD", "WLDUSDT", "Spot"),
+    ("PUMP", "PUMPUSDT", "Spot"),
+    ("AIOT", "AIOTUSDT", "Perpétuo USDⓈ-M"),
+    ("HOT", "HOTUSDT", "Spot"),
+):
+    GLOBAL_REALTIME_MAP[f"TOKENIZED_CRYPTO:{_asset}"] = [
+        ("Binance", _quote(_asset, _instrument, _market_type, "Cotação cripto via WebSocket Binance."))
+    ]
+
+for _ticker in ("AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"):
+    GLOBAL_REALTIME_MAP[f"TOKENIZED_STOCK:{_ticker}"] = GLOBAL_REALTIME_MAP[_ticker]
+
+for _asset, _instrument, _name, _note in (
+    ("BINGX_INDEX_H100", "NCSIH1002USD-USDT", "Hang Seng Tech (H100)", "Índice tokenizado da BingX; referência H100, não o Hang Seng amplo."),
+    ("BINGX_INDEX_KOSPI", "NCSIKOSPI2USD-USDT", "KOSPI", "Índice tokenizado da BingX."),
+    ("BINGX_INDEX_KOSPI1", "NCSIKOSPI12USD-USDT", "KOSPI 200", "Índice tokenizado da BingX."),
+):
+    GLOBAL_REALTIME_MAP[f"TOKENIZED_INDEX:{_asset}"] = [
+        ("BingX", _quote(_asset, _instrument, "Perpétuo", _note))
+    ]
+
+
+TOKENIZED_GLOBAL_INDEX_SYMBOLS = {"^GSPC", "^IXIC", "^DJI", "^RUT", "^N225", "^GDAXI"}
+TOKENIZED_SUPPLEMENTAL_QUOTES = [
+    ("🪙 CRIPTOMOEDAS · WEBSOCKET", asset, f"TOKENIZED_CRYPTO:{asset}", f"TOKENIZED_CRYPTO:{asset}")
+    for asset in ("ZEC", "JCT", "XRP", "HYPE", "1000PEPE", "DOGE", "NEAR", "BNB", "AVAX", "ENA", "SUI", "UNI", "WLD", "PUMP", "AIOT", "HOT")
+]
+TOKENIZED_SUPPLEMENTAL_QUOTES.extend([
+    ("🇺🇸 7 MAGNÍFICAS · TOKENIZADAS", ticker, f"TOKENIZED_STOCK:{ticker}", f"TOKENIZED_STOCK:{ticker}")
+    for ticker in ("AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA")
+])
+TOKENIZED_SUPPLEMENTAL_QUOTES.extend([
+    ("🌍 ÍNDICES TOKENIZADOS", name, f"TOKENIZED_INDEX:{asset}", f"TOKENIZED_INDEX:{asset}")
+    for asset, _instrument, name, _note in (
+        ("BINGX_INDEX_H100", "NCSIH1002USD-USDT", "Hang Seng Tech (H100)", ""),
+        ("BINGX_INDEX_KOSPI", "NCSIKOSPI2USD-USDT", "KOSPI", ""),
+        ("BINGX_INDEX_KOSPI1", "NCSIKOSPI12USD-USDT", "KOSPI 200", ""),
+    )
+])
+
+
 def global_market_subscriptions() -> dict[str, list[dict[str, str]]]:
     subscriptions = {"Binance": [], "OKX": [], "BingX": []}
     for candidates in GLOBAL_REALTIME_MAP.values():
         for provider, row in candidates:
             subscriptions[provider].append(row)
     return subscriptions
+
+
+def _apply_live_quote(
+    item: dict[str, Any],
+    lookup_symbol: str,
+    latest_quotes: dict[tuple[str, str, str], dict[str, Any]],
+    now: float,
+    max_age_seconds: int,
+) -> bool:
+    for provider, mapping in GLOBAL_REALTIME_MAP.get(lookup_symbol, ()):
+        live = latest_quotes.get((provider, mapping["asset"], mapping["market_type"]))
+        if not live:
+            continue
+        received_at = float(live.get("received_at") or 0)
+        age = max(0.0, now - received_at) if received_at else float("inf")
+        try:
+            price = float(live.get("price"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if age > max_age_seconds or price <= 0:
+            continue
+
+        timestamp_ms = int(live.get("timestamp_ms") or 0)
+        source_timestamp = (
+            datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat()
+            if timestamp_ms > 0 else datetime.fromtimestamp(received_at, tz=timezone.utc).isoformat()
+        )
+        mapping_note = mapping.get("mapping_note") or ""
+        item.update({
+            "price": price,
+            "high": float(live.get("high_24h") or item.get("high") or price),
+            "low": float(live.get("low_24h") or item.get("low") or price),
+            "high_low_basis": "exchange_rolling_24h",
+            "change": float(live.get("change_pct_24h") or 0),
+            "change_24h": float(live.get("change_pct_24h") or 0),
+            "change_basis": "exchange_rolling_24h",
+            "source": f"{provider} WebSocket",
+            "source_symbol": mapping["instrument"],
+            "source_timestamp": source_timestamp,
+            "timestamp_type": "exchange" if timestamp_ms > 0 else "retrieved_at",
+            "market_delay_seconds": max(0, round(age)),
+            "age_seconds": max(0, round(age)),
+            "updated_at": source_timestamp,
+            "exchange": provider,
+            "market_type": mapping["market_type"],
+            "instrument_type": "spot" if mapping["market_type"] == "Spot" else "synthetic_perpetual",
+            "reference_type": (
+                "proxy"
+                if "proxy" in str(mapping_note).lower()
+                or "equivalência não confirmada" in str(mapping_note).lower()
+                else "synthetic_reference"
+                if mapping["market_type"] != "Spot"
+                else "exchange_reference"
+            ),
+            "mapping_note": mapping_note,
+            "is_realtime": True,
+            "data_status": "fresh",
+        })
+        return True
+    return False
 
 
 def apply_global_realtime_overlay(
@@ -132,7 +246,10 @@ def apply_global_realtime_overlay(
     now = time.time() if now is None else now
     data = deepcopy(snapshot)
     updated = []
-    categories = data.get("categories") or {}
+    categories = data.get("categories")
+    if not isinstance(categories, dict):
+        categories = {}
+        data["categories"] = categories
 
     for assets in categories.values():
         if not isinstance(assets, list):
@@ -141,58 +258,38 @@ def apply_global_realtime_overlay(
             if not isinstance(item, dict):
                 continue
             symbol = str(item.get("symbol") or "")
-            candidates = GLOBAL_REALTIME_MAP.get(symbol, ())
-            for provider, mapping in candidates:
-                live = latest_quotes.get((provider, mapping["asset"], mapping["market_type"]))
-                if not live:
-                    continue
-                received_at = float(live.get("received_at") or 0)
-                age = max(0.0, now - received_at) if received_at else float("inf")
-                try:
-                    price = float(live.get("price"))
-                except (TypeError, ValueError, OverflowError):
-                    continue
-                if age > max_age_seconds or price <= 0:
-                    continue
-
-                timestamp_ms = int(live.get("timestamp_ms") or 0)
-                source_timestamp = (
-                    datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat()
-                    if timestamp_ms > 0 else datetime.fromtimestamp(received_at, tz=timezone.utc).isoformat()
-                )
-                item.update({
-                    "price": price,
-                    "high": float(live.get("high_24h") or item.get("high") or price),
-                    "low": float(live.get("low_24h") or item.get("low") or price),
-                    "high_low_basis": "exchange_rolling_24h",
-                    "change": float(live.get("change_pct_24h") or 0),
-                    "change_24h": float(live.get("change_pct_24h") or 0),
-                    "change_basis": "exchange_rolling_24h",
-                    "change_5m": item.get("change_5m"),
-                    "source": f"{provider} WebSocket",
-                    "source_symbol": mapping["instrument"],
-                    "source_timestamp": source_timestamp,
-                    "timestamp_type": "exchange" if timestamp_ms > 0 else "retrieved_at",
-                    "market_delay_seconds": max(0, round(age)),
-                    "age_seconds": max(0, round(age)),
-                    "updated_at": source_timestamp,
-                    "exchange": provider,
-                    "market_type": mapping["market_type"],
-                    "instrument_type": "spot" if mapping["market_type"] == "Spot" else "synthetic_perpetual",
-                    "reference_type": (
-                        "proxy"
-                        if "proxy" in str(mapping.get("mapping_note") or "").lower()
-                        or "equivalência não confirmada" in str(mapping.get("mapping_note") or "").lower()
-                        else "synthetic_reference"
-                        if mapping["market_type"] != "Spot"
-                        else "exchange_reference"
-                    ),
-                    "mapping_note": mapping.get("mapping_note") or "",
-                    "is_realtime": True,
-                    "data_status": "fresh",
-                })
+            if _apply_live_quote(item, symbol, latest_quotes, now, max_age_seconds):
                 updated.append(symbol)
-                break
+
+    moved_indices = []
+    for category_name, assets in list(categories.items()):
+        if "ÍNDICES" not in str(category_name).upper() or not isinstance(assets, list):
+            continue
+        retained = []
+        for item in assets:
+            symbol = str(item.get("symbol") or "") if isinstance(item, dict) else ""
+            if symbol in TOKENIZED_GLOBAL_INDEX_SYMBOLS and item.get("is_realtime"):
+                moved_indices.append(item)
+            else:
+                retained.append(item)
+        categories[category_name] = retained
+    if moved_indices:
+        categories.setdefault("🌍 ÍNDICES TOKENIZADOS", []).extend(moved_indices)
+
+    supplemental_by_category: dict[str, list[dict[str, Any]]] = {}
+    for category, name, symbol, lookup_symbol in TOKENIZED_SUPPLEMENTAL_QUOTES:
+        display_symbol = symbol.rsplit(":", 1)[-1]
+        display_symbol = {
+            "BINGX_INDEX_H100": "H100",
+            "BINGX_INDEX_KOSPI": "KOSPI",
+            "BINGX_INDEX_KOSPI1": "KOSPI 200",
+        }.get(display_symbol, display_symbol)
+        item = {"name": name, "symbol": symbol, "display_symbol": display_symbol}
+        if _apply_live_quote(item, lookup_symbol, latest_quotes, now, max_age_seconds):
+            supplemental_by_category.setdefault(category, []).append(item)
+            updated.append(symbol)
+    for category, items in supplemental_by_category.items():
+        categories.setdefault(category, []).extend(items)
 
     unique_updated = sorted(set(updated))
     if not isinstance(data.get("metadata"), dict):

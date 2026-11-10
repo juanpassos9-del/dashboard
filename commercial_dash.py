@@ -9094,6 +9094,9 @@ def sidebar_mercados():
     def sidebar_symbol(item):
         name = str(item.get("name") or "").strip()
         symbol = str(item.get("symbol") or "").strip()
+        display_symbol = str(item.get("display_symbol") or "").strip()
+        if display_symbol:
+            return display_symbol
         aliases = {
             "IBOV": "IBOV",
             "S&P 500": "SPX",
