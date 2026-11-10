@@ -36,6 +36,7 @@ class CryptoDashRealtimeHub:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._desired: dict[str, list[dict[str, str]]] = {key: [] for key in self._MARKETS}
+        self._groups: dict[str, dict[str, list[dict[str, str]]]] = {}
         self._signatures: dict[str, tuple[tuple[str, str], ...]] = {}
         self._sockets: dict[str, Any] = {}
         self._threads: dict[str, threading.Thread] = {}
@@ -54,6 +55,44 @@ class CryptoDashRealtimeHub:
         return "okx"
 
     def configure(self, instruments_by_provider: dict[str, list[dict[str, str]]]) -> None:
+        """Backward-compatible configuration for the CRIPTODASH group."""
+        self.configure_group("cryptodash", instruments_by_provider)
+
+    def configure_group(
+        self,
+        group: str,
+        instruments_by_provider: dict[str, list[dict[str, str]]],
+    ) -> None:
+        """Configure one consumer without replacing other consumers' subscriptions."""
+        normalized: dict[str, list[dict[str, str]]] = {}
+        for provider, rows in (instruments_by_provider or {}).items():
+            if provider not in {"Binance", "BingX", "OKX"}:
+                continue
+            normalized[provider] = [
+                {
+                    "asset": str(row.get("asset") or ""),
+                    "instrument": str(row.get("instrument") or ""),
+                    "market_type": str(row.get("market_type") or ""),
+                }
+                for row in rows
+                if row.get("asset") and row.get("instrument") and row.get("market_type")
+            ]
+        with self._lock:
+            self._groups[str(group)] = normalized
+
+            merged: dict[str, list[dict[str, str]]] = {"Binance": [], "BingX": [], "OKX": []}
+            seen: set[tuple[str, str, str, str]] = set()
+            for group_rows in self._groups.values():
+                for provider, rows in group_rows.items():
+                    for row in rows:
+                        identity = (provider, row["asset"], row["instrument"], row["market_type"])
+                        if identity not in seen:
+                            seen.add(identity)
+                            merged[provider].append(row)
+
+        self._configure_merged(merged)
+
+    def _configure_merged(self, instruments_by_provider: dict[str, list[dict[str, str]]]) -> None:
         grouped: dict[str, list[dict[str, str]]] = {key: [] for key in self._MARKETS}
         for provider, rows in instruments_by_provider.items():
             for row in rows:
@@ -90,6 +129,7 @@ class CryptoDashRealtimeHub:
                     continue
                 self._desired[key] = rows
                 self._signatures[key] = signature
+                self._status.setdefault(key, {"state": "aguardando", "last_message_at": None, "error": ""})
                 socket_to_close = self._sockets.get(key)
                 if rows and (key not in self._threads or not self._threads[key].is_alive()):
                     thread = threading.Thread(target=self._run, args=(key,), daemon=True, name=f"cryptodash-{key}")
@@ -144,9 +184,9 @@ class CryptoDashRealtimeHub:
         if key.startswith("binance_"):
             base = "wss://stream.binance.com:9443" if key == "binance_spot" else "wss://fstream.binance.com"
             return f"{base}/ws"
-        if key == "bingx_spot":
+        if key.startswith("bingx_spot"):
             return "wss://open-api-ws.bingx.com/market"
-        if key == "bingx_swap":
+        if key.startswith("bingx_swap"):
             return "wss://open-api-swap.bingx.com/swap-market"
         return "wss://ws.okx.com:443/ws/v5/public"
 
@@ -195,13 +235,14 @@ class CryptoDashRealtimeHub:
         if not isinstance(payload, dict):
             return
 
-        by_instrument = {row["instrument"].upper(): row for row in rows}
+        by_instrument: dict[str, list[dict[str, str]]] = {}
+        for row in rows:
+            by_instrument.setdefault(row["instrument"].upper(), []).append(row)
         parsed = []
         if key.startswith("binance_"):
             data = payload.get("data", payload)
             instrument = str(data.get("s") or "").upper()
-            row = by_instrument.get(instrument)
-            if row:
+            for row in by_instrument.get(instrument, []):
                 parsed.append((row, {
                     "price": _as_float(data.get("c")),
                     "change_pct_24h": _as_float(data.get("P")),
@@ -214,8 +255,9 @@ class CryptoDashRealtimeHub:
             data = payload.get("data") or {}
             channel = str(payload.get("dataType") or "")
             instrument = str(data.get("s") or channel.split("@", 1)[0]).upper()
-            row = by_instrument.get(instrument)
-            if row and isinstance(data, dict):
+            for row in by_instrument.get(instrument, []):
+                if not isinstance(data, dict):
+                    continue
                 parsed.append((row, {
                     "price": _as_float(data.get("c")),
                     "change_pct_24h": _as_float(data.get("P")),
@@ -226,19 +268,20 @@ class CryptoDashRealtimeHub:
                 }))
         elif payload.get("arg", {}).get("channel") == "tickers":
             for data in payload.get("data", []):
-                row = by_instrument.get(str(data.get("instId") or "").upper())
-                if not row:
+                instrument_rows = by_instrument.get(str(data.get("instId") or "").upper(), [])
+                if not instrument_rows:
                     continue
                 last = _as_float(data.get("last"))
                 open_24h = _as_float(data.get("open24h"))
-                parsed.append((row, {
+                quote = {
                     "price": last,
                     "change_pct_24h": ((last / open_24h) - 1) * 100 if open_24h else 0.0,
                     "quote_volume_24h": _as_float(data.get("volCcy24h")),
                     "high_24h": _as_float(data.get("high24h")),
                     "low_24h": _as_float(data.get("low24h")),
                     "timestamp_ms": int(_as_float(data.get("ts"))),
-                }))
+                }
+                parsed.extend((row, quote) for row in instrument_rows)
 
         received_at = time.time()
         with self._lock:
@@ -263,7 +306,8 @@ class CryptoDashRealtimeHub:
 
     def _on_error(self, key: str, error: Any) -> None:
         with self._lock:
-            self._status[key] = {"state": "reconectando", "last_message_at": self._status[key].get("last_message_at"), "error": str(error)[:160]}
+            previous = self._status.get(key, {})
+            self._status[key] = {"state": "reconectando", "last_message_at": previous.get("last_message_at"), "error": str(error)[:160]}
 
     def _on_close(self, key: str) -> None:
         with self._lock:

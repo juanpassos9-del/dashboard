@@ -33,6 +33,7 @@ except Exception:
 from execution.quote_freshness import quote_freshness_label
 from execution.page_access import enforce_page_access, pages_for_user
 from execution.market_quote_refresh import MarketQuoteRefreshCoordinator
+from execution.market_realtime import apply_global_realtime_overlay, global_market_subscriptions
 from execution.terminal_market_intelligence import (
     age_seconds_since,
     audit_rtd_payload,
@@ -1027,7 +1028,31 @@ def get_global_markets_data():
             rows=rows,
             source="Supabase app_state",
         )
-    return _apply_lse_realtime_quotes(cached_data)
+    data = _apply_lse_realtime_quotes(cached_data)
+    try:
+        hub = get_cryptodash_realtime_hub()
+        hub.configure_group("global_markets", global_market_subscriptions())
+        live_quotes = hub.latest_quotes()
+        overlaid = apply_global_realtime_overlay(data, live_quotes)
+        overlay_meta = (overlaid.get("metadata") or {}).get("realtime_overlay") or {}
+        live_count = int(overlay_meta.get("quotes_updated") or 0)
+        if live_count:
+            mark_source(
+                "Exchange WebSocket",
+                "ok",
+                rows=live_count,
+                message="Cotações ao vivo aplicadas; demais ativos seguem no snapshot/fallback.",
+                source="Binance/OKX/BingX public WebSocket",
+            )
+        return overlaid
+    except Exception as exc:
+        mark_source(
+            "Exchange WebSocket",
+            "stale",
+            message=f"Overlay ao vivo indisponível; mantendo snapshot e fallback: {str(exc)[:120]}",
+            source="Binance/OKX/BingX public WebSocket",
+        )
+        return data
 
 
 def _refresh_global_market_snapshot():
@@ -2315,7 +2340,7 @@ st.markdown("""
 # FRAGMENTS
 # ══════════════════════════════════════════════════════════════════════════════
 
-@st.fragment(run_every=30)
+@st.fragment(run_every=5)
 def painel_tickers_topo():
     """Mini cards de cotações globais no topo do terminal."""
     global_data = get_global_markets_data()
@@ -8932,7 +8957,7 @@ def pagina_terminal_global():
         st.markdown("---")
         render_b3_settlements_section()
             
-@st.fragment(run_every=30)
+@st.fragment(run_every=5)
 def sidebar_mercados():
     global_data = get_global_markets_data()
     if st.button(
@@ -8974,10 +8999,12 @@ def sidebar_mercados():
         return
     
     # Suporte tanto para o formato antigo quanto para o novo
+    realtime_meta = {}
     if "categories" in global_data:
         categories = global_data["categories"]
         metadata = global_data.get("metadata", {})
         last_upd = metadata.get("last_updated", "---")
+        realtime_meta = metadata.get("realtime_overlay") or {}
     else:
         categories = global_data
         last_upd = "---"
@@ -9116,8 +9143,20 @@ def sidebar_mercados():
     else:
         update_color = "#64748B"
         freshness_text = ""
+    live_count = int(realtime_meta.get("quotes_updated") or 0)
+    update_label = f"ATUALIZADO {last_upd}{freshness_text}"
+    if live_count:
+        update_color = "#00E5A8"
+        live_clock = ""
+        try:
+            live_dt = datetime.fromisoformat(str(realtime_meta.get("updated_at") or "").replace("Z", "+00:00"))
+            live_clock = live_dt.astimezone(ZoneInfo("America/Sao_Paulo")).strftime("%H:%M:%S")
+        except (TypeError, ValueError):
+            pass
+        max_tick_age = int(realtime_meta.get("max_tick_age_seconds") or 0)
+        update_label = f"AO VIVO {live_clock} · {live_count} ativos · janela de tick ≤{max_tick_age}s"
     st.markdown(
-        f"<div style='text-align:right; font-size:0.62rem; color:{update_color}; margin-bottom:6px;'>ATUALIZADO {html.escape(str(last_upd))}{html.escape(freshness_text)}</div>",
+        f"<div style='text-align:right; font-size:0.62rem; color:{update_color}; margin-bottom:6px;'>{html.escape(update_label)}</div>",
         unsafe_allow_html=True,
     )
 
@@ -9195,7 +9234,14 @@ def sidebar_mercados():
                 extended_color = "#64748B"
 
             item_name = html.escape(str(item.get('name', '---')))
-            item_source = html.escape(str(item.get("source_symbol") or item.get("source") or ""))
+            source_details = [
+                str(item.get("source") or ""),
+                str(item.get("source_symbol") or ""),
+                str(item.get("market_type") or ""),
+                str(item.get("change_basis") or ""),
+                str(item.get("mapping_note") or ""),
+            ]
+            item_source = html.escape(" | ".join(value for value in source_details if value))
             symbol_label = html.escape(sidebar_symbol(item))
             table_parts.append(
                 '<div class="sidebar-quote-grid sidebar-quote-row" '
