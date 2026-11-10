@@ -9088,6 +9088,8 @@ def sidebar_mercados():
         return (f"{arrow} 5m {pct:+.2f}%", color, accel_label)
 
     remember_sidebar_quotes(categories)
+    quote_flash_states = st.session_state.setdefault("global_quote_flash_states", {})
+    quote_flash_now = time.monotonic()
 
     def sidebar_symbol(item):
         name = str(item.get("name") or "").strip()
@@ -9209,6 +9211,15 @@ def sidebar_mercados():
         .sidebar-quote-category { padding:8px 7px 5px; border-top:1px solid #1E293B; color:#F59E0B; font-size:.69rem; font-weight:900; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .sidebar-quote-category.first { border-top:0; }
         .sidebar-quote-row { min-height:31px; padding:5px 7px; border-top:1px solid #121B28; font-variant-numeric:tabular-nums; }
+        .sidebar-quote-row.flash-up { animation: sidebar-quote-up .9s ease-out 2; }
+        .sidebar-quote-row.flash-down { animation: sidebar-quote-down .9s ease-out 2; }
+        .sidebar-quote-row.flash-up .sidebar-quote-price { animation: sidebar-price-up .9s ease-out 2; }
+        .sidebar-quote-row.flash-down .sidebar-quote-price { animation: sidebar-price-down .9s ease-out 2; }
+        @keyframes sidebar-quote-up { 0%,100% { background:transparent; } 35%,70% { background:rgba(0,229,168,.16); } }
+        @keyframes sidebar-quote-down { 0%,100% { background:transparent; } 35%,70% { background:rgba(255,92,112,.16); } }
+        @keyframes sidebar-price-up { 0%,100% { color:#F8FAFC; } 35%,70% { color:#00E5A8; } }
+        @keyframes sidebar-price-down { 0%,100% { color:#F8FAFC; } 35%,70% { color:#FF5C70; } }
+        @media (prefers-reduced-motion: reduce) { .sidebar-quote-row.flash-up, .sidebar-quote-row.flash-down, .sidebar-quote-row.flash-up .sidebar-quote-price, .sidebar-quote-row.flash-down .sidebar-quote-price { animation:none; } }
         .sidebar-quote-symbol { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#D7E0EC; font-size:.76rem; font-weight:850; }
         .sidebar-quote-price { text-align:right; white-space:nowrap; color:#F8FAFC; font-size:.76rem; font-weight:850; }
         .sidebar-quote-change { text-align:right; white-space:nowrap; font-size:.70rem; font-weight:900; }
@@ -9238,6 +9249,24 @@ def sidebar_mercados():
             if not isinstance(price_val, (int, float)):
                 try: price_val = float(price_val)
                 except (ValueError, TypeError): price_val = 0.0
+
+            quote_key = str(item.get("symbol") or item.get("name") or "")
+            previous_quote = quote_flash_states.get(quote_key, {})
+            previous_price = previous_quote.get("price")
+            flash_direction = previous_quote.get("direction", "")
+            flash_until = float(previous_quote.get("until") or 0)
+            if isinstance(previous_price, (int, float)) and price_val > 0:
+                threshold = max(abs(previous_price) * 1e-7, 1e-8)
+                difference = price_val - previous_price
+                if abs(difference) > threshold:
+                    flash_direction = "up" if difference > 0 else "down"
+                    flash_until = quote_flash_now + 1.8
+            quote_flash_states[quote_key] = {
+                "price": price_val,
+                "direction": flash_direction,
+                "until": flash_until,
+            }
+            pulse_class = f" flash-{flash_direction}" if quote_flash_now < flash_until else ""
 
             is_rate = "TREASUR" in str(cat_name).upper() or "DI FUTURO" in str(cat_name).upper()
             if is_rate:
@@ -9275,7 +9304,7 @@ def sidebar_mercados():
             item_source = html.escape(" | ".join(value for value in source_details if value))
             symbol_label = html.escape(sidebar_symbol(item))
             table_parts.append(
-                '<div class="sidebar-quote-grid sidebar-quote-row" '
+                f'<div class="sidebar-quote-grid sidebar-quote-row{pulse_class}" '
                 f'title="{item_name} | {item_source}">'
                 f'<span class="sidebar-quote-symbol">{symbol_label}</span>'
                 f'<span class="sidebar-quote-price">{price_fmt}</span>'
