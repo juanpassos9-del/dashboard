@@ -78,10 +78,12 @@ def test_overlay_updates_only_fresh_quotes_and_preserves_fallback_rows():
         },
         now=1_800_000_000,
     )
-    assert stale["categories"]["Índices"][0]["price"] == 5000
+    stale_spx = stale["categories"]["🌍 ÍNDICES TOKENIZADOS"][0]
+    assert stale_spx["price"] == 5000
+    assert stale_spx["realtime_pending"] is True
 
 
-def test_overlay_adds_crypto_stocks_and_world_indices_only_from_fresh_websocket_ticks():
+def test_overlay_populates_new_categories_and_marks_missing_ticks_as_pending():
     result = apply_global_realtime_overlay(
         {"categories": {}, "metadata": {}},
         {
@@ -94,7 +96,7 @@ def test_overlay_adds_crypto_stocks_and_world_indices_only_from_fresh_websocket_
 
     crypto = result["categories"]["🪙 CRIPTOMOEDAS · WEBSOCKET"][0]
     stock = result["categories"]["🇺🇸 7 MAGNÍFICAS · TOKENIZADAS"][0]
-    index = result["categories"]["🌍 ÍNDICES TOKENIZADOS"][0]
+    index = next(row for row in result["categories"]["🌍 ÍNDICES TOKENIZADOS"] if row["name"] == "KOSPI")
     assert (crypto["name"], crypto["price"], crypto["source"]) == ("ZEC", 1150, "Binance WebSocket")
     assert crypto["display_symbol"] == "ZEC"
     assert (stock["name"], stock["price"], stock["source"]) == ("AAPL", 350, "Binance WebSocket")
@@ -106,7 +108,10 @@ def test_overlay_adds_crypto_stocks_and_world_indices_only_from_fresh_websocket_
         {("Binance", "ZEC", "Spot"): {"price": 1150, "received_at": 900}},
         now=1000,
     )
-    assert "🪙 CRIPTOMOEDAS · WEBSOCKET" not in stale["categories"]
+    pending_crypto = stale["categories"]["🪙 CRIPTOMOEDAS · WEBSOCKET"][0]
+    assert pending_crypto["name"] == "ZEC"
+    assert pending_crypto["price"] is None
+    assert pending_crypto["realtime_pending"] is True
 
 
 def test_hub_keeps_subscriptions_from_independent_dashboard_groups(monkeypatch):

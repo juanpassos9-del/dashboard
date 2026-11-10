@@ -268,7 +268,13 @@ def apply_global_realtime_overlay(
         retained = []
         for item in assets:
             symbol = str(item.get("symbol") or "") if isinstance(item, dict) else ""
-            if symbol in TOKENIZED_GLOBAL_INDEX_SYMBOLS and item.get("is_realtime"):
+            if symbol in TOKENIZED_GLOBAL_INDEX_SYMBOLS:
+                if not item.get("is_realtime"):
+                    candidates = GLOBAL_REALTIME_MAP.get(symbol, ())
+                    if candidates:
+                        provider, mapping = candidates[0]
+                        item["realtime_pending"] = True
+                        item["realtime_pending_instrument"] = f"{provider}: {mapping['instrument']}"
                 moved_indices.append(item)
             else:
                 retained.append(item)
@@ -288,6 +294,21 @@ def apply_global_realtime_overlay(
         if _apply_live_quote(item, lookup_symbol, latest_quotes, now, max_age_seconds):
             supplemental_by_category.setdefault(category, []).append(item)
             updated.append(symbol)
+        else:
+            candidates = GLOBAL_REALTIME_MAP.get(lookup_symbol, ())
+            if candidates:
+                provider, mapping = candidates[0]
+                item.update({
+                    "price": None,
+                    "change": None,
+                    "source": "Aguardando WebSocket",
+                    "source_symbol": mapping["instrument"],
+                    "market_type": mapping["market_type"],
+                    "exchange": provider,
+                    "realtime_pending": True,
+                    "realtime_pending_instrument": f"{provider}: {mapping['instrument']}",
+                })
+            supplemental_by_category.setdefault(category, []).append(item)
     for category, items in supplemental_by_category.items():
         categories.setdefault(category, []).extend(items)
 

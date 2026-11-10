@@ -9230,6 +9230,7 @@ def sidebar_mercados():
         .sidebar-quote-symbol { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#D7E0EC; font-size:.76rem; font-weight:850; }
         .sidebar-quote-source { display:inline-block; margin-left:4px; padding:1px 3px; border-radius:2px; font-size:.48rem; line-height:1.2; font-weight:900; vertical-align:1px; color:#9AA6B2; background:#1A222D; }
         .sidebar-quote-source.ws { color:#00E5A8; background:rgba(0,229,168,.10); }
+        .sidebar-quote-source.pending { color:#F5B942; background:rgba(245,185,66,.10); }
         .sidebar-quote-price { text-align:right; white-space:nowrap; color:#F8FAFC; font-size:.76rem; font-weight:850; }
         .sidebar-quote-change { text-align:right; white-space:nowrap; font-size:.70rem; font-weight:900; }
         .sidebar-quote-extended { text-align:right; white-space:nowrap; font-size:.70rem; font-weight:900; }
@@ -9255,6 +9256,7 @@ def sidebar_mercados():
                 except (ValueError, TypeError): change_val = 0.0
 
             price_val = item.get('price', 0)
+            pending_quote = bool(item.get("realtime_pending")) and item.get("price") is None
             if not isinstance(price_val, (int, float)):
                 try: price_val = float(price_val)
                 except (ValueError, TypeError): price_val = 0.0
@@ -9278,7 +9280,9 @@ def sidebar_mercados():
             pulse_class = f" flash-{flash_direction}" if quote_flash_now < flash_until else ""
 
             is_rate = "TREASUR" in str(cat_name).upper() or "DI FUTURO" in str(cat_name).upper()
-            if is_rate:
+            if pending_quote:
+                price_fmt = "—"
+            elif is_rate:
                 price_fmt = f"{price_val:.3f}%".replace(".", ",")
             elif abs(price_val) < 10:
                 price_fmt = f"{price_val:.4f}".replace(".", ",")
@@ -9286,8 +9290,8 @@ def sidebar_mercados():
                 price_fmt = f"{price_val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
             displayed_change = change_val
-            change_fmt = f"{displayed_change:+.2f}%".replace(".", ",")
-            color = "#00E5A8" if displayed_change > 0 else ("#FF5C70" if displayed_change < 0 else "#94A3B8")
+            change_fmt = "—" if pending_quote else f"{displayed_change:+.2f}%".replace(".", ",")
+            color = "#64748B" if pending_quote else ("#00E5A8" if displayed_change > 0 else ("#FF5C70" if displayed_change < 0 else "#94A3B8"))
             try:
                 tick_age = float(item.get("age_seconds"))
             except (TypeError, ValueError):
@@ -9318,16 +9322,18 @@ def sidebar_mercados():
                 str(item.get("mapping_note") or ""),
             ]
             item_source = html.escape(" | ".join(value for value in source_details if value))
+            if item.get("realtime_pending_instrument"):
+                item_source += html.escape(f" | WS aguardando: {item['realtime_pending_instrument']}")
             symbol_label = html.escape(sidebar_symbol(item))
             source_name = str(item.get("source") or "")
-            source_short = "WS" if live_tick else (
+            source_short = "WS" if live_tick else "WS…" if pending_quote else (
                 "YF" if "yahoo" in source_name.lower()
                 else "TV" if "tradingview" in source_name.lower()
                 else "FRED" if "fred" in source_name.lower()
                 else "LSE" if "london" in source_name.lower()
                 else "REST" if source_name else "SNAP"
             )
-            source_class = "ws" if live_tick else "rest"
+            source_class = "ws" if live_tick else "pending" if pending_quote else "rest"
             source_marker = (
                 f'<span class="sidebar-quote-source {source_class}" title="Fonte: {html.escape(source_name or "snapshot", quote=True)}">{source_short}</span>'
             )
