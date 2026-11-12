@@ -11893,6 +11893,22 @@ def load_crypto_mvrv_history(refresh_key: int = 0):
         }
 
 
+@st.cache_data(ttl=21600, show_spinner=False)
+def load_crypto_balanced_price_history(refresh_key: int = 0):
+    """Load the public daily Balanced Price series with a long cache."""
+    try:
+        from execution.crypto_bgeometrics import fetch_bgeometrics_balanced_price_history
+
+        return fetch_bgeometrics_balanced_price_history(days=730)
+    except Exception as exc:
+        return {
+            "source": "BGeometrics public API",
+            "status": "error",
+            "data": {"points": [], "latest": {}},
+            "warnings": [f"Balanced Price indisponivel: {exc}"],
+        }
+
+
 @st.cache_data(ttl=86400, show_spinner=False)
 def load_crypto_rainbow_chart(refresh_key: int = 0):
     """Load Bitcoin Rainbow Chart lazily to avoid slowing app boot."""
@@ -12082,7 +12098,7 @@ def _crypto_mini_chart_html(symbol: str, asset: dict[str, Any], uid: str) -> str
     """
 
 
-def _render_crypto_mvrv_chart(points: list[dict[str, Any]]) -> None:
+def _render_crypto_mvrv_chart(points: list[dict[str, Any]], balanced_points: list[dict[str, Any]] | None = None) -> None:
     chart_points = [
         {
             "time": int(row.get("time") or 0),
@@ -12100,6 +12116,13 @@ def _render_crypto_mvrv_chart(points: list[dict[str, Any]]) -> None:
 
     df = pd.DataFrame(chart_points)
     df["date"] = pd.to_datetime(df["time"], unit="s", utc=True)
+    balanced_by_date = {
+        str(row.get("date")): float(row.get("balancedPrice") or 0)
+        for row in (balanced_points or [])
+        if row.get("date") and float(row.get("balancedPrice") or 0) > 0
+    }
+    df["date_key"] = df["date"].dt.strftime("%Y-%m-%d")
+    df["balanced_price"] = df["date_key"].map(balanced_by_date)
     latest_btc = float(chart_points[-1]["btc_price"] or 0)
     latest_realized = float(chart_points[-1]["realized_price"] or 0)
     fig = go.Figure()
@@ -12119,6 +12142,16 @@ def _render_crypto_mvrv_chart(points: list[dict[str, Any]]) -> None:
         line={"color": "#22D3EE", "width": 2},
         hovertemplate="%{x|%d/%m/%Y}<br>Realized: US$ %{y:,.0f}<extra></extra>",
     ))
+    if df["balanced_price"].notna().any():
+        fig.add_trace(go.Scatter(
+            x=df["date"],
+            y=df["balanced_price"],
+            mode="lines",
+            name="Balanced Price",
+            line={"color": "#F59E0B", "width": 2},
+            connectgaps=True,
+            hovertemplate="%{x|%d/%m/%Y}<br>Balanced: US$ %{y:,.0f}<extra></extra>",
+        ))
     fig.update_layout(
         height=470,
         margin={"l": 10, "r": 22, "t": 8, "b": 10},
@@ -12143,6 +12176,7 @@ def _render_crypto_mvrv_chart(points: list[dict[str, Any]]) -> None:
         <div class="crypto-mvrv-legend">
           <span class="green">BTC</span>
           <span class="yellow">Realized US$ {latest_realized:,.0f}</span>
+          <span class="orange">Balanced Price</span>
         </div>
       </div>
     </div>
@@ -12932,7 +12966,25 @@ def pagina_crypto_terminal():
     mvrv_ratio = _num(bgeometrics_data.get("mvrv"), None)
     mvrv_zone, mvrv_cls, mvrv_text = _mvrv_zone(mvrv_z)
     mvrv_status = sanitize_text(bgeometrics.get("status", "---") if isinstance(bgeometrics, dict) else "---")
-    mvrv_date = sanitize_text(bgeometrics_data.get("date", "---"))
+    mvrv_refresh_key = int(st.session_state.get("crypto_terminal_refresh_key", 0))
+    bgeometrics_mvrv_history = load_crypto_mvrv_history(mvrv_refresh_key)
+    mvrv_history_data = bgeometrics_mvrv_history.get("data", {}) if isinstance(bgeometrics_mvrv_history, dict) else {}
+    mvrv_history_points = mvrv_history_data.get("points") or []
+    latest_mvrv_history = mvrv_history_points[-1] if mvrv_history_points else {}
+    mvrv_date = sanitize_text(bgeometrics_data.get("date") or latest_mvrv_history.get("date") or "---")
+    balanced_payload = load_crypto_balanced_price_history(int(st.session_state.get("crypto_terminal_refresh_key", 0)))
+    balanced_data = balanced_payload.get("data", {}) if isinstance(balanced_payload, dict) else {}
+    balanced_points = balanced_data.get("points") or []
+    balanced_latest = balanced_data.get("latest") or (balanced_points[-1] if balanced_points else {})
+    balanced_price = _num(balanced_latest.get("balancedPrice"), None)
+    realized_price = _num(bgeometrics_data.get("realized_price"), None)
+    if realized_price is None:
+        realized_price = _num(latest_mvrv_history.get("realized_price"), None)
+    btc_spot_price = _num(btc.get("price"), None)
+    balanced_gap = ((btc_spot_price / balanced_price) - 1) * 100 if btc_spot_price and balanced_price else None
+    realized_gap = ((btc_spot_price / realized_price) - 1) * 100 if btc_spot_price and realized_price else None
+    balanced_date = sanitize_text(balanced_latest.get("date") or "---")
+    valuation_warning = " | ".join(str(item) for item in (balanced_payload.get("warnings") or []) if item)
     mayer_multiple = _num(bgeometrics_data.get("mayer_multiple"), None)
     puell_multiple = _num(bgeometrics_data.get("puell_multiple"), None)
     aviv_value = _num(bgeometrics_data.get("aviv"), None)
@@ -13121,6 +13173,17 @@ def pagina_crypto_terminal():
           .crypto-onchain-grid span {{display:block; color:#94A3B8; font-size:.68rem; font-weight:900; text-transform:uppercase;}}
           .crypto-onchain-grid b {{display:block; color:#F8FAFC; font-size:1rem; margin-top:4px;}}
           .crypto-onchain-cycle {{display:grid; grid-template-columns:.78fr 1.22fr; gap:12px; margin:-6px 0 18px;}}
+          .crypto-valuation {{background:#07111F; border:1px solid #203047; border-radius:8px; padding:13px; margin:-5px 0 16px;}}
+          .crypto-valuation-head {{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px;}}
+          .crypto-valuation-head h3 {{margin:3px 0 0; color:#F8FAFC; font-size:1.05rem;}}
+          .crypto-valuation-head small,.crypto-valuation-grid small {{color:#8FA4BD; font-size:.7rem;}}
+          .crypto-valuation-grid {{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px;}}
+          .crypto-valuation-grid div {{background:#050B14; border:1px solid #203047; border-radius:7px; padding:10px; min-width:0;}}
+          .crypto-valuation-grid span {{display:block; color:#94A3B8; font-size:.68rem; font-weight:900; text-transform:uppercase;}}
+          .crypto-valuation-grid b {{display:block; color:#F8FAFC; font-size:1.2rem; margin:4px 0;}}
+          .crypto-valuation-grid small {{display:block; line-height:1.35;}}
+          .crypto-valuation p {{margin:10px 0 0; color:#AAB7C4; font-size:.74rem; line-height:1.4;}}
+          .crypto-valuation-warning {{display:block; margin-top:7px; color:#FFCB6B; font-size:.7rem;}}
           .crypto-cycle-card {{background:linear-gradient(135deg,#07111F,#0B1727); border:1px solid #28405E; border-radius:8px; padding:13px;}}
           .crypto-cycle-card.good {{border-left:5px solid #00D084;}}
           .crypto-cycle-card.warn {{border-left:5px solid #FFB020;}}
@@ -13144,6 +13207,7 @@ def pagina_crypto_terminal():
           .crypto-mvrv-legend .green {{color:#2DFFAA; background:rgba(0,208,132,.10);}}
           .crypto-mvrv-legend .yellow {{color:#FFCB6B; background:rgba(255,176,32,.10);}}
           .crypto-mvrv-legend .red {{color:#FF8A8A; background:rgba(255,75,75,.10);}}
+          .crypto-mvrv-legend .orange {{color:#FDBA74; background:rgba(245,158,11,.12);}}
           .crypto-mvrv-chart {{height:320px; width:100%;}}
           .crypto-assets {{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; margin-bottom:16px;}}
           .crypto-asset {{background:linear-gradient(180deg,#08111F,#050B14); border:1px solid #203047; border-radius:8px; padding:11px;}}
@@ -13213,6 +13277,9 @@ def pagina_crypto_terminal():
             .crypto-onchain {{grid-template-columns:1fr;}}
             .crypto-onchain-grid {{grid-template-columns:1fr;}}
             .crypto-onchain-cycle {{grid-template-columns:1fr;}}
+            .crypto-valuation-head {{display:block;}}
+            .crypto-valuation-head small {{display:block; margin-top:6px;}}
+            .crypto-valuation-grid {{grid-template-columns:1fr;}}
             .crypto-onchain-heatmap {{grid-template-columns:repeat(2,minmax(0,1fr));}}
             .crypto-mvrv-head {{display:block;}}
             .crypto-mvrv-legend {{justify-content:flex-start; margin-top:8px;}}
@@ -13350,6 +13417,19 @@ def pagina_crypto_terminal():
             <div><span>Fonte</span><b>BGeometrics · {mvrv_status}</b></div>
           </div>
         </div>
+        <section class="crypto-valuation">
+          <div class="crypto-valuation-head">
+            <div><span class="crypto-label">Valuation on-chain do Bitcoin</span><h3>Referências de custo e ciclo</h3></div>
+            <small>Dados diários · BGeometrics · Balanced atualizado em {balanced_date}</small>
+          </div>
+          <div class="crypto-valuation-grid">
+            <div><span>BTC spot</span><b>{'---' if btc_spot_price is None else f'US$ {btc_spot_price:,.0f}'}</b><small>Binance · cotação de mercado</small></div>
+            <div><span>Realized Price</span><b>{'---' if realized_price is None else f'US$ {realized_price:,.0f}'}</b><small>{'---' if realized_gap is None else f'BTC {realized_gap:+.1f}% vs. realizado'} · data {mvrv_date}</small></div>
+            <div><span>Balanced Price</span><b>{'---' if balanced_price is None else f'US$ {balanced_price:,.0f}'}</b><small>{'---' if balanced_gap is None else f'BTC {balanced_gap:+.1f}% vs. balanced'} · data {balanced_date}</small></div>
+          </div>
+          <p>Realized Price representa a base média de custo estimada das moedas em circulação; Balanced Price é uma métrica de ciclo de longo prazo. São referências históricas, não suportes garantidos nem sinais de entrada.</p>
+          {f'<small class="crypto-valuation-warning">{sanitize_text(valuation_warning)}</small>' if valuation_warning else ''}
+        </section>
         <div class="crypto-onchain-cycle">
           <div class="crypto-cycle-card {cycle_cls}">
             <span class="crypto-label">Regime on-chain BTC</span>
@@ -13364,10 +13444,7 @@ def pagina_crypto_terminal():
         unsafe_allow_html=True,
     )
 
-    mvrv_refresh_key = int(st.session_state.get("crypto_terminal_refresh_key", 0))
-    bgeometrics_mvrv_history = load_crypto_mvrv_history(mvrv_refresh_key)
-    mvrv_history_data = bgeometrics_mvrv_history.get("data", {}) if isinstance(bgeometrics_mvrv_history, dict) else {}
-    _render_crypto_mvrv_chart(mvrv_history_data.get("points") or [])
+    _render_crypto_mvrv_chart(mvrv_history_points, balanced_points)
     bgeometrics_rainbow = load_crypto_rainbow_chart(mvrv_refresh_key)
     rainbow_data = bgeometrics_rainbow.get("data", {}) if isinstance(bgeometrics_rainbow, dict) else {}
     _render_crypto_rainbow_chart(rainbow_data.get("points") or [])

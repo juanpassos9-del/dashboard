@@ -20,10 +20,12 @@ except ModuleNotFoundError:
 CACHE_NAME = "crypto_bgeometrics.json"
 HISTORY_CACHE_NAME = "crypto_bgeometrics_mvrv_zscore_history.json"
 RAINBOW_CACHE_NAME = "crypto_bgeometrics_rainbow_chart.json"
+VALUATION_CACHE_NAME = "crypto_bgeometrics_valuation_history.json"
 SOURCE = "BGeometrics"
 SNAPSHOT_URL = "https://bitcoin-data.com/api/v1/snapshot"
 MVRV_ZSCORE_URL = "https://bitcoin-data.com/api/v1/mvrv-zscore"
 RAINBOW_CHART_URL = "https://bitcoin-data.com/api/v1/rainbow-chart"
+BALANCED_PRICE_URL = "https://bitcoin-data.com/v1/balanced-price"
 PUBLIC_MVRV_CHART_URL = "https://charts.bgeometrics.com/graphics/mvrv_400.html"
 PUBLIC_MVRV_PRICE_URL = "https://charts.bgeometrics.com/files/mvrv_zscore_btc_price.json"
 
@@ -147,6 +149,75 @@ def _normalize_highcharts_pairs(raw: Any) -> list[dict[str, Any]]:
         })
     points.sort(key=lambda row: int(row.get("time") or 0))
     return points
+
+
+def _normalize_daily_metric(raw: Any, field: str) -> list[dict[str, Any]]:
+    rows = raw if isinstance(raw, list) else []
+    points: list[dict[str, Any]] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        timestamp = int(safe_float(item.get("unixTs")))
+        date_value = str(item.get("d") or "")
+        value = safe_float(item.get(field), default=float("nan"))
+        if not timestamp and date_value:
+            try:
+                timestamp = int(datetime.fromisoformat(date_value).replace(tzinfo=timezone.utc).timestamp())
+            except Exception:
+                timestamp = 0
+        if timestamp and value == value and value > 0:
+            points.append({
+                "time": timestamp,
+                "date": date_value or datetime.fromtimestamp(timestamp, tz=timezone.utc).date().isoformat(),
+                field: round(value, 2),
+            })
+    points.sort(key=lambda row: int(row["time"]))
+    return points
+
+
+def fetch_bgeometrics_balanced_price_history(
+    days: int = 730,
+    max_age_seconds: int = 21600,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    """Fetch the public daily Balanced Price series; keep requests within the free API quota."""
+    if not force_refresh:
+        cached = load_cache(VALUATION_CACHE_NAME, max_age_seconds=max_age_seconds)
+        if cached:
+            return cached
+
+    start_day = (datetime.now(timezone.utc) - timedelta(days=max(30, int(days)))).date().isoformat()
+    try:
+        started = time.perf_counter()
+        response = requests.get(
+            BALANCED_PRICE_URL,
+            params={"startday": start_day},
+            timeout=20,
+            headers={"User-Agent": "TTS-Crypto-Terminal/1.0"},
+        )
+        response.raise_for_status()
+        points = _normalize_daily_metric(response.json(), "balancedPrice")[-int(days):]
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        payload = {
+            "source": "BGeometrics public API",
+            "status": "ok" if points else "empty",
+            "updated_at": utc_now_iso(),
+            "updated_ts": time.time(),
+            "latency_ms": latency_ms,
+            "data": {
+                "metric": "Balanced Price",
+                "points": points,
+                "latest": points[-1] if points else {},
+            },
+            "warnings": [],
+        }
+        save_cache(VALUATION_CACHE_NAME, payload)
+        mark_source("Crypto Balanced Price", payload["status"], rows=len(points), source=payload["source"], message=f"Serie diaria carregada em {latency_ms}ms.")
+        return payload
+    except Exception as exc:
+        payload = stale_payload(VALUATION_CACHE_NAME, "BGeometrics public API", f"Falha ao carregar Balanced Price: {exc}")
+        mark_source("Crypto Balanced Price", payload.get("status", "error"), rows=0, source=payload.get("source", SOURCE), message="Usando cache anterior ou indisponivel.")
+        return payload
 
 
 def _fetch_public_mvrv_chart_history(days: int) -> tuple[list[dict[str, Any]], int]:
