@@ -11839,6 +11839,7 @@ def load_crypto_terminal_payload(refresh_key: int = 0):
     """Load public crypto sources and deterministic regime snapshot."""
     from execution.crypto_bgeometrics import fetch_bgeometrics_snapshot
     from execution.crypto_binance import fetch_binance_crypto_snapshot
+    from execution.crypto_bgeometrics import fetch_bgeometrics_balanced_price_history
     from execution.crypto_coingecko import fetch_coingecko_crypto_snapshot
     from execution.crypto_defillama import fetch_defillama_crypto_snapshot
     from execution.crypto_fear_greed import fetch_fear_greed_snapshot
@@ -11850,6 +11851,23 @@ def load_crypto_terminal_payload(refresh_key: int = 0):
     fear_greed = fetch_fear_greed_snapshot()
     defillama = fetch_defillama_crypto_snapshot()
     bgeometrics = fetch_bgeometrics_snapshot()
+    balanced_payload = fetch_bgeometrics_balanced_price_history(days=730)
+    balanced_data = balanced_payload.get("data", {}) if isinstance(balanced_payload, dict) else {}
+    balanced_latest = balanced_data.get("latest") or {}
+    if isinstance(bgeometrics, dict):
+        bgeometrics = dict(bgeometrics)
+        bgeometrics_data = dict(bgeometrics.get("data") or {})
+        bgeometrics_data["balanced_price"] = balanced_latest.get("balancedPrice")
+        bgeometrics_data["balanced_price_date"] = balanced_latest.get("date")
+        btc_assets = ((binance or {}).get("data") or {}).get("assets") or []
+        btc_row = next((row for row in btc_assets if row.get("symbol") == "BTCUSDT"), {})
+        btc_price = float((btc_row or {}).get("price") or 0)
+        bgeometrics_data["btc_price"] = btc_price or None
+        realized_price = float(bgeometrics_data.get("realized_price") or 0)
+        balanced_price = float(bgeometrics_data.get("balanced_price") or 0)
+        bgeometrics_data["realized_gap_pct"] = (btc_price / realized_price - 1) * 100 if btc_price and realized_price else None
+        bgeometrics_data["balanced_gap_pct"] = (btc_price / balanced_price - 1) * 100 if btc_price and balanced_price else None
+        bgeometrics["data"] = bgeometrics_data
     regime = calculate_crypto_regime(binance, coingecko, fear_greed, defillama, bgeometrics)
     operational = build_crypto_operational_dashboard(binance, regime, coingecko)
     return {
@@ -11858,6 +11876,7 @@ def load_crypto_terminal_payload(refresh_key: int = 0):
         "fear_greed": fear_greed,
         "defillama": defillama,
         "bgeometrics": bgeometrics,
+        "balanced_price": balanced_payload,
         "regime": regime,
         "operational": operational,
     }

@@ -150,6 +150,8 @@ def _cycle_allocation_decision(
     btc_asset: dict[str, Any] | None,
     eth_asset: dict[str, Any] | None,
     funding_pressure: bool,
+    realized_gap_pct: float | None = None,
+    balanced_gap_pct: float | None = None,
 ) -> dict[str, Any]:
     """Contrarian cycle allocation with momentum confirmation."""
     cycle_score = 50.0
@@ -194,6 +196,22 @@ def _cycle_allocation_decision(
         elif mvrv >= 3:
             cycle_score -= 13
             risks.append(f"MVRV esticado ({mvrv:.2f}x)")
+
+    if realized_gap_pct is not None and not mvrv:
+        if realized_gap_pct <= 0:
+            cycle_score += 10
+            reasons.append(f"BTC abaixo do Realized Price ({realized_gap_pct:+.1f}%)")
+        elif realized_gap_pct <= 10:
+            cycle_score += 4
+            reasons.append(f"BTC proximo ao Realized Price ({realized_gap_pct:+.1f}%)")
+
+    if balanced_gap_pct is not None:
+        if balanced_gap_pct <= 0:
+            cycle_score += 5
+            reasons.append(f"BTC abaixo do Balanced Price ({balanced_gap_pct:+.1f}%)")
+        elif balanced_gap_pct <= 15:
+            cycle_score += 2
+            reasons.append(f"BTC proximo do Balanced Price ({balanced_gap_pct:+.1f}%)")
 
     if mayer:
         if mayer < 0.8:
@@ -430,6 +448,11 @@ def calculate_crypto_regime(
     fear_onchain = safe_float(onchain.get("fear_greed"))
     active_addresses = safe_float(onchain.get("active_addresses"))
     hashrate = safe_float(onchain.get("hashrate"))
+    realized_price = safe_float(onchain.get("realized_price"))
+    balanced_price = safe_float(onchain.get("balanced_price"))
+    btc_price = safe_float(asset_by_symbol.get("BTCUSDT", {}).get("price"))
+    realized_gap_pct = (btc_price / realized_price - 1) * 100 if btc_price > 0 and realized_price > 0 else None
+    balanced_gap_pct = (btc_price / balanced_price - 1) * 100 if btc_price > 0 and balanced_price > 0 else None
     if mvrv_z:
         if mvrv_z >= 7:
             score -= 14
@@ -450,6 +473,32 @@ def calculate_crypto_regime(
             positive.append(f"MVRV BTC {mvrv:.2f}x")
     else:
         missing.append("MVRV Z-Score BGeometrics")
+
+    if realized_price > 0 and realized_gap_pct is not None:
+        if mvrv:
+            positive.append(f"BTC {realized_gap_pct:+.1f}% vs. Realized Price (confirmacao do MVRV)")
+        elif realized_gap_pct <= 0:
+            score += 5
+            positive.append(f"BTC abaixo do Realized Price ({realized_gap_pct:+.1f}%), sinal de desconto agregado")
+        elif realized_gap_pct <= 10:
+            score += 2
+            positive.append(f"BTC proximo ao Realized Price ({realized_gap_pct:+.1f}%)")
+        else:
+            positive.append(f"BTC {realized_gap_pct:+.1f}% acima do Realized Price")
+    else:
+        missing.append("Realized Price")
+
+    if balanced_price > 0 and balanced_gap_pct is not None:
+        if balanced_gap_pct <= 0:
+            score += 4
+            positive.append(f"BTC abaixo do Balanced Price ({balanced_gap_pct:+.1f}%), zona profunda de valuation")
+        elif balanced_gap_pct <= 15:
+            score += 2
+            positive.append(f"BTC proximo do Balanced Price ({balanced_gap_pct:+.1f}%)")
+        else:
+            positive.append(f"BTC {balanced_gap_pct:+.1f}% acima do Balanced Price; referencia de ciclo, sem sinal isolado")
+    else:
+        missing.append("Balanced Price")
 
     if mayer:
         if mayer < 0.8:
@@ -524,6 +573,8 @@ def calculate_crypto_regime(
         btc_asset=asset_by_symbol.get("BTCUSDT"),
         eth_asset=asset_by_symbol.get("ETHUSDT"),
         funding_pressure=funding_pressure,
+        realized_gap_pct=realized_gap_pct,
+        balanced_gap_pct=balanced_gap_pct,
     )
     result = {
         "source": "TTS Crypto Regime Engine",
@@ -546,10 +597,16 @@ def calculate_crypto_regime(
             "mayer_multiple": round(mayer, 4) if mayer else None,
             "puell_multiple": round(puell, 4) if puell else None,
             "aviv": round(aviv, 4) if aviv else None,
+            "btc_price": round(btc_price, 2) if btc_price else None,
+            "realized_price": round(realized_price, 2) if realized_price else None,
+            "realized_gap_pct": round(realized_gap_pct, 2) if realized_gap_pct is not None else None,
+            "balanced_price": round(balanced_price, 2) if balanced_price else None,
+            "balanced_gap_pct": round(balanced_gap_pct, 2) if balanced_gap_pct is not None else None,
             "fear_greed": round(fear_onchain, 2) if fear_onchain else None,
             "active_addresses": round(active_addresses, 2) if active_addresses else None,
             "hashrate": round(hashrate, 2) if hashrate else None,
             "date": onchain.get("date"),
+            "balanced_price_date": onchain.get("balanced_price_date"),
         },
     }
     if save_file:
