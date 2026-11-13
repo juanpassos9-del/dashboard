@@ -257,3 +257,41 @@ def test_hyperliquid_treasury_yields_map_to_live_rates_and_calculate_basis_point
     assert two_year["quote_unit"] == "percent_per_year"
     assert two_year["source"] == "Hyperliquid WebSocket"
     assert "para:2Y" in two_year["yield_source"]
+
+    pending = apply_global_realtime_overlay(
+        {"categories": {"Treasuries": [{"symbol": "^TNX", "price": 4.1, "source": "Yahoo Finance"}]}, "metadata": {}},
+        {},
+        now=1_800_000_001,
+    )["categories"]["Treasuries"][0]
+    assert pending["price"] == 4.1
+    assert pending["realtime_pending"] is True
+    assert pending["realtime_pending_instrument"] == "Hyperliquid: para:10Y"
+
+
+def test_hyperliquid_heartbeat_sends_application_ping(monkeypatch):
+    class FakeSocket:
+        connected = True
+
+    class FakeWebSocket:
+        sock = FakeSocket()
+        keep_running = True
+
+        def __init__(self):
+            self.sent = []
+
+        def send(self, message):
+            self.sent.append(message)
+
+    ws = FakeWebSocket()
+    sleep_count = 0
+
+    def stop_after_one_ping(_seconds):
+        nonlocal sleep_count
+        sleep_count += 1
+        if sleep_count == 2:
+            ws.keep_running = False
+
+    monkeypatch.setattr("execution.cryptodash_ws.time.sleep", stop_after_one_ping)
+    CryptoDashRealtimeHub._hyperliquid_heartbeat(ws)
+
+    assert ws.sent == ['{"method": "ping"}']

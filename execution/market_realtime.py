@@ -358,6 +358,14 @@ def apply_global_realtime_overlay(
             symbol = str(item.get("symbol") or "")
             if _apply_live_quote(item, symbol, latest_quotes, now, max_age_seconds):
                 updated.append(symbol)
+            else:
+                hyperliquid_mapping = next(
+                    (mapping for provider, mapping in GLOBAL_REALTIME_MAP.get(symbol, ()) if provider == "Hyperliquid"),
+                    None,
+                )
+                if hyperliquid_mapping:
+                    item["realtime_pending"] = True
+                    item["realtime_pending_instrument"] = f"Hyperliquid: {hyperliquid_mapping['instrument']}"
 
     moved_indices = []
     for category_name, assets in list(categories.items()):

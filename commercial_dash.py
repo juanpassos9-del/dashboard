@@ -1054,6 +1054,8 @@ def get_global_markets_data():
             "connections_with_recent_ticks": recent_messages,
             "connection_states": {key: value.get("state") for key, value in statuses.items()},
             "connection_error": errors[0] if errors else "",
+            "hyperliquid_treasury_state": statuses.get("hyperliquid_para", {}).get("state", "aguardando"),
+            "hyperliquid_treasury_error": statuses.get("hyperliquid_para", {}).get("error", ""),
         })
         if live_count:
             mark_source(
@@ -1061,7 +1063,7 @@ def get_global_markets_data():
                 "ok",
                 rows=live_count,
                 message="Cotações ao vivo aplicadas; demais ativos seguem no snapshot/fallback.",
-                source="Binance/OKX/BingX public WebSocket",
+                source="Binance/OKX/BingX/Hyperliquid public WebSocket",
             )
         return overlaid
     except Exception as exc:
@@ -1069,7 +1071,7 @@ def get_global_markets_data():
             "Exchange WebSocket",
             "stale",
             message=f"Overlay ao vivo indisponível; mantendo snapshot e fallback: {str(exc)[:120]}",
-            source="Binance/OKX/BingX public WebSocket",
+            source="Binance/OKX/BingX/Hyperliquid public WebSocket",
         )
         return data
 
@@ -9326,14 +9328,14 @@ def sidebar_mercados():
                 item_source += html.escape(f" | WS aguardando: {item['realtime_pending_instrument']}")
             symbol_label = html.escape(sidebar_symbol(item))
             source_name = str(item.get("source") or "")
-            source_short = "WS" if live_tick else "WS…" if pending_quote else (
+            source_short = "WS" if live_tick else "WS…" if pending_quote or item.get("realtime_pending") else (
                 "YF" if "yahoo" in source_name.lower()
                 else "TV" if "tradingview" in source_name.lower()
                 else "FRED" if "fred" in source_name.lower()
                 else "LSE" if "london" in source_name.lower()
                 else "REST" if source_name else "SNAP"
             )
-            source_class = "ws" if live_tick else "pending" if pending_quote else "rest"
+            source_class = "ws" if live_tick else "pending" if pending_quote or item.get("realtime_pending") else "rest"
             source_marker = (
                 f'<span class="sidebar-quote-source {source_class}" title="Fonte: {html.escape(source_name or "snapshot", quote=True)}">{source_short}</span>'
             )

@@ -228,6 +228,12 @@ class CryptoDashRealtimeHub:
                         "method": "subscribe",
                         "subscription": {"type": "activeAssetCtx", "coin": row["instrument"]},
                     }))
+                threading.Thread(
+                    target=self._hyperliquid_heartbeat,
+                    args=(ws,),
+                    daemon=True,
+                    name=f"hyperliquid-heartbeat-{key}",
+                ).start()
             elif key == "okx":
                 ws.send(json.dumps({
                     "op": "subscribe",
@@ -235,6 +241,18 @@ class CryptoDashRealtimeHub:
                 }))
         except Exception as exc:
             self._on_error(key, exc)
+
+    @staticmethod
+    def _hyperliquid_heartbeat(ws: Any) -> None:
+        while True:
+            time.sleep(20)
+            socket = getattr(ws, "sock", None)
+            if not getattr(ws, "keep_running", False) or not getattr(socket, "connected", False):
+                return
+            try:
+                ws.send(json.dumps({"method": "ping"}))
+            except Exception:
+                return
 
     def _on_message(self, key: str, message: Any, rows: list[dict[str, str]]) -> None:
         text = _message_text(message).strip()
