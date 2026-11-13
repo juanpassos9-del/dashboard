@@ -8,12 +8,21 @@ import time
 from typing import Any
 
 
-def _quote(asset: str, instrument: str, market_type: str, note: str = "") -> dict[str, str]:
+def _quote(
+    asset: str,
+    instrument: str,
+    market_type: str,
+    note: str = "",
+    dex: str | None = None,
+    quote_unit: str | None = None,
+) -> dict[str, str | None]:
     return {
         "asset": asset,
         "instrument": instrument,
         "market_type": market_type,
         "mapping_note": note,
+        "dex": dex,
+        "quote_unit": quote_unit,
     }
 
 
@@ -95,6 +104,78 @@ GLOBAL_REALTIME_MAP["XLV"] = [
     ("BingX", _quote("BINGX_STOCK_XLV", "NCSKXLV2USD-USDT", "Perpétuo")),
 ]
 
+
+def _add_hyperliquid_candidate(
+    yahoo_symbol: str,
+    instrument: str,
+    *,
+    dex: str = "",
+    note: str,
+) -> None:
+    candidates = GLOBAL_REALTIME_MAP.setdefault(yahoo_symbol, [])
+    candidates.append((
+        "Hyperliquid",
+        _quote(
+            f"HYPERLIQUID:{instrument}",
+            instrument,
+            f"Perpétuo Hyperliquid{f' · {dex.upper()}' if dex else ''}",
+            note,
+            dex=dex,
+        ),
+    ))
+
+
+for _ticker in ("AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"):
+    _add_hyperliquid_candidate(
+        _ticker,
+        f"xyz:{_ticker}",
+        dex="xyz",
+        note="Perpétuo sintético HIP-3 referenciado à ação; não é ação à vista.",
+    )
+
+for _yahoo_symbol, _coin, _note in (
+    ("^GSPC", "xyz:SP500", "Perpétuo sintético referenciado ao S&P 500."),
+    ("DX-Y.NYB", "xyz:DXY", "Perpétuo sintético referenciado ao índice DXY."),
+    ("EURUSD=X", "xyz:EUR", "Perpétuo sintético EUR; proxy de EUR/USD, não cotação spot."),
+    ("GBPUSD=X", "xyz:GBP", "Perpétuo sintético GBP; proxy de GBP/USD, não cotação spot."),
+    ("EWZ", "xyz:EWZ", "Perpétuo sintético referenciado ao ETF EWZ."),
+    ("XLE", "xyz:XLE", "Perpétuo sintético referenciado ao ETF setorial XLE."),
+    ("XBI", "xyz:XBI", "Perpétuo sintético referenciado ao ETF setorial XBI."),
+    ("BZ=F", "xyz:BRENTOIL", "Perpétuo sintético de Brent; não é o contrato futuro BZ da CME."),
+    ("CL=F", "xyz:CL", "Perpétuo sintético de WTI; instrumento e referência podem divergir do futuro CL."),
+    ("NG=F", "xyz:NATGAS", "Perpétuo sintético de gás natural; não é o contrato futuro NG."),
+    ("HG=F", "xyz:COPPER", "Perpétuo sintético de cobre; referência não idêntica ao futuro HG."),
+    ("GC=F", "xyz:GOLD", "Perpétuo sintético de ouro; não é o contrato futuro GC."),
+    ("SI=F", "xyz:SILVER", "Perpétuo sintético de prata; não é o contrato futuro SI."),
+    ("PL=F", "xyz:PLATINUM", "Perpétuo sintético de platina; referência não idêntica ao futuro PL."),
+    ("PA=F", "xyz:PALLADIUM", "Perpétuo sintético de paládio; referência não idêntica ao futuro PA."),
+):
+    _add_hyperliquid_candidate(_yahoo_symbol, _coin, dex="xyz", note=_note)
+
+for _symbol, _tenor in (
+    ("FRED:DGS2", "2Y"),
+    ("^TNX", "10Y"),
+    ("^TYX", "30Y"),
+    ("US02Y", "2Y"),
+    ("US10Y", "10Y"),
+    ("US30Y", "30Y"),
+):
+    GLOBAL_REALTIME_MAP[_symbol] = [("Hyperliquid", _quote(
+        f"US{_tenor}",
+        f"para:{_tenor}",
+        "Perpétuo de yield Hyperliquid · Paragon",
+        f"Yield do Treasury dos EUA de {_tenor}, cotado em % ao ano; perpétuo sintético, não preço do título à vista.",
+        dex="para",
+        quote_unit="yield_percent",
+    ))]
+
+for _yahoo_symbol, _coin, _note in (
+    ("BTC-USD", "BTC", "Perpétuo cripto Hyperliquid; preço de venue, não índice composto."),
+    ("ETH-USD", "ETH", "Perpétuo cripto Hyperliquid; preço de venue, não índice composto."),
+    ("SOL-USD", "SOL", "Perpétuo cripto Hyperliquid; preço de venue, não índice composto."),
+):
+    _add_hyperliquid_candidate(_yahoo_symbol, _coin, note=_note)
+
 for _symbol, _aliases in (
     ("BZ=F", (("Binance", "BZ", "BZUSDT", "Perpétuo USDⓈ-M"), ("OKX", "BZ", "BZ-USDT-SWAP", "Perpétuo"), ("BingX", "BINGX_COMMODITY_BRENT", "NCCO1OILBRENT2USD-USDT", "Perpétuo"))),
     ("CL=F", (("Binance", "CL", "CLUSDT", "Perpétuo USDⓈ-M"), ("OKX", "CL", "CL-USDT-SWAP", "Perpétuo"), ("BingX", "BINGX_COMMODITY_WTI", "NCCO1OILWTI2USD-USDT", "Perpétuo"))),
@@ -108,7 +189,7 @@ for _symbol, _aliases in (
     GLOBAL_REALTIME_MAP[_symbol] = [
         (provider, _quote(alias, instrument, market_type))
         for provider, alias, instrument, market_type in _aliases
-    ]
+    ] + [candidate for candidate in GLOBAL_REALTIME_MAP.get(_symbol, ()) if candidate[0] == "Hyperliquid"]
 
 
 for _asset, _instrument, _market_type in (
@@ -165,8 +246,8 @@ TOKENIZED_SUPPLEMENTAL_QUOTES.extend([
 ])
 
 
-def global_market_subscriptions() -> dict[str, list[dict[str, str]]]:
-    subscriptions = {"Binance": [], "OKX": [], "BingX": []}
+def global_market_subscriptions() -> dict[str, list[dict[str, str | None]]]:
+    subscriptions = {"Binance": [], "OKX": [], "BingX": [], "Hyperliquid": []}
     for candidates in GLOBAL_REALTIME_MAP.values():
         for provider, row in candidates:
             subscriptions[provider].append(row)
@@ -199,14 +280,15 @@ def _apply_live_quote(
             if timestamp_ms > 0 else datetime.fromtimestamp(received_at, tz=timezone.utc).isoformat()
         )
         mapping_note = mapping.get("mapping_note") or ""
+        previous_source = item.get("source")
+        live_change = live.get("change_pct_24h")
+        live_high = live.get("high_24h")
+        live_low = live.get("low_24h")
         item.update({
             "price": price,
-            "high": float(live.get("high_24h") or item.get("high") or price),
-            "low": float(live.get("low_24h") or item.get("low") or price),
-            "high_low_basis": "exchange_rolling_24h",
-            "change": float(live.get("change_pct_24h") or 0),
-            "change_24h": float(live.get("change_pct_24h") or 0),
-            "change_basis": "exchange_rolling_24h",
+            "high": float(live_high) if live_high is not None else item.get("high"),
+            "low": float(live_low) if live_low is not None else item.get("low"),
+            "high_low_basis": "exchange_rolling_24h" if live_high is not None and live_low is not None else item.get("high_low_basis"),
             "source": f"{provider} WebSocket",
             "source_symbol": mapping["instrument"],
             "source_timestamp": source_timestamp,
@@ -229,6 +311,22 @@ def _apply_live_quote(
             "is_realtime": True,
             "data_status": "fresh",
         })
+        if live_change is not None:
+            item.update({
+                "change": float(live_change),
+                "change_24h": float(live_change),
+                "change_basis": live.get("change_basis") or "exchange_rolling_24h",
+            })
+        elif previous_source:
+            item["change_source"] = previous_source
+        if (live_high is None or live_low is None) and previous_source:
+            item["high_low_source"] = previous_source
+        if mapping.get("quote_unit") == "yield_percent":
+            previous_yield = live.get("previous_price")
+            if previous_yield is not None:
+                item["change_bps"] = round((price - float(previous_yield)) * 100, 2)
+            item["quote_unit"] = "percent_per_year"
+            item["yield_source"] = f"{provider} {mapping['instrument']}"
         return True
     return False
 
@@ -316,7 +414,7 @@ def apply_global_realtime_overlay(
     if not isinstance(data.get("metadata"), dict):
         data["metadata"] = {}
     data["metadata"]["realtime_overlay"] = {
-        "source": "Binance/OKX/BingX public WebSocket",
+        "source": "Binance/OKX/BingX/Hyperliquid public WebSocket",
         "updated_at": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
         "quotes_updated": len(unique_updated),
         "symbols": unique_updated,

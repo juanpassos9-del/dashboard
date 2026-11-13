@@ -30,7 +30,10 @@ def _message_text(message: Any) -> str:
 class CryptoDashRealtimeHub:
     """Maintains one public connection per provider/market and shares latest ticks."""
 
-    _MARKETS = ("binance_spot", "binance_swap", "bingx_spot", "bingx_swap", "okx")
+    _MARKETS = (
+        "binance_spot", "binance_swap", "bingx_spot", "bingx_swap", "okx",
+        "hyperliquid_default", "hyperliquid_xyz", "hyperliquid_para",
+    )
     _BINGX_SUBSCRIPTIONS_PER_CONNECTION = 100
 
     def __init__(self) -> None:
@@ -47,11 +50,13 @@ class CryptoDashRealtimeHub:
         }
 
     @staticmethod
-    def _market_key(provider: str, market_type: str) -> str:
+    def _market_key(provider: str, market_type: str, dex: str | None = None) -> str:
         if provider == "Binance":
             return "binance_spot" if market_type == "Spot" else "binance_swap"
         if provider == "BingX":
             return "bingx_spot" if market_type == "Spot" else "bingx_swap"
+        if provider == "Hyperliquid":
+            return f"hyperliquid_{str(dex or 'default').lower()}"
         return "okx"
 
     def configure(self, instruments_by_provider: dict[str, list[dict[str, str]]]) -> None:
@@ -66,13 +71,14 @@ class CryptoDashRealtimeHub:
         """Configure one consumer without replacing other consumers' subscriptions."""
         normalized: dict[str, list[dict[str, str]]] = {}
         for provider, rows in (instruments_by_provider or {}).items():
-            if provider not in {"Binance", "BingX", "OKX"}:
+            if provider not in {"Binance", "BingX", "OKX", "Hyperliquid"}:
                 continue
             normalized[provider] = [
                 {
                     "asset": str(row.get("asset") or ""),
                     "instrument": str(row.get("instrument") or ""),
                     "market_type": str(row.get("market_type") or ""),
+                    "dex": str(row.get("dex") or ""),
                 }
                 for row in rows
                 if row.get("asset") and row.get("instrument") and row.get("market_type")
@@ -80,12 +86,12 @@ class CryptoDashRealtimeHub:
         with self._lock:
             self._groups[str(group)] = normalized
 
-            merged: dict[str, list[dict[str, str]]] = {"Binance": [], "BingX": [], "OKX": []}
-            seen: set[tuple[str, str, str, str]] = set()
+            merged: dict[str, list[dict[str, str]]] = {"Binance": [], "BingX": [], "OKX": [], "Hyperliquid": []}
+            seen: set[tuple[str, str, str, str, str]] = set()
             for group_rows in self._groups.values():
                 for provider, rows in group_rows.items():
                     for row in rows:
-                        identity = (provider, row["asset"], row["instrument"], row["market_type"])
+                        identity = (provider, row["asset"], row["instrument"], row["market_type"], row.get("dex", ""))
                         if identity not in seen:
                             seen.add(identity)
                             merged[provider].append(row)
@@ -100,16 +106,17 @@ class CryptoDashRealtimeHub:
                 asset = str(row.get("asset") or "")
                 market_type = str(row.get("market_type") or "")
                 if instrument and asset:
-                    grouped[self._market_key(provider, market_type)].append({
+                    key = self._market_key(provider, market_type, row.get("dex"))
+                    grouped.setdefault(key, []).append({
                         "asset": asset,
                         "instrument": instrument,
                         "market_type": market_type,
+                        "dex": str(row.get("dex") or ""),
                     })
 
         desired: dict[str, list[dict[str, str]]] = {
-            "binance_spot": grouped["binance_spot"],
-            "binance_swap": grouped["binance_swap"],
-            "okx": grouped["okx"],
+            key: grouped[key]
+            for key in ("binance_spot", "binance_swap", "okx", "hyperliquid_default", "hyperliquid_xyz", "hyperliquid_para")
         }
         for base_key in ("bingx_spot", "bingx_swap"):
             rows = grouped[base_key]
@@ -122,7 +129,11 @@ class CryptoDashRealtimeHub:
         for key in existing_keys | set(desired):
             rows = desired.get(key, [])
             rows.sort(key=lambda row: (row["instrument"], row["asset"]))
-            signature = tuple((row["asset"], row["instrument"]) for row in rows)
+            signature = tuple(
+                (row["asset"], row["instrument"], row.get("dex", "")) if key.startswith("hyperliquid_")
+                else (row["asset"], row["instrument"])
+                for row in rows
+            )
             socket_to_close = None
             with self._lock:
                 if signature == self._signatures.get(key):
@@ -188,6 +199,8 @@ class CryptoDashRealtimeHub:
             return "wss://open-api-ws.bingx.com/market"
         if key.startswith("bingx_swap"):
             return "wss://open-api-swap.bingx.com/swap-market"
+        if key.startswith("hyperliquid_"):
+            return "wss://api.hyperliquid.xyz/ws"
         return "wss://ws.okx.com:443/ws/v5/public"
 
     def _on_open(self, key: str, ws: Any, rows: list[dict[str, str]]) -> None:
@@ -208,6 +221,12 @@ class CryptoDashRealtimeHub:
                         "id": str(uuid.uuid4()),
                         "reqType": "sub",
                         "dataType": f"{row['instrument']}@ticker",
+                    }))
+            elif key.startswith("hyperliquid_"):
+                for row in rows:
+                    ws.send(json.dumps({
+                        "method": "subscribe",
+                        "subscription": {"type": "activeAssetCtx", "coin": row["instrument"]},
                     }))
             elif key == "okx":
                 ws.send(json.dumps({
@@ -266,6 +285,24 @@ class CryptoDashRealtimeHub:
                     "low_24h": _as_float(data.get("l")),
                     "timestamp_ms": int(_as_float(data.get("T") or payload.get("ts"))),
                 }))
+        elif key.startswith("hyperliquid_") and payload.get("channel") == "activeAssetCtx":
+            data = payload.get("data") or {}
+            instrument_rows = by_instrument.get(str(data.get("coin") or "").upper(), [])
+            ctx = data.get("ctx") or {}
+            price_fields = ("oraclePx", "midPx", "markPx") if key == "hyperliquid_para" else ("midPx", "oraclePx", "markPx")
+            price = next((_as_float(ctx.get(field)) for field in price_fields if _as_float(ctx.get(field)) > 0), 0.0)
+            prev_day = _as_float(ctx.get("prevDayPx"))
+            if instrument_rows and price > 0:
+                quote = {
+                    "price": price,
+                    "quote_volume_24h": _as_float(ctx.get("dayNtlVlm")),
+                    "timestamp_ms": 0,
+                }
+                if prev_day > 0:
+                    quote["change_pct_24h"] = ((price / prev_day) - 1) * 100
+                    quote["change_basis"] = "hyperliquid_previous_day_price"
+                    quote["previous_price"] = prev_day
+                parsed.extend((row, quote) for row in instrument_rows)
         elif payload.get("arg", {}).get("channel") == "tickers":
             for data in payload.get("data", []):
                 instrument_rows = by_instrument.get(str(data.get("instId") or "").upper(), [])
@@ -302,7 +339,13 @@ class CryptoDashRealtimeHub:
 
     @staticmethod
     def _provider_for(key: str) -> str:
-        return "Binance" if key.startswith("binance_") else "BingX" if key.startswith("bingx_") else "OKX"
+        if key.startswith("binance_"):
+            return "Binance"
+        if key.startswith("bingx_"):
+            return "BingX"
+        if key.startswith("hyperliquid_"):
+            return "Hyperliquid"
+        return "OKX"
 
     def _on_error(self, key: str, error: Any) -> None:
         with self._lock:
