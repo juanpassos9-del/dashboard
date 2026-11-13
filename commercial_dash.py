@@ -5713,7 +5713,7 @@ def painel_inferior_rtd():
     elif data.get("escada"):
         st.warning("Escada indisponível: o Excel não enviou níveis numéricos válidos.")
 
-@st.fragment(run_every=30)
+@st.fragment(run_every=2)
 def painel_topo_global():
     """Heatmap de indicadores globais no Terminal Global."""
     global_data = get_global_markets_data()
@@ -5778,6 +5778,7 @@ def painel_topo_global():
             min-width: 0;
         }
         .tg-heatmap-card {
+            position: relative;
             min-height: 86px;
             border: 1px solid rgba(255,255,255,0.15);
             border-radius: 3px;
@@ -5793,6 +5794,29 @@ def painel_topo_global():
             background: linear-gradient(180deg, #ffe600 0%, #d6b600 100%);
             color: #111827;
         }
+        .tg-heatmap-card.tick-up { animation: tg-tick-up 1.25s ease-out; }
+        .tg-heatmap-card.tick-down { animation: tg-tick-down 1.25s ease-out; }
+        @keyframes tg-tick-up {
+            0% { box-shadow: inset 0 0 0 2px #00ffc3, 0 0 14px rgba(0,255,195,.75); }
+            100% { box-shadow: inset 0 1px 0 rgba(255,255,255,.08); }
+        }
+        @keyframes tg-tick-down {
+            0% { box-shadow: inset 0 0 0 2px #ff4057, 0 0 14px rgba(255,64,87,.75); }
+            100% { box-shadow: inset 0 1px 0 rgba(255,255,255,.08); }
+        }
+        .tg-heatmap-source {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            border-radius: 3px;
+            padding: 1px 3px;
+            background: rgba(15,23,42,.7);
+            color: #cbd5e1;
+            font-size: .5rem;
+            font-weight: 900;
+            line-height: 1.2;
+        }
+        .tg-heatmap-source.live { color: #00ffc3; }
         .tg-heatmap-symbol {
             font-size: 0.72rem;
             line-height: 1;
@@ -5891,15 +5915,29 @@ def painel_topo_global():
         for tab in tabs
     )
     rows = []
+    live_state = st.session_state.setdefault("tg_heatmap_live_prices", {})
+    tick_now = time.monotonic()
+    live_assets = 0
+    total_assets = 0
     for label, assets in display_groups:
         if not assets:
             continue
         cards = []
         for asset in assets:
             name = esc_html(str(asset.get("name", "---")))
+            total_assets += 1
             price = fmt_num(asset.get("price"))
-            high = fmt_num(asset.get("high", asset.get("price")))
-            low = fmt_num(asset.get("low", asset.get("price")))
+            quote_age = asset.get("age_seconds")
+            try:
+                quote_age = float(quote_age)
+            except (TypeError, ValueError):
+                quote_age = float("inf")
+            is_live = bool(asset.get("is_realtime")) and quote_age <= 20
+            if is_live:
+                live_assets += 1
+            high_low_is_stale = bool(asset.get("high_low_source"))
+            high = "---" if is_live and high_low_is_stale else fmt_num(asset.get("high", asset.get("price")))
+            low = "---" if is_live and high_low_is_stale else fmt_num(asset.get("low", asset.get("price")))
             try:
                 change_value = float(asset.get("change", 0))
                 change = f"{change_value:+.2f}%"
@@ -5907,8 +5945,50 @@ def painel_topo_global():
             except Exception:
                 change = "---"
                 change_class = "flat"
+            symbol = str(asset.get("symbol") or asset.get("name") or "")
+            tick_class = ""
+            try:
+                live_price = float(asset.get("price"))
+            except (TypeError, ValueError):
+                live_price = 0.0
+            if is_live and live_price > 0:
+                previous = live_state.get(symbol, {})
+                previous_price = previous.get("price")
+                if isinstance(previous_price, (int, float)) and abs(live_price - previous_price) > max(abs(previous_price) * 1e-8, 1e-10):
+                    direction = "up" if live_price > previous_price else "down"
+                    live_state[symbol] = {"price": live_price, "direction": direction, "until": tick_now + 1.35}
+                else:
+                    state = previous if isinstance(previous, dict) else {}
+                    if not isinstance(previous_price, (int, float)):
+                        state = {"price": live_price, "direction": "", "until": 0.0}
+                        live_state[symbol] = state
+                state = live_state.get(symbol, {})
+                if tick_now < float(state.get("until") or 0):
+                    tick_class = f" tick-{state.get('direction')}"
+            source_name = str(asset.get("source") or "Snapshot")
+            source_badge = "WS" if is_live else "WS…" if asset.get("realtime_pending") else (
+                "YF" if "yahoo" in source_name.lower()
+                else "TV" if "tradingview" in source_name.lower()
+                else "FRED" if "fred" in source_name.lower()
+                else "REST" if source_name != "Snapshot" else "SNAP"
+            )
+            tooltip_parts = [source_name]
+            if asset.get("source_symbol"):
+                tooltip_parts.append(str(asset["source_symbol"]))
+            if asset.get("market_type"):
+                tooltip_parts.append(str(asset["market_type"]))
+            if asset.get("mapping_note"):
+                tooltip_parts.append(str(asset["mapping_note"]))
+            if asset.get("change_basis"):
+                tooltip_parts.append(f"Base da variação: {asset['change_basis']}")
+            if is_live:
+                tooltip_parts.append(f"Tick recebido há {max(0, int(quote_age))}s")
+            elif asset.get("realtime_pending_instrument"):
+                tooltip_parts.append(f"Aguardando {asset['realtime_pending_instrument']}")
+            card_title = esc_html(" | ".join(tooltip_parts))
             cards.append(
-                f"<article class='tg-heatmap-card {change_class}'>"
+                f"<article class='tg-heatmap-card {change_class}{tick_class}' title='{card_title}'>"
+                f"<span class='tg-heatmap-source {'live' if is_live else ''}'>{source_badge}</span>"
                 f"<div class='tg-heatmap-symbol'>{name}</div>"
                 f"<div class='tg-heatmap-price'>{price}</div>"
                 f"<div class='tg-heatmap-range'>"
@@ -5925,8 +6005,9 @@ def painel_topo_global():
         )
 
     st.markdown("#### 🌎 INDICADORES GLOBAIS")
+    live_caption = f"WEBSOCKET {live_assets}/{total_assets} · interface atualiza a cada 2s" if live_assets else f"SEM TICKS AO VIVO · {total_assets} ativos no snapshot"
     st.markdown(
-        f"<div class='tg-heatmap-tabs'>{tab_html}</div><div class='tg-heatmap-grid'>{''.join(rows)}</div>",
+        f"<div class='tg-heatmap-tabs'>{tab_html}<span style='margin-left:auto;color:{'#00ffc3' if live_assets else '#f5b942'};font-size:.62rem;'>{esc_html(live_caption)}</span></div><div class='tg-heatmap-grid'>{''.join(rows)}</div>",
         unsafe_allow_html=True,
     )
 
