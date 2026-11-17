@@ -1076,6 +1076,86 @@ def get_global_markets_data():
         return data
 
 
+@st.fragment(run_every=5)
+def render_live_market_context(title: str, instruments: tuple[tuple[str, tuple[str, ...], str], ...]):
+    """Render current cross-asset quotes from the shared WebSocket overlay."""
+    global_data = get_global_markets_data()
+    if not isinstance(global_data, dict):
+        return
+    categories = global_data.get("categories", global_data)
+    if not isinstance(categories, dict):
+        categories = {}
+    assets = [
+        item
+        for rows in categories.values() if isinstance(rows, list)
+        for item in rows
+        if isinstance(item, dict)
+    ]
+
+    def _age(item):
+        try:
+            return float(item.get("age_seconds"))
+        except (TypeError, ValueError, OverflowError):
+            return float("inf")
+
+    matched = []
+    for label, aliases, kind in instruments:
+        wanted = {str(alias).strip().casefold() for alias in aliases}
+        candidates = [
+            item for item in assets
+            if any(
+                str(item.get(field) or "").strip().casefold() in wanted
+                for field in ("symbol", "ticker", "name", "display_symbol")
+            )
+        ]
+        if candidates:
+            candidates.sort(key=lambda item: (not bool(item.get("is_realtime")), _age(item)))
+            matched.append((label, kind, candidates[0]))
+
+    live_count = sum(bool(item.get("is_realtime")) and _age(item) <= 20 for _, _, item in matched)
+    st.markdown(f"#### {title}")
+    st.caption(f"Fatores de mercado · WebSocket fresco {live_count}/{len(matched)} · leitura independente das séries oficiais")
+    if not matched:
+        st.info("Aguardando fatores de mercado no snapshot compartilhado.")
+        return
+
+    columns = st.columns(min(len(matched), 4))
+    for index, (label, kind, item) in enumerate(matched):
+        age = item.get("age_seconds")
+        try:
+            age = max(0, int(float(age))) if age is not None else None
+        except (TypeError, ValueError, OverflowError):
+            age = None
+        live = bool(item.get("is_realtime")) and age is not None and age <= 20
+        try:
+            price = float(item.get("price"))
+            if kind == "yield":
+                value = f"{price:.3f}%"
+            elif abs(price) < 10:
+                value = f"{price:.4f}"
+            else:
+                value = f"{price:,.2f}"
+        except (TypeError, ValueError):
+            value = "—"
+        change_bps = item.get("change_bps") if kind == "yield" else None
+        change = None
+        if change_bps is not None:
+            try:
+                change = f"{float(change_bps):+.1f} bps"
+            except (TypeError, ValueError):
+                change = None
+        if change is None and item.get("change") is not None:
+            try:
+                change = f"{float(item['change']):+.2f}%"
+            except (TypeError, ValueError):
+                change = None
+        with columns[index % len(columns)]:
+            st.metric(label, value, change, help=str(item.get("mapping_note") or item.get("change_basis") or ""))
+            source = str(item.get("source") or "Fonte não identificada")
+            freshness = f"· {age}s" if live else "· sem tick WS fresco"
+            st.caption(f"{source} {freshness}")
+
+
 def _refresh_global_market_snapshot():
     """Recover missed scheduled collections without blocking a dashboard rerun."""
     from execution.market_data_engine import collect_and_publish_market_snapshot
@@ -3422,7 +3502,7 @@ def _fx_correlation_rows(pair_df: pd.DataFrame, driver_df: pd.DataFrame | None =
     )
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=5, show_spinner=False)
 def get_fx_command_center_data():
     pair_df = get_terminal_global_line_chart_data(tuple(FX_COMMAND_PAIR_MAP.items()), period="1d", interval="5m", forward_fill=False)
     if pair_df.empty:
@@ -3696,6 +3776,12 @@ def get_fx_command_center_data():
 def render_fx_command_center():
     st.markdown("## FX COMMAND CENTER")
     st.caption("Majors FX, DXY, US02Y/US10Y, treasuries e correlacoes intradiarias | dados do dashboard + yfinance/cache")
+    render_live_market_context("Fatores globais ao vivo", (
+        ("USD/BRL", ("BRL=X", "USDBRL"), "price"),
+        ("DXY", ("DX-Y.NYB", "DXY (Dólar Index)"), "price"),
+        ("S&P 500", ("^GSPC", "S&P 500"), "price"),
+        ("Treasury 2Y", ("FRED:DGS2", "US 02Y (Yield)", "US02Y"), "yield"),
+    ))
     data = get_fx_command_center_data()
     if data.get("error"):
         st.info(data["error"])
@@ -7698,6 +7784,12 @@ def pagina_monitor_macro():
     """Monitor macro quantitativo baseado em FRED e calendario economico."""
     st.title("MONITOR MACRO")
     st.caption("Motor deterministico: FRED estrutural + surpresa dos eventos USD/BRL da semana.")
+    render_live_market_context("Contexto global ao vivo", (
+        ("DXY", ("DX-Y.NYB", "DXY (Dólar Index)"), "price"),
+        ("S&P 500", ("^GSPC", "S&P 500"), "price"),
+        ("VIX", ("^VIX", "VIX"), "price"),
+        ("Treasury 10Y", ("^TNX", "US 10Y (Yield)", "US10Y"), "yield"),
+    ))
 
     try:
         from execution.macro_fred_monitor import build_macro_fred_monitor, load_cached_macro_fred_monitor, load_macro_history
@@ -7982,6 +8074,12 @@ def pagina_renda_fixa_br():
 
     st.title("RENDAFIXABR")
     st.caption("Panorama da renda fixa brasileira · Tesouro Direto, Selic e curva DI")
+    render_live_market_context("Referências externas ao vivo · Treasuries dos EUA", (
+        ("EUA 2 anos", ("FRED:DGS2", "US 02Y (Yield)", "US02Y"), "yield"),
+        ("EUA 10 anos", ("^TNX", "US 10Y (Yield)", "US10Y"), "yield"),
+        ("EUA 30 anos", ("^TYX", "US 30Y (Yield)", "US30Y"), "yield"),
+    ))
+    st.caption("Referências internacionais sintéticas/indicativas; não substituem taxas oficiais brasileiras do Tesouro, Selic ou DI.")
 
     payload = load_tesouro_cache()
     refresh_col, source_col = st.columns([1, 2])
@@ -8307,6 +8405,12 @@ def pagina_monitor_br():
     """Painel deterministico de macroeconomia brasileira."""
     st.title("MONITOR BR")
     st.caption("Brasil: dados oficiais do BCB e IBGE, expectativas Focus e leitura de mercado/curva DI.")
+    render_live_market_context("Fatores Brasil e externos ao vivo", (
+        ("USD/BRL", ("BRL=X", "USDBRL"), "price"),
+        ("EWZ", ("EWZ",), "price"),
+        ("Petróleo Brent", ("BZ=F", "Brent"), "price"),
+        ("Treasury 10Y", ("^TNX", "US 10Y (Yield)", "US10Y"), "yield"),
+    ))
 
     from execution.monitor_br import build_monitor_br_payload, load_monitor_br_cache, save_monitor_br_cache
     from execution.monitor_br_briefing import build_monitor_br_briefing
@@ -10284,7 +10388,7 @@ def _fetch_gamma_intraday_cached(underlying: str):
 
 
 def _get_dashboard_underlying_snapshot(underlying: str):
-    payload = fetch_app_state_cached("mercados_globais") or get_global_markets_data() or {}
+    payload = get_global_markets_data() or fetch_app_state_cached("mercados_globais") or {}
     categories = payload.get("categories", {}) if isinstance(payload, dict) else {}
     for items in categories.values():
         if not isinstance(items, list):
@@ -10296,8 +10400,42 @@ def _get_dashboard_underlying_snapshot(underlying: str):
                     "previous_close": item.get("prev_close") or item.get("previous_close"),
                     "source": item.get("source") or "motor de cotações",
                     "timestamp": item.get("source_timestamp") or item.get("updated_at"),
+                    "age_seconds": item.get("age_seconds"),
+                    "is_realtime": bool(item.get("is_realtime")),
+                    "change": item.get("change"),
+                    "change_basis": item.get("change_basis"),
+                    "market_type": item.get("market_type"),
+                    "mapping_note": item.get("mapping_note"),
                 }
     return {}
+
+
+@st.fragment(run_every=5)
+def render_gamma_live_reference(underlying: str):
+    quote = _get_dashboard_underlying_snapshot(underlying)
+    price = quote.get("price")
+    if price is None:
+        st.info(f"{underlying}: aguardando cotação compartilhada; zonas GEX e cadeia não são atualizadas por este bloco.")
+        return
+    try:
+        formatted_price = f"${float(price):,.2f}"
+    except (TypeError, ValueError, OverflowError):
+        formatted_price = "—"
+    age = quote.get("age_seconds")
+    try:
+        age_seconds = max(0, int(float(age))) if age is not None else None
+    except (TypeError, ValueError, OverflowError):
+        age_seconds = None
+    is_live = quote.get("is_realtime") and age_seconds is not None and age_seconds <= 20
+    change = quote.get("change")
+    try:
+        delta = f"{float(change):+.2f}%" if change is not None else None
+    except (TypeError, ValueError, OverflowError):
+        delta = None
+    status = f"{quote.get('source', 'Fonte não identificada')} · {age_seconds}s" if is_live else f"Referência não WS fresca · {quote.get('source', 'fonte de fallback')}"
+    st.metric(f"{underlying} · referência { 'ao vivo' if is_live else 'mais recente' }", formatted_price, delta)
+    st.caption(f"{status} · {quote.get('market_type') or 'mercado não identificado'} · {quote.get('timestamp') or 'horário não informado'}")
+    st.caption("O tick atualiza esta referência. Candles, cadeia/opções e níveis GEX permanecem no último cálculo manual; derivativos podem ser proxies sintéticas.")
 
 
 def _gamma_history_key(underlying: str) -> str:
@@ -10368,6 +10506,7 @@ def pagina_gama():
 
     st.title("Gama")
     st.caption(f"{underlying} · zonas de exposição à gama estimada por strike e vencimento")
+    render_gamma_live_reference(underlying)
     st.warning(
         "GEX é uma estimativa: calls positivas e puts negativas são uma convenção, não posições observadas de dealers. "
         "As cotações Yahoo podem ter atraso e o open interest pode refletir a sessão anterior; a gamma é estimada localmente. "
@@ -10999,6 +11138,12 @@ def pagina_terminal_b3():
         macro_snapshot = None
         macro_context = build_macro_context(None, None, None)
     st.markdown("### Contexto dos fatores")
+    render_live_market_context("Fatores ao vivo · confirmação intradiária", (
+        ("EWZ", ("EWZ",), "price"),
+        ("USD/BRL", ("BRL=X", "USDBRL"), "price"),
+        ("Brent", ("BZ=F", "Brent"), "price"),
+        ("Treasury 10Y", ("^TNX", "US 10Y (Yield)", "US10Y"), "yield"),
+    ))
     macro_age_seconds = _global_market_payload_age_seconds(macro_snapshot)
     macro_age = format_age(macro_age_seconds) if macro_age_seconds is not None else "idade desconhecida"
     st.caption(f"Snapshot global: {macro_age}. Leitura contextual, não causal: cotações e fluxo podem ter horários diferentes dos fechamentos usados no ranking.")
