@@ -4394,7 +4394,7 @@ def render_terminal_global_asset_performance_chart():
     colors = {
         "Nasdaq 100": "#35C7F3",
         "Ouro": "#F6C945",
-        "Petróleo Brent": "#F28C45",
+        "Petróleo Brent": "#166534",
         "DXY": "#B28DFF",
         "Treasury 2Y": "#FF4D9D",
         "Treasury 10Y": "#00D6A3",
