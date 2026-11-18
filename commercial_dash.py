@@ -4351,6 +4351,114 @@ def render_terminal_interest_rate_tv_comparison():
     )
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_terminal_global_asset_performance_data():
+    from execution.global_intraday_performance import fetch_intraday_candles
+
+    return fetch_intraday_candles()
+
+
+@st.fragment(run_every=15)
+def render_terminal_global_asset_performance_chart():
+    """Compare exchange candles and fresh WS ticks for global macro assets."""
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    from execution.global_intraday_performance import (
+        INSTRUMENTS,
+        apply_latest_websocket_ticks,
+        normalize_performance,
+    )
+
+    payload = get_terminal_global_asset_performance_data()
+    candles = payload.get("candles") if isinstance(payload, dict) else None
+    if candles is None or candles.empty:
+        st.info("Comparativo intradiário de índices, commodities, dólar e Treasuries indisponível no momento.")
+        errors = payload.get("errors", {}) if isinstance(payload, dict) else {}
+        if errors:
+            st.caption("Falhas das fontes: " + " · ".join(f"{name}: {error}" for name, error in errors.items()))
+        return
+
+    hub = get_cryptodash_realtime_hub()
+    candles, tick_ages = apply_latest_websocket_ticks(candles, hub.latest_quotes())
+    normalized = normalize_performance(candles)
+    if normalized.empty or len(normalized) < 2:
+        st.info("Comparativo aguardando mais candles intradiários válidos das fontes.")
+        return
+
+    colors = {
+        "Nasdaq 100": "#35C7F3",
+        "Ouro": "#F6C945",
+        "Petróleo Brent": "#F28C45",
+        "DXY": "#B28DFF",
+        "Treasury 2Y": "#47D7AC",
+        "Treasury 10Y": "#35A88A",
+        "Treasury 30Y": "#167D68",
+    }
+    kinds = {spec["label"]: spec["kind"] for spec in INSTRUMENTS}
+    chart_index = pd.DatetimeIndex(normalized.index)
+    chart_index = chart_index.tz_localize("UTC") if chart_index.tz is None else chart_index
+    chart_index = chart_index.tz_convert("America/Sao_Paulo")
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    for label in normalized.columns:
+        values = normalized[label]
+        is_yield = kinds.get(label) == "yield"
+        valid = values.dropna()
+        unit = " bps" if is_yield else "%"
+        hover = "%{y:+.1f} bps<extra></extra>" if is_yield else "%{y:+.2f}%<extra></extra>"
+        fig.add_trace(
+            go.Scatter(
+                x=chart_index,
+                y=values,
+                mode="lines",
+                name=label,
+                line={"color": colors.get(label, "#CBD5E1"), "width": 2.1, "dash": "dot" if is_yield else "solid"},
+                connectgaps=False,
+                hovertemplate=f"{label}<br>%{{x|%d/%m %H:%M}}<br>{hover}",
+            ),
+            secondary_y=is_yield,
+        )
+        if not valid.empty:
+            last_stamp = valid.index[-1]
+            last_pos = normalized.index.get_loc(last_stamp)
+            fig.add_annotation(
+                x=chart_index[last_pos], y=float(valid.iloc[-1]),
+                text=f"{label} {float(valid.iloc[-1]):+.1f}{unit}",
+                showarrow=False, xanchor="left", xshift=6,
+                font={"size": 9, "color": "#F8FAFC"},
+                bgcolor=colors.get(label, "#475569"), borderpad=3,
+                yref="y2" if is_yield else "y",
+            )
+
+    fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="#64748B", opacity=0.75, secondary_y=False)
+    fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="#64748B", opacity=0.45, secondary_y=True)
+    fig.update_layout(
+        title={"text": "Intraday Performance | fatores globais nas últimas 24h", "x": 0.01, "font": {"size": 16, "color": "#F8FAFC"}},
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#111821",
+        font={"family": '"Roboto Mono", monospace', "color": "#CBD5E1"},
+        margin={"l": 55, "r": 62, "t": 58, "b": 42}, height=440,
+        hovermode="x unified",
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1, "font": {"size": 10}},
+    )
+    fig.update_xaxes(showgrid=True, gridcolor="#1F2937", zeroline=False, title=None)
+    fig.update_yaxes(title_text="Variação do preço desde a base (%)", ticksuffix="%", showgrid=True, gridcolor="#1F2937", zeroline=False, secondary_y=False)
+    fig.update_yaxes(title_text="Variação do yield desde a base (bps)", ticksuffix=" bps", showgrid=False, zeroline=False, secondary_y=True)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    sources = payload.get("sources", {})
+    source_labels = []
+    for spec in INSTRUMENTS:
+        label = spec["label"]
+        source = sources.get(label)
+        if source:
+            tick = f"WS {tick_ages[label]}s" if label in tick_ages else "sem tick WS fresco"
+            source_labels.append(f"{label}: {source['provider']} · {tick}")
+    st.caption("Candles de 5 min via API pública; pontos WS acrescentam apenas o tick mais recente. " + " | ".join(source_labels))
+    st.caption("Eixo esquerdo: retorno percentual dos instrumentos de preço. Eixo direito: deslocamento dos yields em pontos-base. Os perps de índices/commodities e Treasuries são referências sintéticas, não preços spot nem taxas oficiais.")
+    errors = payload.get("errors", {})
+    if errors:
+        st.warning("Algumas séries não carregaram: " + " · ".join(f"{name}: {error}" for name, error in errors.items()))
+
     source_msg = " + ".join(meta.get("sources", [])) or "fontes indisponiveis"
     st.caption(f"Fonte carregada: {source_msg}.")
 
@@ -8926,6 +9034,7 @@ def pagina_terminal_global():
     render_source_health_panel()
     render_di_brasil_regime_panel()
     render_terminal_global_currency_performance_chart()
+    render_terminal_global_asset_performance_chart()
     curve_col, koyfin_col = st.columns([0.58, 0.42], gap="medium")
     with curve_col:
         render_yield_curve_regime_panel()
