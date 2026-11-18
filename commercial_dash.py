@@ -4392,6 +4392,7 @@ def render_terminal_global_asset_performance_chart():
         return
 
     colors = {
+        "S&P 500": "#E5E7EB",
         "Nasdaq 100": "#35C7F3",
         "Ouro": "#F6C945",
         "Petróleo Brent": "#166534",

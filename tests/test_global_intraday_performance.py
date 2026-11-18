@@ -30,6 +30,16 @@ def test_exchange_candle_parsers_return_sorted_utc_series():
     assert str(bingx.index.tz) == "UTC"
 
 
+def test_sp500_uses_existing_bingx_synthetic_contract():
+    from execution.global_intraday_performance import _mapping_for
+
+    sp500 = next(spec for spec in INSTRUMENTS if spec["label"] == "S&P 500")
+    mapping = _mapping_for(sp500)
+
+    assert sp500["provider"] == "BingX"
+    assert mapping["instrument"] == "NCSISP5002USD-USDT"
+
+
 def test_session_window_starts_at_sao_paulo_midnight():
     now = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
 

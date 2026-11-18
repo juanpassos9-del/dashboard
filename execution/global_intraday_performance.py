@@ -20,6 +20,7 @@ CANDLE_LIMIT = WINDOW_HOURS * 12
 REQUEST_TIMEOUT_SECONDS = 10
 
 INSTRUMENTS = (
+    {"label": "S&P 500", "symbol": "^GSPC", "provider": "BingX", "kind": "price", "note": "Perpétuo sintético referenciado ao S&P 500."},
     {"label": "Nasdaq 100", "symbol": "^IXIC", "provider": "BingX", "kind": "price", "note": "Perpétuo sintético referenciado ao Nasdaq 100."},
     {"label": "Ouro", "symbol": "GC=F", "provider": "Hyperliquid", "kind": "price", "note": "Perpétuo sintético de ouro."},
     {"label": "Petróleo Brent", "symbol": "BZ=F", "provider": "Hyperliquid", "kind": "price", "note": "Perpétuo sintético referenciado ao Brent."},
