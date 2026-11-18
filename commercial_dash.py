@@ -4384,7 +4384,8 @@ def render_terminal_global_asset_performance_chart():
         hub = get_cryptodash_realtime_hub()
         candles, tick_ages = apply_latest_websocket_ticks(candles, hub.latest_quotes())
     except Exception as exc:
-        st.warning(f"Tick WebSocket indisponível nesta atualização; mantendo candles de 5 min. ({type(exc).__name__})")
+        detail = str(exc).replace("\n", " ")[:140]
+        st.warning(f"Tick WebSocket indisponível nesta atualização; mantendo candles de 5 min. ({type(exc).__name__}: {detail})")
     normalized = normalize_performance(candles)
     if normalized.empty or len(normalized) < 2:
         st.info("Comparativo aguardando mais candles intradiários válidos das fontes.")
@@ -4462,9 +4463,6 @@ def render_terminal_global_asset_performance_chart():
     errors = payload.get("errors", {})
     if errors:
         st.warning("Algumas séries não carregaram: " + " · ".join(f"{name}: {error}" for name, error in errors.items()))
-
-    source_msg = " + ".join(meta.get("sources", [])) or "fontes indisponiveis"
-    st.caption(f"Fonte carregada: {source_msg}.")
 
 
 @st.cache_data(ttl=120, show_spinner=False)

@@ -191,7 +191,8 @@ def apply_latest_websocket_ticks(
         age = max(0.0, now_seconds - received_at)
         if age > max_age_seconds or price <= 0 or spec["label"] not in result.columns:
             continue
-        stamp = pd.Timestamp(received_at, unit="s", tz="UTC")
+        # Exchange candle indices may use millisecond precision (not nanoseconds).
+        stamp = pd.Timestamp(int(round(received_at * 1000)), unit="ms", tz="UTC")
         tick_rows.setdefault(stamp, {})[spec["label"]] = price
         tick_ages[spec["label"]] = int(age)
     if tick_rows:

@@ -44,7 +44,7 @@ def test_performance_uses_percent_for_prices_and_basis_points_for_yields():
 
 def test_websocket_tick_appends_only_when_fresh():
     label = "Nasdaq 100"
-    index = pd.date_range("2026-11-18T12:00:00Z", periods=2, freq="5min")
+    index = pd.date_range("2026-11-18T12:00:00Z", periods=2, freq="5min").as_unit("ms")
     candles = pd.DataFrame({label: [100.0, 100.5]}, index=index)
     instrument = next(spec for spec in INSTRUMENTS if spec["label"] == label)
     from execution.global_intraday_performance import _mapping_for
@@ -53,13 +53,13 @@ def test_websocket_tick_appends_only_when_fresh():
     live = {
         (instrument["provider"], mapping["asset"], mapping["market_type"]): {
             "price": 101.0,
-            "received_at": datetime(2026, 11, 18, 12, 5, 10, tzinfo=timezone.utc).timestamp(),
+            "received_at": datetime(2026, 11, 18, 12, 5, 10, 123000, tzinfo=timezone.utc).timestamp(),
         }
     }
 
     result, ages = apply_latest_websocket_ticks(
         candles, live,
-        now_seconds=datetime(2026, 11, 18, 12, 5, 15, tzinfo=timezone.utc).timestamp(),
+        now_seconds=datetime(2026, 11, 18, 12, 5, 15, 123000, tzinfo=timezone.utc).timestamp(),
     )
 
     assert result[label].iloc[-1] == 101.0
