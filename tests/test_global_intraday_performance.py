@@ -9,6 +9,7 @@ from execution.global_intraday_performance import (
     normalize_performance,
     parse_bingx_candles,
     parse_hyperliquid_candles,
+    session_window,
 )
 
 
@@ -27,6 +28,24 @@ def test_exchange_candle_parsers_return_sorted_utc_series():
     assert list(bingx) == [100.0, 101.0]
     assert str(hyperliquid.index.tz) == "UTC"
     assert str(bingx.index.tz) == "UTC"
+
+
+def test_session_window_starts_at_sao_paulo_midnight():
+    now = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
+
+    start, end = session_window(now)
+
+    assert start == datetime(2026, 11, 18, 3, 0, tzinfo=timezone.utc)
+    assert end == now
+
+
+def test_session_window_before_brazil_midnight_uses_previous_session():
+    now = datetime(2026, 11, 18, 2, 30, tzinfo=timezone.utc)
+
+    start, end = session_window(now)
+
+    assert start == datetime(2026, 11, 17, 3, 0, tzinfo=timezone.utc)
+    assert end == now
 
 
 def test_performance_uses_relative_percent_for_prices_and_yields():

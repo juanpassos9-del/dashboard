@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -13,6 +14,7 @@ from execution.market_realtime import GLOBAL_REALTIME_MAP
 
 
 WINDOW_HOURS = 24
+SESSION_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 CANDLE_INTERVAL = "5m"
 CANDLE_LIMIT = WINDOW_HOURS * 12
 REQUEST_TIMEOUT_SECONDS = 10
@@ -26,6 +28,18 @@ INSTRUMENTS = (
     {"label": "Treasury 10Y", "symbol": "US10Y", "provider": "Hyperliquid", "kind": "yield", "note": "Yield sintético em % a.a.; variação relativa exibida em %."},
     {"label": "Treasury 30Y", "symbol": "US30Y", "provider": "Hyperliquid", "kind": "yield", "note": "Yield sintético em % a.a.; variação relativa exibida em %."},
 )
+
+
+def session_window(now: datetime | None = None) -> tuple[datetime, datetime]:
+    """Return the current Sao Paulo session open and current time in UTC."""
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    end_utc = now.astimezone(timezone.utc)
+    start_local = now.astimezone(SESSION_TIMEZONE).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return start_local.astimezone(timezone.utc), end_utc
 
 
 def _mapping_for(spec: dict[str, str]) -> dict[str, str]:
@@ -117,17 +131,15 @@ def _fetch_one(spec: dict[str, str], start_ms: int, end_ms: int) -> tuple[str, p
     else:
         raise ValueError(f"Fonte não suportada: {spec['provider']}")
     if candles.empty:
-        raise ValueError("A fonte não retornou candles para as últimas 24 horas.")
+        raise ValueError("A fonte não retornou candles desde a abertura da sessão.")
     return spec["label"], candles
 
 
 def fetch_intraday_candles(now: datetime | None = None) -> dict[str, Any]:
-    """Fetch 24h of 5-minute closes, preserving per-asset errors and sources."""
-    now = now or datetime.now(timezone.utc)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
-    end_ms = int(now.timestamp() * 1000)
-    start_ms = int((now - timedelta(hours=WINDOW_HOURS)).timestamp() * 1000)
+    """Fetch 5-minute closes from the Sao Paulo midnight session open."""
+    start_utc, end_utc = session_window(now)
+    end_ms = int(end_utc.timestamp() * 1000)
+    start_ms = int(start_utc.timestamp() * 1000)
     series_by_label: dict[str, pd.Series] = {}
     sources: dict[str, dict[str, str]] = {}
     errors: dict[str, str] = {}
@@ -158,8 +170,8 @@ def fetch_intraday_candles(now: datetime | None = None) -> dict[str, Any]:
         "candles": candles,
         "sources": sources,
         "errors": errors,
-        "window_start": datetime.fromtimestamp(start_ms / 1000, timezone.utc).isoformat(),
-        "window_end": datetime.fromtimestamp(end_ms / 1000, timezone.utc).isoformat(),
+        "window_start": start_utc.astimezone(SESSION_TIMEZONE).isoformat(),
+        "window_end": end_utc.astimezone(SESSION_TIMEZONE).isoformat(),
     }
 
 

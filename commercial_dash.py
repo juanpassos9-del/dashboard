@@ -4438,7 +4438,7 @@ def render_terminal_global_asset_performance_chart():
     fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="#64748B", opacity=0.75, secondary_y=False)
     fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="#64748B", opacity=0.45, secondary_y=True)
     fig.update_layout(
-        title={"text": "Intraday Performance | fatores globais nas últimas 24h", "x": 0.01, "font": {"size": 16, "color": "#F8FAFC"}},
+        title={"text": "Intraday Performance | fatores globais desde 00:00 BRT", "x": 0.01, "font": {"size": 16, "color": "#F8FAFC"}},
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#111821",
         font={"family": '"Roboto Mono", monospace', "color": "#CBD5E1"},
         margin={"l": 55, "r": 62, "t": 58, "b": 42}, height=440,
@@ -4451,6 +4451,9 @@ def render_terminal_global_asset_performance_chart():
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
     sources = payload.get("sources", {})
+    session_start = payload.get("window_start") or "00:00 BRT"
+    session_end = payload.get("window_end") or "agora"
+    st.caption(f"Sessão: {session_start} até {session_end} · base de cada série no primeiro candle do dia.")
     source_labels = []
     for spec in INSTRUMENTS:
         label = spec["label"]
