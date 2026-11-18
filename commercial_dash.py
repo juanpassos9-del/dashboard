@@ -4396,9 +4396,9 @@ def render_terminal_global_asset_performance_chart():
         "Ouro": "#F6C945",
         "Petróleo Brent": "#F28C45",
         "DXY": "#B28DFF",
-        "Treasury 2Y": "#47D7AC",
-        "Treasury 10Y": "#35A88A",
-        "Treasury 30Y": "#167D68",
+        "Treasury 2Y": "#FF4D9D",
+        "Treasury 10Y": "#00D6A3",
+        "Treasury 30Y": "#FF6B6B",
     }
     kinds = {spec["label"]: spec["kind"] for spec in INSTRUMENTS}
     chart_index = pd.DatetimeIndex(normalized.index)
@@ -4409,8 +4409,8 @@ def render_terminal_global_asset_performance_chart():
         values = normalized[label]
         is_yield = kinds.get(label) == "yield"
         valid = values.dropna()
-        unit = " bps" if is_yield else "%"
-        hover = "%{y:+.1f} bps<extra></extra>" if is_yield else "%{y:+.2f}%<extra></extra>"
+        unit = "%"
+        hover = "%{y:+.2f}%<extra></extra>"
         fig.add_trace(
             go.Scatter(
                 x=chart_index,
@@ -4447,7 +4447,7 @@ def render_terminal_global_asset_performance_chart():
     )
     fig.update_xaxes(showgrid=True, gridcolor="#1F2937", zeroline=False, title=None)
     fig.update_yaxes(title_text="Variação do preço desde a base (%)", ticksuffix="%", showgrid=True, gridcolor="#1F2937", zeroline=False, secondary_y=False)
-    fig.update_yaxes(title_text="Variação do yield desde a base (bps)", ticksuffix=" bps", showgrid=False, zeroline=False, secondary_y=True)
+    fig.update_yaxes(title_text="Variação relativa do yield (%)", ticksuffix="%", showgrid=False, zeroline=False, secondary_y=True)
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
     sources = payload.get("sources", {})
@@ -4459,7 +4459,7 @@ def render_terminal_global_asset_performance_chart():
             tick = f"WS {tick_ages[label]}s" if label in tick_ages else "sem tick WS fresco"
             source_labels.append(f"{label}: {source['provider']} · {tick}")
     st.caption("Candles de 5 min via API pública; pontos WS acrescentam apenas o tick mais recente. " + " | ".join(source_labels))
-    st.caption("Eixo esquerdo: retorno percentual dos instrumentos de preço. Eixo direito: deslocamento dos yields em pontos-base. Os perps de índices/commodities e Treasuries são referências sintéticas, não preços spot nem taxas oficiais.")
+    st.caption("Eixo esquerdo: variação percentual dos preços. Eixo direito: variação percentual relativa de cada yield desde sua base inicial. Os perps de índices/commodities e Treasuries são referências sintéticas, não preços spot nem taxas oficiais.")
     errors = payload.get("errors", {})
     if errors:
         st.warning("Algumas séries não carregaram: " + " · ".join(f"{name}: {error}" for name, error in errors.items()))

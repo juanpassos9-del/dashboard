@@ -22,9 +22,9 @@ INSTRUMENTS = (
     {"label": "Ouro", "symbol": "GC=F", "provider": "Hyperliquid", "kind": "price", "note": "Perpétuo sintético de ouro."},
     {"label": "Petróleo Brent", "symbol": "BZ=F", "provider": "Hyperliquid", "kind": "price", "note": "Perpétuo sintético referenciado ao Brent."},
     {"label": "DXY", "symbol": "DX-Y.NYB", "provider": "BingX", "kind": "price", "note": "Perpétuo sintético referenciado ao DXY."},
-    {"label": "Treasury 2Y", "symbol": "FRED:DGS2", "provider": "Hyperliquid", "kind": "yield", "note": "Yield sintético em % a.a.; variação exibida em pontos-base."},
-    {"label": "Treasury 10Y", "symbol": "US10Y", "provider": "Hyperliquid", "kind": "yield", "note": "Yield sintético em % a.a.; variação exibida em pontos-base."},
-    {"label": "Treasury 30Y", "symbol": "US30Y", "provider": "Hyperliquid", "kind": "yield", "note": "Yield sintético em % a.a.; variação exibida em pontos-base."},
+    {"label": "Treasury 2Y", "symbol": "FRED:DGS2", "provider": "Hyperliquid", "kind": "yield", "note": "Yield sintético em % a.a.; variação relativa exibida em %."},
+    {"label": "Treasury 10Y", "symbol": "US10Y", "provider": "Hyperliquid", "kind": "yield", "note": "Yield sintético em % a.a.; variação relativa exibida em %."},
+    {"label": "Treasury 30Y", "symbol": "US30Y", "provider": "Hyperliquid", "kind": "yield", "note": "Yield sintético em % a.a.; variação relativa exibida em %."},
 )
 
 
@@ -204,7 +204,7 @@ def apply_latest_websocket_ticks(
 
 
 def normalize_performance(candles: pd.DataFrame) -> pd.DataFrame:
-    """Normalize traded instruments to percent and yields to basis points from base."""
+    """Normalize price returns and relative yield changes to percent from each base."""
     if candles is None or candles.empty:
         return pd.DataFrame()
     frame = candles.sort_index().ffill(limit=3)
@@ -216,7 +216,7 @@ def normalize_performance(candles: pd.DataFrame) -> pd.DataFrame:
         if len(valid) < 2 or valid.iloc[0] == 0:
             continue
         if specs.get(label, {}).get("kind") == "yield":
-            normalized[label] = (values - float(valid.iloc[0])) * 100.0
+            normalized[label] = (values / float(valid.iloc[0]) - 1.0) * 100.0
         else:
             normalized[label] = (values / float(valid.iloc[0]) - 1.0) * 100.0
     return normalized

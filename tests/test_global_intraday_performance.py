@@ -29,17 +29,21 @@ def test_exchange_candle_parsers_return_sorted_utc_series():
     assert str(bingx.index.tz) == "UTC"
 
 
-def test_performance_uses_percent_for_prices_and_basis_points_for_yields():
+def test_performance_uses_relative_percent_for_prices_and_yields():
     index = pd.date_range("2026-11-18T12:00:00Z", periods=2, freq="5min")
     candles = pd.DataFrame({
         "Nasdaq 100": [100.0, 101.0],
         "Treasury 2Y": [4.80, 4.85],
+        "Treasury 10Y": [4.00, 3.96],
+        "Treasury 30Y": [4.50, 4.59],
     }, index=index)
 
     result = normalize_performance(candles)
 
     assert result["Nasdaq 100"].iloc[-1] == pytest.approx(1.0)
-    assert result["Treasury 2Y"].iloc[-1] == pytest.approx(5.0)
+    assert result["Treasury 2Y"].iloc[-1] == pytest.approx((4.85 / 4.80 - 1) * 100)
+    assert result["Treasury 10Y"].iloc[-1] == pytest.approx(-1.0)
+    assert result["Treasury 30Y"].iloc[-1] == pytest.approx(2.0)
 
 
 def test_websocket_tick_appends_only_when_fresh():
