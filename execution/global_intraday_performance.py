@@ -174,6 +174,7 @@ def apply_latest_websocket_ticks(
     now_seconds = datetime.now(timezone.utc).timestamp() if now_seconds is None else now_seconds
     result = candles.copy()
     tick_ages: dict[str, int] = {}
+    tick_rows: dict[pd.Timestamp, dict[str, float]] = {}
     for spec in INSTRUMENTS:
         try:
             mapping = _mapping_for(spec)
@@ -191,8 +192,13 @@ def apply_latest_websocket_ticks(
         if age > max_age_seconds or price <= 0 or spec["label"] not in result.columns:
             continue
         stamp = pd.Timestamp(received_at, unit="s", tz="UTC")
-        result.loc[stamp, spec["label"]] = price
+        tick_rows.setdefault(stamp, {})[spec["label"]] = price
         tick_ages[spec["label"]] = int(age)
+    if tick_rows:
+        tick_frame = pd.DataFrame.from_dict(tick_rows, orient="index")
+        tick_frame.index = pd.DatetimeIndex(tick_frame.index)
+        result = pd.concat([result, tick_frame], axis=0).sort_index()
+        result = result.groupby(level=0, sort=True).last()
     return result.sort_index(), tick_ages
 
 
