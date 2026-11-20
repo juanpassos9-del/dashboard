@@ -5,7 +5,7 @@ from PIL import Image
 from io import BytesIO
 
 from execution.macro_news_art import generate_macro_news_art
-from execution.news_macro_hub import RSS_SOURCES, _classify, _fetch_rss, _google_news_source, generate_daily_macro_briefing
+from execution.news_macro_hub import RSS_SOURCES, _classify, _fetch_rss, _google_news_source, _parallel_collect, generate_daily_macro_briefing
 
 
 def test_google_news_source_reads_structured_publisher():
@@ -51,7 +51,21 @@ def test_macro_news_art_is_a_deterministic_theme_based_png():
     assert first == same
     assert first != other_theme
     with Image.open(BytesIO(first)) as image:
-        assert image.size == (960, 420)
+        assert image.size == (640, 280)
+
+
+def test_parallel_collection_preserves_task_order():
+    def slow_first():
+        import time
+        time.sleep(0.03)
+        return [{"title": "first"}]
+
+    def fast_second():
+        return [{"title": "second"}]
+
+    rows = _parallel_collect([slow_first, fast_second], max_workers=2)
+
+    assert [row["title"] for row in rows] == ["first", "second"]
 
 
 def test_classification_marks_brazil_politics_and_recent_breaking_news():

@@ -1945,6 +1945,12 @@ def render_macro_news_hub():
         """)
 
     counts = hub.get("counts") or {}
+    performance = hub.get("performance_ms") or {}
+    try:
+        fetch_seconds = max(0, int(performance.get("fetch", 0))) / 1000
+        fetch_label = f" · coleta {fetch_seconds:.1f}s" if fetch_seconds else ""
+    except (TypeError, ValueError):
+        fetch_label = ""
     style = """
     <style>
       .mnh-wrap{background:#171411;border:1px solid #41372d;padding:16px;margin:14px 0 18px;color:#f4efe3;font-family:Arial,sans-serif;}
@@ -1984,7 +1990,7 @@ def render_macro_news_hub():
     markup = f"""
     <div class="mnh-wrap">
       <div class="mnh-head">
-        <div><h3>Mural Macro</h3><div class="mnh-meta">Manchetes por tema · ilustrações editoriais geradas localmente · atualizado {sanitize_text(str(hub.get('updated_at', '---')))}{' · cache' if hub.get('stale') else ''}</div></div>
+        <div><h3>Mural Macro</h3><div class="mnh-meta">Manchetes por tema · capas leves em cache · atualizado {sanitize_text(str(hub.get('updated_at', '---')))}{' · cache' if hub.get('stale') else ''}{fetch_label}</div></div>
         <div class="mnh-meta">ALTO {counts.get('alto', 0)} · MÉDIO {counts.get('medio', 0)} · BAIXO {counts.get('baixo', 0)}</div>
       </div>
       <div class="mnh-board">{board}</div>

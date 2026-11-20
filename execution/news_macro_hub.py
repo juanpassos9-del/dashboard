@@ -12,6 +12,8 @@ import json
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from time import perf_counter
 from urllib.parse import urlencode
 from datetime import datetime, timezone
 from typing import Any
@@ -189,6 +191,20 @@ def _source_weight(level: str) -> int:
     return {"nivel_1": 20, "nivel_2": 12, "nivel_3": 7}.get(level, 5)
 
 
+def _parallel_collect(tasks, max_workers: int) -> list[dict[str, Any]]:
+    if not tasks:
+        return []
+    results: dict[int, list[dict[str, Any]]] = {}
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(tasks))) as pool:
+        futures = {pool.submit(task): index for index, task in enumerate(tasks)}
+        for future in as_completed(futures):
+            try:
+                results[futures[future]] = future.result()
+            except Exception:
+                results[futures[future]] = []
+    return [item for index in sorted(results) for item in results[index]]
+
+
 def _classify(item: dict[str, Any]) -> dict[str, Any] | None:
     text = f"{item.get('title', '')} {item.get('summary', '')}".lower()
     if any(term in text for term in NOISE_TERMS):
@@ -233,14 +249,15 @@ def _classify(item: dict[str, Any]) -> dict[str, Any] | None:
 
 def _fetch_rss(limit_per_source: int = 8) -> list[dict[str, Any]]:
     headers = {"User-Agent": "Mozilla/5.0 (compatible; TTSMacroHub/1.0)"}
-    rows: list[dict[str, Any]] = []
-    for source, (level, url) in RSS_SOURCES.items():
+
+    def fetch_source(source: str, level: str, url: str) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
         try:
             response = requests.get(url, headers=headers, timeout=8)
             response.raise_for_status()
             feed = feedparser.parse(response.content, response_headers=response.headers)
         except Exception:
-            continue
+            return rows
         for entry in feed.entries[:limit_per_source]:
             title = _clean_text(entry.get("title", ""))
             if not title:
@@ -258,12 +275,18 @@ def _fetch_rss(limit_per_source: int = 8) -> list[dict[str, Any]]:
                 "timestamp": dt.timestamp(),
                 "published_str": dt.astimezone(BR_TZ).strftime("%d/%m %H:%M"),
             })
-    return rows
+        return rows
+
+    tasks = [
+        lambda source=source, level=level, url=url: fetch_source(source, level, url)
+        for source, (level, url) in RSS_SOURCES.items()
+    ]
+    return _parallel_collect(tasks, max_workers=8)
 
 
 def _fetch_gdelt(limit_per_source: int = 6, timespan: str = "12h") -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for source, (level, query) in GDELT_QUERIES.items():
+    def fetch_source(source: str, level: str, query: str) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
         params = {
             "query": query,
             "mode": "artlist",
@@ -277,7 +300,7 @@ def _fetch_gdelt(limit_per_source: int = 6, timespan: str = "12h") -> list[dict[
             response.raise_for_status()
             articles = response.json().get("articles", [])
         except Exception:
-            continue
+            return rows
         for article in articles:
             title = _clean_text(article.get("title"))
             if not title:
@@ -295,13 +318,20 @@ def _fetch_gdelt(limit_per_source: int = 6, timespan: str = "12h") -> list[dict[
                 "timestamp": dt.timestamp(),
                 "published_str": dt.astimezone(BR_TZ).strftime("%d/%m %H:%M"),
             })
-    return rows
+        return rows
+
+    tasks = [
+        lambda source=source, level=level, query=query: fetch_source(source, level, query)
+        for source, (level, query) in GDELT_QUERIES.items()
+    ]
+    return _parallel_collect(tasks, max_workers=7)
 
 
 def _fetch_google_news(limit_per_query: int = 8) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
     headers = {"User-Agent": "Mozilla/5.0 (compatible; TTSMacroHub/1.0)"}
-    for topic, (level, query) in GOOGLE_NEWS_QUERIES.items():
+
+    def fetch_topic(topic: str, level: str, query: str) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
         params = {
             "q": query,
             "hl": "pt-BR",
@@ -317,7 +347,7 @@ def _fetch_google_news(limit_per_query: int = 8) -> list[dict[str, Any]]:
             response.raise_for_status()
             feed = feedparser.parse(response.content, response_headers=response.headers)
         except Exception:
-            continue
+            return rows
         for entry in feed.entries[:limit_per_query]:
             raw_title = _clean_text(entry.get("title", ""))
             if not raw_title:
@@ -343,7 +373,13 @@ def _fetch_google_news(limit_per_query: int = 8) -> list[dict[str, Any]]:
                 "timestamp": dt.timestamp(),
                 "published_str": dt.astimezone(BR_TZ).strftime("%d/%m %H:%M"),
             })
-    return rows
+        return rows
+
+    tasks = [
+        lambda topic=topic, level=level, query=query: fetch_topic(topic, level, query)
+        for topic, (level, query) in GOOGLE_NEWS_QUERIES.items()
+    ]
+    return _parallel_collect(tasks, max_workers=4)
 
 
 def build_macro_news_hub(limit: int = 24, max_age_hours: int = 24, force: bool = False) -> dict[str, Any]:
@@ -352,9 +388,19 @@ def build_macro_news_hub(limit: int = 24, max_age_hours: int = 24, force: bool =
     if not force and cache.get("items") and now_ts - float(cache.get("updated_ts", 0)) < 900:
         return cache
 
-    rows = _fetch_rss()
-    rows.extend(_fetch_google_news())
-    rows.extend(_fetch_gdelt())
+    fetch_started = perf_counter()
+    collectors = (_fetch_rss, _fetch_google_news, _fetch_gdelt)
+    rows_by_collector: dict[int, list[dict[str, Any]]] = {}
+    with ThreadPoolExecutor(max_workers=len(collectors)) as pool:
+        futures = {pool.submit(collector): index for index, collector in enumerate(collectors)}
+        for future in as_completed(futures):
+            try:
+                rows_by_collector[futures[future]] = future.result()
+            except Exception:
+                rows_by_collector[futures[future]] = []
+    rows = [row for index in sorted(rows_by_collector) for row in rows_by_collector[index]]
+    fetch_ms = round((perf_counter() - fetch_started) * 1000)
+    classify_started = perf_counter()
     cutoff = now_ts - max_age_hours * 3600
     seen = set()
     classified = []
@@ -368,6 +414,7 @@ def build_macro_news_hub(limit: int = 24, max_age_hours: int = 24, force: bool =
             classified.append(item)
 
     classified.sort(key=lambda item: (item.get("breaking", False), item.get("impact") == "ALTO", item.get("score", 0), item.get("timestamp", 0)), reverse=True)
+    classify_ms = round((perf_counter() - classify_started) * 1000)
     if not classified and cache.get("items"):
         cache["stale"] = True
         return cache
@@ -376,6 +423,11 @@ def build_macro_news_hub(limit: int = 24, max_age_hours: int = 24, force: bool =
         "updated_at": datetime.now(BR_TZ).strftime("%d/%m/%Y %H:%M:%S"),
         "updated_ts": now_ts,
         "stale": False,
+        "performance_ms": {
+            "fetch": fetch_ms,
+            "classification": classify_ms,
+            "total": fetch_ms + classify_ms,
+        },
         "items": classified[:limit],
         "sources": sorted({item["source"] for item in classified}),
         "counts": {

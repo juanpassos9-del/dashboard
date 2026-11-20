@@ -74,6 +74,7 @@ def generate_macro_news_art(theme: str, item_id: str = "") -> bytes:
     stamp = unicodedata.normalize("NFKD", f"{theme.upper()}  /  ILUSTRACAO EDITORIAL").encode("ascii", "ignore").decode("ascii")
     draw.text((45, 40), stamp[:42], font=font, fill=(240, 245, 250, 255))
 
+    image = image.resize((640, 280), Image.Resampling.LANCZOS)
     output = BytesIO()
     image.save(output, format="PNG", optimize=True)
     return output.getvalue()
