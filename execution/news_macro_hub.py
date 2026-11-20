@@ -48,6 +48,7 @@ PRIMARY_SOURCE_NAMES = {
 RSS_SOURCES = {
     "Bloomberg": ("nivel_1", "https://feeds.bloomberg.com/markets/news.rss"),
     "CNBC": ("nivel_1", "https://www.cnbc.com/id/100003114/device/rss/rss.html"),
+    "The Economist": ("nivel_1", "https://www.economist.com/finance-and-economics/rss.xml"),
     "Federal Reserve": ("nivel_1", "https://www.federalreserve.gov/feeds/press_all.xml"),
     "ECB": ("nivel_1", "https://www.ecb.europa.eu/rss/press.html"),
     "Banco Central do Brasil": ("nivel_1", "https://www.bcb.gov.br/rss/bcbnoticias.xml"),

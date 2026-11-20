@@ -1,14 +1,45 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from PIL import Image
 from io import BytesIO
 
 from execution.macro_news_art import generate_macro_news_art
-from execution.news_macro_hub import _classify, _google_news_source, generate_daily_macro_briefing
+from execution.news_macro_hub import RSS_SOURCES, _classify, _fetch_rss, _google_news_source, generate_daily_macro_briefing
 
 
 def test_google_news_source_reads_structured_publisher():
     assert _google_news_source({"source": {"title": "Agência Brasil"}}) == "Agência Brasil"
+
+
+def test_economist_rss_is_collected_as_credited_headline(monkeypatch):
+    feed_url = "https://www.economist.com/finance-and-economics/rss.xml"
+    rss = b"""<?xml version='1.0' encoding='UTF-8'?>
+    <rss version='2.0'><channel><item>
+      <title>Bond yields are rising everywhere except China</title>
+      <description>The central bank changed its policy rate.</description>
+      <link>https://www.economist.com/finance-and-economics/example</link>
+      <pubDate>Thu, 19 Nov 2026 10:04:37 +0000</pubDate>
+    </item></channel></rss>"""
+
+    def fake_get(url, **_kwargs):
+        if url != feed_url:
+            raise RuntimeError("not mocked")
+        return SimpleNamespace(
+            content=rss,
+            headers={"content-type": "text/xml"},
+            raise_for_status=lambda: None,
+        )
+
+    monkeypatch.setattr("execution.news_macro_hub.requests.get", fake_get)
+    rows = _fetch_rss(limit_per_source=1)
+
+    economist_rows = [row for row in rows if row["source"] == "The Economist"]
+    assert RSS_SOURCES["The Economist"][1] == feed_url
+    assert len(economist_rows) == 1
+    assert economist_rows[0]["title"] == "Bond yields are rising everywhere except China"
+    assert economist_rows[0]["link"].startswith("https://www.economist.com/")
+    assert economist_rows[0]["provider"] == "RSS"
 
 
 def test_macro_news_art_is_a_deterministic_theme_based_png():
