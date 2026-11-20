@@ -1807,6 +1807,13 @@ def get_macro_news_briefing_cached(items_json: str):
     return generate_daily_macro_briefing(json.loads(items_json))
 
 
+@st.cache_data(max_entries=160, show_spinner=False)
+def get_macro_news_art_cached(theme: str, item_id: str) -> bytes:
+    from execution.macro_news_art import generate_macro_news_art
+
+    return generate_macro_news_art(theme, item_id)
+
+
 def render_macro_news_hub():
     try:
         hub = get_macro_news_hub_cached("macro_news_hub_v1")
@@ -1875,74 +1882,115 @@ def render_macro_news_hub():
     def chip_list(values):
         return "".join(f"<span class='mnh-chip'>{sanitize_text(str(value))}</span>" for value in values[:4])
 
-    cards = []
+    def theme_for(item):
+        themes = set(item.get("themes") or [])
+        if "Política" in themes or "Brasil" in themes:
+            return "Brasil"
+        if "Fed/Juros EUA" in themes:
+            return "Juros & Fed"
+        if "Geopolítica" in themes:
+            return "Geopolítica"
+        if "Petróleo/Energia" in themes:
+            return "Energia & commodities"
+        if "China" in themes:
+            return "China & comércio"
+        if "Cripto" in themes:
+            return "Cripto"
+        if "Inflação" in themes or "Atividade" in themes:
+            return "Inflação & atividade"
+        if "Crédito" in themes:
+            return "Crédito & risco"
+        if "S&P/Nasdaq" in (item.get("assets") or []):
+            return "Bolsas & tecnologia"
+        return "Panorama macro"
+
+    grouped = {}
     for item in items[:12]:
-        impact = sanitize_text(str(item.get("impact", "BAIXO")))
-        impact_class = "high" if impact == "ALTO" else ("medium" if impact == "MEDIO" else "low")
-        link = safe_external_url(item.get("link"))
-        title = sanitize_text(str(item.get("title", "")))
-        source = sanitize_text(str(item.get("source", "")))
-        provider = sanitize_text(str(item.get("provider", "")))
-        published = sanitize_text(str(item.get("published_str", "")))
-        bias = sanitize_text(str(item.get("bias", "Neutro")))
-        score = sanitize_text(str(item.get("score", "")))
-        themes = chip_list(item.get("themes") or [])
-        assets = chip_list(item.get("assets") or [])
-        sections = chip_list(item.get("sections") or [])
-        breaking = "<span class='mnh-breaking'>BREAKING</span>" if item.get("breaking") else ""
-        cards.append(f"""
-            <a class="mnh-card {impact_class}" href="{link}" target="_blank" rel="noopener noreferrer">
-              <div class="mnh-top">
-                <span>{breaking}<span class="mnh-impact">{impact}</span></span>
-                <span class="mnh-source">{source} · {provider} · {published}</span>
-              </div>
-              <div class="mnh-title">{title}</div>
-              <div class="mnh-row"><b>Vies:</b> {bias} <b>Score:</b> {score}</div>
-              <div class="mnh-tags">{sections}</div>
-              <div class="mnh-tags">{themes}{assets}</div>
-            </a>
+        grouped.setdefault(theme_for(item), []).append(item)
+
+    sections = []
+    for theme, stories in grouped.items():
+        story_cards = []
+        for item in stories:
+            impact = sanitize_text(str(item.get("impact", "BAIXO")))
+            impact_class = "high" if impact == "ALTO" else ("medium" if impact == "MEDIO" else "low")
+            link = safe_external_url(item.get("link"))
+            title = sanitize_text(str(item.get("title", "")))
+            summary = sanitize_text(str(item.get("summary", "")))
+            source = sanitize_text(str(item.get("source", "")))
+            published = sanitize_text(str(item.get("published_str", "")))
+            bias = sanitize_text(str(item.get("bias", "Neutro")))
+            score = sanitize_text(str(item.get("score", "")))
+            themes = chip_list(item.get("themes") or [])
+            assets = chip_list(item.get("assets") or [])
+            art = base64.b64encode(get_macro_news_art_cached(theme, str(item.get("id", title)))).decode("ascii")
+            breaking = "<span class='mnh-breaking'>URGENTE</span>" if item.get("breaking") else ""
+            story_cards.append(f"""
+                <a class="mnh-card {impact_class}" href="{link}" target="_blank" rel="noopener noreferrer">
+                  <img class="mnh-art" src="data:image/png;base64,{art}" alt="Ilustração editorial sobre {sanitize_text(theme)}" loading="lazy">
+                  <div class="mnh-card-body">
+                    <div class="mnh-top"><span>{breaking}<span class="mnh-impact">{impact}</span></span><span class="mnh-source">{source} · {published}</span></div>
+                    <div class="mnh-title">{title}</div>
+                    <div class="mnh-summary">{summary}</div>
+                    <div class="mnh-row"><b>Viés:</b> {bias} <b>Score:</b> {score}</div>
+                    <div class="mnh-tags">{themes}{assets}</div>
+                  </div>
+                </a>
+            """)
+        sections.append(f"""
+          <section class="mnh-topic">
+            <div class="mnh-topic-head"><span class="mnh-topic-mark"></span><h4>{sanitize_text(theme)}</h4><span class="mnh-topic-count">{len(stories)} manchete{'s' if len(stories) != 1 else ''}</span></div>
+            <div class="mnh-topic-grid">{''.join(story_cards)}</div>
+          </section>
         """)
 
     counts = hub.get("counts") or {}
     style = """
     <style>
-      .mnh-wrap{border:1px solid #1F2937;background:#070B12;border-radius:9px;padding:14px;margin:14px 0 18px;}
-      .mnh-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:11px;}
-      .mnh-head h3{margin:0;color:#E5E7EB;font-size:1.05rem;}
-      .mnh-meta{color:#94A3B8;font-size:.75rem;font-weight:800;}
-      .mnh-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;}
-      .mnh-card{display:block;text-decoration:none;background:#0B1220;border:1px solid #263244;border-left:5px solid #64748B;border-radius:7px;padding:10px;color:#E5E7EB;min-height:132px;}
-      .mnh-card.high{border-left-color:#FF3333;background:#1A080B;}
-      .mnh-card.medium{border-left-color:#FF9800;}
-      .mnh-card.low{border-left-color:#38BDF8;}
-      .mnh-top{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:7px;}
-      .mnh-impact{font-size:.68rem;font-weight:950;color:#FFF;background:#263244;border-radius:999px;padding:3px 7px;}
-      .mnh-breaking{display:inline-block;margin-right:5px;font-size:.62rem;font-weight:950;color:#FFF;background:#DC2626;border-radius:3px;padding:3px 6px;}
-      .mnh-card.high .mnh-impact{background:#B91C1C;}
-      .mnh-card.medium .mnh-impact{background:#A16207;}
-      .mnh-source{color:#94A3B8;font-size:.68rem;font-weight:800;text-align:right;}
-      .mnh-title{font-size:.88rem;font-weight:900;line-height:1.25;color:#F8FAFC;margin-bottom:8px;}
-      .mnh-row{font-size:.72rem;color:#CBD5E1;margin-bottom:7px;}
-      .mnh-row b{color:#94A3B8;}
+      .mnh-wrap{background:#171411;border:1px solid #41372d;padding:16px;margin:14px 0 18px;color:#f4efe3;font-family:Arial,sans-serif;}
+      .mnh-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid #514336;}
+      .mnh-head h3{margin:0;color:#fff8e8;font-size:1.12rem;font-weight:900;}
+      .mnh-meta{color:#b4aa9a;font-size:.72rem;font-weight:700;}
+      .mnh-board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:15px;align-items:start;}
+      .mnh-column{display:grid;gap:18px;min-width:0;}
+      .mnh-topic{min-width:0;}
+      .mnh-topic-head{display:flex;align-items:center;gap:8px;margin:0 0 10px;padding-bottom:7px;border-bottom:1px solid #66523d;}
+      .mnh-topic-head h4{margin:0;color:#fff3d8;font-size:.86rem;text-transform:uppercase;font-weight:900;}
+      .mnh-topic-mark{width:5px;height:22px;background:#e3b85f;flex:none;}
+      .mnh-topic-count{margin-left:auto;color:#b4aa9a;font-size:.65rem;white-space:nowrap;}
+      .mnh-topic-grid{display:grid;grid-template-columns:1fr;gap:10px;}
+      .mnh-card{display:block;min-width:0;overflow:hidden;background:#f1ead9;border:1px solid #d4c7ad;color:#24201b;text-decoration:none;box-shadow:0 3px 9px #0006;}
+      .mnh-art{display:block;width:100%;height:150px;object-fit:cover;background:#17212a;border-bottom:1px solid #d4c7ad;}
+      .mnh-card-body{padding:10px 11px 12px;}
+      .mnh-top{display:flex;justify-content:space-between;gap:7px;align-items:center;margin-bottom:7px;}
+      .mnh-impact{font-size:.62rem;font-weight:900;color:#fff;background:#334155;padding:3px 6px;}
+      .mnh-breaking{display:inline-block;margin-right:5px;font-size:.6rem;font-weight:900;color:#fff;background:#b4232c;padding:3px 5px;}
+      .mnh-card.high .mnh-impact{background:#a52b31;}.mnh-card.medium .mnh-impact{background:#a56818;}.mnh-card.low .mnh-impact{background:#356e78;}
+      .mnh-source{color:#71675a;font-size:.62rem;font-weight:700;text-align:right;}
+      .mnh-title{font-family:Georgia,serif;font-size:1rem;font-weight:800;line-height:1.24;color:#201d19;margin-bottom:7px;}
+      .mnh-summary{font-family:Georgia,serif;color:#5c554b;font-size:.76rem;line-height:1.35;margin-bottom:8px;}
+      .mnh-row{font-size:.68rem;color:#494239;margin-bottom:8px;}.mnh-row b{color:#29251f;}
       .mnh-tags{display:flex;gap:5px;flex-wrap:wrap;}
-      .mnh-chip{border:1px solid #334155;background:#111827;color:#BFDBFE;border-radius:999px;padding:3px 6px;font-size:.66rem;font-weight:850;}
-      @media(max-width:1200px){.mnh-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
-      @media(max-width:760px){.mnh-grid{grid-template-columns:1fr;}}
+      .mnh-chip{border:1px solid #c9bea9;background:#e7decc;color:#544a3b;padding:3px 6px;font-size:.6rem;font-weight:800;}
+      .mnh-card:hover{transform:translateY(-2px);box-shadow:0 7px 14px #0008;}
+      @media(max-width:1050px){.mnh-board{grid-template-columns:repeat(2,minmax(0,1fr));}}
+      @media(max-width:680px){.mnh-wrap{padding:10px}.mnh-board{grid-template-columns:1fr}.mnh-art{height:170px}.mnh-card{display:grid;grid-template-columns:38% 1fr}.mnh-art{height:100%;min-height:170px;border-bottom:0;border-right:1px solid #d4c7ad}.mnh-card-body{padding:9px}.mnh-title{font-size:.91rem}}
     </style>
     """
+    columns = [[], [], []]
+    for index, section in enumerate(sections):
+        columns[index % len(columns)].append(section)
+    board = "".join(f"<div class='mnh-column'>{''.join(column)}</div>" for column in columns)
     markup = f"""
     <div class="mnh-wrap">
       <div class="mnh-head">
-        <div>
-          <h3>Hub Macro de Noticias</h3>
-          <div class="mnh-meta">Fontes prioritarias abertas · atualizado {sanitize_text(str(hub.get('updated_at', '---')))}{' · cache' if hub.get('stale') else ''}</div>
-        </div>
-        <div class="mnh-meta">ALTO {counts.get('alto', 0)} · MEDIO {counts.get('medio', 0)} · BAIXO {counts.get('baixo', 0)}</div>
+        <div><h3>Mural Macro</h3><div class="mnh-meta">Manchetes por tema · ilustrações editoriais geradas localmente · atualizado {sanitize_text(str(hub.get('updated_at', '---')))}{' · cache' if hub.get('stale') else ''}</div></div>
+        <div class="mnh-meta">ALTO {counts.get('alto', 0)} · MÉDIO {counts.get('medio', 0)} · BAIXO {counts.get('baixo', 0)}</div>
       </div>
-      <div class="mnh-grid">{''.join(cards)}</div>
+      <div class="mnh-board">{board}</div>
     </div>
     """
-    components.html(style + markup, height=620, scrolling=True)
+    components.html(style + markup, height=980, scrolling=True)
 
 
 @st.fragment(run_every=30)

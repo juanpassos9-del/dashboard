@@ -1,10 +1,26 @@
 from datetime import datetime, timezone
 
+from PIL import Image
+from io import BytesIO
+
+from execution.macro_news_art import generate_macro_news_art
 from execution.news_macro_hub import _classify, _google_news_source, generate_daily_macro_briefing
 
 
 def test_google_news_source_reads_structured_publisher():
     assert _google_news_source({"source": {"title": "Agência Brasil"}}) == "Agência Brasil"
+
+
+def test_macro_news_art_is_a_deterministic_theme_based_png():
+    first = generate_macro_news_art("Juros & Fed", "story-1")
+    same = generate_macro_news_art("Juros & Fed", "story-1")
+    other_theme = generate_macro_news_art("Brasil", "story-1")
+
+    assert first.startswith(b"\x89PNG\r\n\x1a\n")
+    assert first == same
+    assert first != other_theme
+    with Image.open(BytesIO(first)) as image:
+        assert image.size == (960, 420)
 
 
 def test_classification_marks_brazil_politics_and_recent_breaking_news():
