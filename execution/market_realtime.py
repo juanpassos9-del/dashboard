@@ -192,27 +192,32 @@ for _symbol, _aliases in (
     ] + [candidate for candidate in GLOBAL_REALTIME_MAP.get(_symbol, ()) if candidate[0] == "Hyperliquid"]
 
 
-for _asset, _instrument, _market_type in (
-    ("ZEC", "ZECUSDT", "Spot"),
-    ("JCT", "JCTUSDT", "Perpétuo USDⓈ-M"),
-    ("XRP", "XRPUSDT", "Spot"),
-    ("HYPE", "HYPEUSDT", "Spot"),
-    ("1000PEPE", "1000PEPEUSDT", "Perpétuo USDⓈ-M"),
-    ("DOGE", "DOGEUSDT", "Spot"),
-    ("NEAR", "NEARUSDT", "Spot"),
-    ("BNB", "BNBUSDT", "Spot"),
-    ("AVAX", "AVAXUSDT", "Spot"),
-    ("ENA", "ENAUSDT", "Spot"),
-    ("SUI", "SUIUSDT", "Spot"),
-    ("UNI", "UNIUSDT", "Spot"),
-    ("WLD", "WLDUSDT", "Spot"),
-    ("PUMP", "PUMPUSDT", "Spot"),
-    ("AIOT", "AIOTUSDT", "Perpétuo USDⓈ-M"),
-    ("HOT", "HOTUSDT", "Spot"),
+for _asset, _binance, _binance_type, _okx, _okx_type, _bingx, _bingx_type in (
+    ("ZEC", "ZECUSDT", "Spot", "ZEC-USDT", "Spot", "ZEC-USDT", "Spot"),
+    ("JCT", "JCTUSDT", "Perpétuo USDⓈ-M", "JCT-USDT-SWAP", "Perpétuo", "JCT-USDT", "Perpétuo"),
+    ("XRP", "XRPUSDT", "Spot", "XRP-USDT", "Spot", "XRP-USDT", "Spot"),
+    ("HYPE", "HYPEUSDT", "Spot", "HYPE-USDT", "Spot", "HYPE-USDT", "Spot"),
+    ("1000PEPE", "1000PEPEUSDT", "Perpétuo USDⓈ-M", None, None, "1000PEPE-USDT", "Perpétuo"),
+    ("DOGE", "DOGEUSDT", "Spot", "DOGE-USDT", "Spot", "DOGE-USDT", "Spot"),
+    ("NEAR", "NEARUSDT", "Spot", "NEAR-USDT", "Spot", "NEAR-USDT", "Spot"),
+    ("BNB", "BNBUSDT", "Spot", "BNB-USDT", "Spot", "BNB-USDT", "Spot"),
+    ("AVAX", "AVAXUSDT", "Spot", "AVAX-USDT", "Spot", "AVAX-USDT", "Spot"),
+    ("ENA", "ENAUSDT", "Spot", "ENA-USDT", "Spot", "ENA-USDT", "Spot"),
+    ("SUI", "SUIUSDT", "Spot", "SUI-USDT", "Spot", "SUI-USDT", "Spot"),
+    ("UNI", "UNIUSDT", "Spot", "UNI-USDT", "Spot", "UNI-USDT", "Spot"),
+    ("WLD", "WLDUSDT", "Spot", "WLD-USDT", "Spot", "WLD-USDT", "Spot"),
+    ("PUMP", "PUMPUSDT", "Spot", "PUMP-USDT", "Spot", "PUMP-USDT", "Spot"),
+    ("AIOT", "AIOTUSDT", "Perpétuo USDⓈ-M", None, None, "AIOT-USDT", "Perpétuo"),
+    ("HOT", "HOTUSDT", "Spot", None, None, "HOT-USDT", "Spot"),
 ):
-    GLOBAL_REALTIME_MAP[f"TOKENIZED_CRYPTO:{_asset}"] = [
-        ("Binance", _quote(_asset, _instrument, _market_type, "Cotação cripto via WebSocket Binance."))
+    _candidates = [
+        ("Binance", _quote(_asset, _binance, _binance_type, "Cotação cripto via WebSocket Binance.")),
     ]
+    if _okx and _okx_type:
+        _candidates.append(("OKX", _quote(_asset, _okx, _okx_type, "Fallback via WebSocket OKX.")))
+    if _bingx and _bingx_type:
+        _candidates.append(("BingX", _quote(_asset, _bingx, _bingx_type, "Fallback via WebSocket BingX.")))
+    GLOBAL_REALTIME_MAP[f"TOKENIZED_CRYPTO:{_asset}"] = _candidates
 
 for _ticker in ("AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"):
     GLOBAL_REALTIME_MAP[f"TOKENIZED_STOCK:{_ticker}"] = GLOBAL_REALTIME_MAP[_ticker]
@@ -228,6 +233,20 @@ for _asset, _instrument, _name, _note in (
 
 
 TOKENIZED_GLOBAL_INDEX_SYMBOLS = {"^GSPC", "^IXIC", "^DJI", "^RUT", "^N225", "^GDAXI"}
+GLOBAL_CRYPTO_SYMBOL_ALIASES = {
+    "BTC": "BTC-USD",
+    "BTCUSDT": "BTC-USD",
+    "BTC/USDT": "BTC-USD",
+    "BITCOIN": "BTC-USD",
+    "ETH": "ETH-USD",
+    "ETHUSDT": "ETH-USD",
+    "ETH/USDT": "ETH-USD",
+    "ETHEREUM": "ETH-USD",
+    "SOL": "SOL-USD",
+    "SOLUSDT": "SOL-USD",
+    "SOL/USDT": "SOL-USD",
+    "SOLANA": "SOL-USD",
+}
 TOKENIZED_SUPPLEMENTAL_QUOTES = [
     ("🪙 CRIPTOMOEDAS · WEBSOCKET", asset, f"TOKENIZED_CRYPTO:{asset}", f"TOKENIZED_CRYPTO:{asset}")
     for asset in ("ZEC", "JCT", "XRP", "HYPE", "1000PEPE", "DOGE", "NEAR", "BNB", "AVAX", "ENA", "SUI", "UNI", "WLD", "PUMP", "AIOT", "HOT")
@@ -311,6 +330,8 @@ def _apply_live_quote(
             "is_realtime": True,
             "data_status": "fresh",
         })
+        item.pop("realtime_pending", None)
+        item.pop("realtime_pending_instrument", None)
         if live_change is not None:
             item.update({
                 "change": float(live_change),
@@ -329,6 +350,25 @@ def _apply_live_quote(
             item["yield_source"] = f"{provider} {mapping['instrument']}"
         return True
     return False
+
+
+def _resolve_global_lookup_symbol(item: dict[str, Any]) -> str:
+    """Resolve current and legacy snapshot identifiers to a realtime map key."""
+    for field in ("symbol", "source_symbol", "name", "display_symbol"):
+        value = str(item.get(field) or "").strip()
+        if not value:
+            continue
+        if value in GLOBAL_REALTIME_MAP:
+            return value
+        normalized = value.upper()
+        alias = GLOBAL_CRYPTO_SYMBOL_ALIASES.get(normalized)
+        if alias:
+            return alias
+        compact = normalized.replace(" ", "")
+        alias = GLOBAL_CRYPTO_SYMBOL_ALIASES.get(compact)
+        if alias:
+            return alias
+    return ""
 
 
 def apply_global_realtime_overlay(
@@ -356,11 +396,20 @@ def apply_global_realtime_overlay(
             if not isinstance(item, dict):
                 continue
             symbol = str(item.get("symbol") or "")
-            if _apply_live_quote(item, symbol, latest_quotes, now, max_age_seconds):
-                updated.append(symbol)
+            lookup_symbol = _resolve_global_lookup_symbol(item) or symbol
+            if _apply_live_quote(item, lookup_symbol, latest_quotes, now, max_age_seconds):
+                updated.append(symbol or lookup_symbol)
+            elif lookup_symbol in {"BTC-USD", "ETH-USD", "SOL-USD"}:
+                candidates = GLOBAL_REALTIME_MAP.get(lookup_symbol, ())
+                if candidates:
+                    provider, mapping = candidates[0]
+                    item["realtime_pending"] = True
+                    item["realtime_pending_instrument"] = (
+                        f"{provider}: {mapping['instrument']}"
+                    )
             else:
                 hyperliquid_mapping = next(
-                    (mapping for provider, mapping in GLOBAL_REALTIME_MAP.get(symbol, ()) if provider == "Hyperliquid"),
+                    (mapping for provider, mapping in GLOBAL_REALTIME_MAP.get(lookup_symbol, ()) if provider == "Hyperliquid"),
                     None,
                 )
                 if hyperliquid_mapping:

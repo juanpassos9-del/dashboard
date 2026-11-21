@@ -5,6 +5,7 @@ import threading
 from execution.cryptodash_ws import CryptoDashRealtimeHub
 from execution.market_realtime import (
     GLOBAL_REALTIME_MAP,
+    TOKENIZED_SUPPLEMENTAL_QUOTES,
     apply_global_realtime_overlay,
     global_market_subscriptions,
 )
@@ -39,6 +40,11 @@ def test_global_subscriptions_cover_live_markets_without_faking_unavailable_asse
     } == {"para:2Y", "para:10Y", "para:30Y"}
     assert "TOKENIZED_INDEX:BINGX_INDEX_H100" in GLOBAL_REALTIME_MAP
     assert "TOKENIZED_INDEX:BINGX_INDEX_KOSPI" in GLOBAL_REALTIME_MAP
+    for asset in ("ZEC", "JCT", "XRP", "HYPE", "1000PEPE", "DOGE", "NEAR", "BNB", "AVAX", "ENA", "SUI", "UNI", "WLD", "PUMP", "AIOT", "HOT"):
+        providers = {provider for provider, _ in GLOBAL_REALTIME_MAP[f"TOKENIZED_CRYPTO:{asset}"]}
+        assert "Binance" in providers
+        assert "BingX" in providers
+        assert any(row["asset"] == asset for rows in subscriptions.values() for row in rows)
 
 
 def test_overlay_updates_only_fresh_quotes_and_preserves_fallback_rows():
@@ -94,6 +100,49 @@ def test_overlay_updates_only_fresh_quotes_and_preserves_fallback_rows():
     assert stale_spx["realtime_pending"] is True
 
 
+def test_primary_crypto_rows_accept_legacy_aliases_and_use_fresh_exchange_ticks():
+    now = 1_800_000_000
+    snapshot = {
+        "categories": {
+            "Commodities & Cripto": [
+                {"symbol": "BTC-USD", "name": "BITCOIN", "price": 60000, "source": "Yahoo Finance"},
+                {"symbol": "ETHUSDT", "name": "ETHEREUM", "price": 1600, "source": "Yahoo Finance"},
+                {"symbol": "SOL", "name": "SOLANA", "price": 65, "source": "Yahoo Finance"},
+            ]
+        },
+        "metadata": {},
+    }
+    quotes = {
+        ("Binance", "BTC", "Spot"): {"price": 60100, "change_pct_24h": 1.0, "received_at": now},
+        ("OKX", "ETH", "Spot"): {"price": 1610, "change_pct_24h": 2.0, "received_at": now},
+        ("BingX", "SOL", "Spot"): {"price": 66, "change_pct_24h": 3.0, "received_at": now},
+    }
+
+    result = apply_global_realtime_overlay(snapshot, quotes, now=now + 1)
+    crypto_rows = result["categories"]["Commodities & Cripto"]
+
+    assert [row["price"] for row in crypto_rows] == [60100, 1610, 66]
+    assert [row["source"] for row in crypto_rows] == [
+        "Binance WebSocket", "OKX WebSocket", "BingX WebSocket"
+    ]
+    assert all(row["is_realtime"] for row in crypto_rows)
+    assert result["metadata"]["realtime_overlay"]["quotes_updated"] == 3
+
+
+def test_primary_crypto_rows_mark_snapshot_fallback_when_websocket_tick_is_missing():
+    result = apply_global_realtime_overlay(
+        {"categories": {"Cripto": [{"symbol": "BITCOIN", "name": "BITCOIN", "price": 60000, "source": "Yahoo Finance"}]}},
+        {},
+        now=1_800_000_000,
+    )
+    bitcoin = result["categories"]["Cripto"][0]
+
+    assert bitcoin["price"] == 60000
+    assert bitcoin["source"] == "Yahoo Finance"
+    assert bitcoin["realtime_pending"] is True
+    assert bitcoin["realtime_pending_instrument"] == "Binance: BTCUSDT"
+
+
 def test_overlay_populates_new_categories_and_marks_missing_ticks_as_pending():
     result = apply_global_realtime_overlay(
         {"categories": {}, "metadata": {}},
@@ -123,6 +172,32 @@ def test_overlay_populates_new_categories_and_marks_missing_ticks_as_pending():
     assert pending_crypto["name"] == "ZEC"
     assert pending_crypto["price"] is None
     assert pending_crypto["realtime_pending"] is True
+
+
+def test_supplemental_crypto_category_uses_exchange_websocket_fallbacks():
+    now = 1_800_000_000
+    snapshots = {"categories": {}, "metadata": {}}
+    fallback_quotes = {}
+    assets = [
+        row[1] for row in TOKENIZED_SUPPLEMENTAL_QUOTES
+        if row[0] == "🪙 CRIPTOMOEDAS · WEBSOCKET"
+    ]
+    for asset in assets:
+        candidates = GLOBAL_REALTIME_MAP[f"TOKENIZED_CRYPTO:{asset}"]
+        provider, mapping = candidates[-1]
+        fallback_quotes[(provider, mapping["asset"], mapping["market_type"])] = {
+            "price": 100 + len(fallback_quotes),
+            "change_pct_24h": 1.25,
+            "received_at": now,
+        }
+
+    result = apply_global_realtime_overlay(snapshots, fallback_quotes, now=now + 1)
+    rows = result["categories"]["🪙 CRIPTOMOEDAS · WEBSOCKET"]
+
+    assert len(rows) == len(assets) == 16
+    assert all(row["is_realtime"] for row in rows)
+    assert all(row["source"].endswith("WebSocket") for row in rows)
+    assert all(row["price"] is not None for row in rows)
 
 
 def test_hub_keeps_subscriptions_from_independent_dashboard_groups(monkeypatch):
