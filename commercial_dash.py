@@ -15854,11 +15854,45 @@ with st.sidebar:
     default_page = "🌎 Terminal Global" if "🌎 Terminal Global" in allowed_pages else allowed_pages[0]
     nav_key = "main_page_navigation"
     if st.session_state.get(nav_key) not in allowed_pages:
-        st.session_state.pop(nav_key, None)
-    page = st.radio(
-        "Ir para:", allowed_pages, index=allowed_pages.index(default_page),
-        label_visibility="collapsed", key=nav_key,
-    )
+        st.session_state[nav_key] = default_page
+
+    navigation_groups = {
+        "Terminais de Mercado": [
+            "🌎 Terminal Global", "🇧🇷 Terminal B3", "📉 Terminal de Trading",
+            "FX COMMAND CENTER", "Crypto Terminal", "CRIPTODASH", "📺 Terminal Bloomberg",
+        ],
+        "Macro e Pesquisa": [
+            "MONITOR MACRO", "🇧🇷 MONITOR BR", "RENDAFIXABR",
+            "📰 Market Report", "Market Moving",
+        ],
+        "Watchlists e Análise": [
+            "WATCHLIST", "WATCHLIST QUANT", "📊 Gráficos Avançados",
+            "⚖️ Painel de Correlação",
+        ],
+        "Estratégias e Gestão": ["Gama", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"],
+    }
+
+    def select_navigation_page(widget_key):
+        st.session_state[nav_key] = st.session_state[widget_key]
+
+    for group_name, group_pages in navigation_groups.items():
+        visible_pages = [item for item in group_pages if item in allowed_pages]
+        if not visible_pages:
+            continue
+        widget_key = f"main_navigation_{group_name.lower().replace(' ', '_')}"
+        current_page = st.session_state.get(nav_key)
+        if st.session_state.get(widget_key) not in visible_pages:
+            st.session_state[widget_key] = current_page if current_page in visible_pages else visible_pages[0]
+        with st.expander(group_name, expanded=current_page in visible_pages):
+            st.radio(
+                f"Páginas: {group_name}",
+                visible_pages,
+                label_visibility="collapsed",
+                key=widget_key,
+                on_change=select_navigation_page,
+                args=(widget_key,),
+            )
+    page = st.session_state[nav_key]
     page = enforce_page_access(page, _auth_user_email(auth_user), all_pages, default_page)
     sidebar_clock()
     
