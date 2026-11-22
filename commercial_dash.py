@@ -117,7 +117,8 @@ supabase = init_supabase()
 LOCAL_TMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".tmp")
 
 
-AUTH_REQUIRED = True
+# Acesso temporariamente publico; volte para True para reativar o login.
+AUTH_REQUIRED = False
 AUTH_COOKIE_NAME = "tts_auth_refresh_v1"
 AUTH_COOKIE_MAX_AGE = 30 * 24 * 60 * 60
 APP_STATE_ALLOWED_KEYS = {
@@ -775,6 +776,8 @@ def render_auth_screen():
 
 
 def require_authenticated_user():
+    if not AUTH_REQUIRED:
+        return None
     user = st.session_state.get("auth_user")
     if user:
         client = _session_auth_client()
