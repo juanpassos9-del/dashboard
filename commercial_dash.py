@@ -15871,22 +15871,54 @@ with st.sidebar:
         ],
         "GESTÃO": ["Gama", "🛡️ Gestão de Risco", "⚙️ Painel de Controle"],
     }
-    category_by_page = {
-        item: category
-        for category, group_pages in navigation_groups.items()
-        for item in group_pages
-    }
-    ordered_allowed_pages = [
-        item for group_pages in navigation_groups.values()
-        for item in group_pages if item in allowed_pages
-    ]
-    page = st.radio(
-        "Ir para:",
-        ordered_allowed_pages,
-        format_func=lambda item: f"{category_by_page[item]} · {item}",
-        label_visibility="collapsed",
-        key=nav_key,
+    def select_navigation_page(selected_page):
+        st.session_state[nav_key] = selected_page
+
+    st.markdown(
+        """
+        <style>
+        .nav-category-title {
+            margin: 10px 0 3px;
+            padding: 0 2px 4px;
+            border-bottom: 1px solid rgba(148,163,184,.18);
+            color: #94A3B8;
+            font-size: .64rem;
+            font-weight: 800;
+            letter-spacing: .04em;
+            text-transform: uppercase;
+        }
+        div[class*="st-key-nav_page_"] button {
+            height: 1.8rem;
+            min-height: 1.8rem;
+            justify-content: flex-start;
+            padding: .15rem .45rem;
+            border-radius: 4px;
+            box-shadow: none;
+            font-size: .76rem;
+        }
+        div[class*="st-key-nav_page_"] button[kind="secondary"] {
+            border-color: transparent;
+            background: transparent;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
+    for group_name, group_pages in navigation_groups.items():
+        visible_pages = [item for item in group_pages if item in allowed_pages]
+        if not visible_pages:
+            continue
+        st.markdown(f'<div class="nav-category-title">{group_name}</div>', unsafe_allow_html=True)
+        for item in visible_pages:
+            st.button(
+                item,
+                key=f"nav_page_{all_pages.index(item)}",
+                type="primary" if st.session_state[nav_key] == item else "secondary",
+                use_container_width=True,
+                on_click=select_navigation_page,
+                args=(item,),
+            )
+    page = st.session_state[nav_key]
     page = enforce_page_access(page, _auth_user_email(auth_user), all_pages, default_page)
     sidebar_clock()
     
