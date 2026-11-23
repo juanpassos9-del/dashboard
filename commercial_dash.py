@@ -10883,9 +10883,63 @@ def pagina_gama():
 
     strike_data = result["by_strike"]
     profile_data = result["profile"]
-    tab_overview, tab_intraday, tab_history, tab_chain, tab_zones, tab_scenarios, tab_price, tab_tradingview = st.tabs(["Visão geral", "Intraday + níveis", "Histórico GEX", "Cadeia + IV", "Perfil por strike", "Cenários", "Preço + níveis", "TradingView"])
+    tab_overview, tab_intraday, tab_history, tab_chain, tab_scenarios, tab_price, tab_tradingview = st.tabs(["Painel GEX", "Intraday", "Histórico", "Cadeia e IV", "Cenários", "Preço e níveis", "TradingView"])
 
     with tab_overview:
+        st.markdown("#### Perfil de exposição por strike")
+        profile_fig = go.Figure()
+        profile_colors = ["#22C58B" if value >= 0 else "#F05B68" for value in strike_data["gex_usd_1pct"]]
+        profile_fig.add_trace(go.Bar(
+            x=strike_data["strike"], y=strike_data["gex_usd_1pct"] / 1e6,
+            marker_color=profile_colors, name="GEX modelado / 1%",
+            customdata=np.column_stack([strike_data["call_gex"] / 1e6, strike_data["put_gex"] / 1e6, strike_data["open_interest"]]),
+            hovertemplate="Strike $%{x:.2f}<br>GEX líquido: $%{y:.2f} mi<br>Calls: $%{customdata[0]:.2f} mi<br>Puts: $%{customdata[1]:.2f} mi<br>OI: %{customdata[2]:,.0f}<extra></extra>",
+        ))
+        profile_fig.add_hline(y=0, line_color="#8792A2", line_width=1)
+        profile_fig.add_vline(x=spot, line_color="#F5C451", line_width=2, annotation_text=f"{underlying} ${spot:.2f}")
+        if flip is not None:
+            profile_fig.add_vline(x=flip, line_color="#B49AFF", line_dash="dash", annotation_text="Flip estimado")
+        for level_key, level_name, level_color in (("call_wall", "Call wall", "#F5A742"), ("put_wall", "Put wall", "#43C6D8")):
+            level = (result.get(level_key) or {}).get("strike")
+            if level:
+                profile_fig.add_vline(x=float(level), line_color=level_color, line_dash="dot", annotation_text=level_name)
+        profile_fig.update_layout(
+            template="plotly_dark", title="GEX estimado por strike · chamadas positivas / puts negativas",
+            xaxis_title="Strike", yaxis_title="GEX (US$ milhões por movimento de 1%)",
+            height=470, margin=dict(l=20, r=20, t=58, b=20), hovermode="x unified",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        )
+        st.plotly_chart(profile_fig, use_container_width=True, config={"displayModeBar": True, "scrollZoom": True})
+        st.caption("Barras positivas e negativas seguem uma convenção heurística, não posições observadas de dealers. Open interest pode estar defasado.")
+
+        if not options_frame.empty and {"expiration", "strike", "signed_gex"}.issubset(options_frame.columns):
+            heat_source = options_frame.copy()
+            heat_source["gex_millions"] = heat_source["signed_gex"] / 1e6
+            strike_window = heat_source[heat_source["strike"].between(spot * 0.85, spot * 1.15)]
+            if not strike_window.empty:
+                heat_matrix = strike_window.pivot_table(index="strike", columns="expiration", values="gex_millions", aggfunc="sum", fill_value=0).sort_index()
+                strike_strength = heat_matrix.abs().sum(axis=1)
+                selected_strikes = strike_strength.nlargest(30).index
+                heat_matrix = heat_matrix.loc[heat_matrix.index.intersection(selected_strikes)].sort_index()
+                heat_matrix = heat_matrix.reindex(sorted(heat_matrix.columns), axis=1)
+                if not heat_matrix.empty:
+                    color_limit = max(float(np.nanmax(np.abs(heat_matrix.to_numpy()))), 0.01)
+                    heat_fig = go.Figure(go.Heatmap(
+                        z=heat_matrix.to_numpy(), x=heat_matrix.columns.tolist(), y=heat_matrix.index.tolist(),
+                        zmin=-color_limit, zmax=color_limit, zmid=0,
+                        colorscale=[[0, "#D94A59"], [0.5, "#202833"], [1, "#1AAE86"]],
+                        colorbar=dict(title="GEX / 1%<br>US$ mi"),
+                        hovertemplate="Vencimento %{x}<br>Strike $%{y:.2f}<br>GEX: $%{z:.2f} mi<extra></extra>",
+                    ))
+                    heat_fig.add_hline(y=spot, line_color="#F5C451", line_dash="dash", annotation_text="Spot")
+                    heat_fig.update_layout(
+                        template="plotly_dark", title="Mapa strike × vencimento · GEX estimado",
+                        xaxis_title="Vencimento", yaxis_title="Strike", height=460,
+                        margin=dict(l=20, r=20, t=58, b=20),
+                    )
+                    st.plotly_chart(heat_fig, use_container_width=True, config={"displayModeBar": True})
+                    st.caption("Matriz agregada dos contratos disponíveis na cadeia atual; strikes fora de ±15% do spot e os de menor exposição foram omitidos para leitura.")
+
         overview_cols = st.columns([1.2, 1])
         with overview_cols[0]:
             st.markdown("##### Mapa de níveis")
@@ -10936,6 +10990,30 @@ def pagina_gama():
             history_table = history_table.rename(columns={"market_date": "Pregão", "spot": underlying, "net_gex_usd_1pct": "GEX / 1%", "gamma_flip": "Flip", "call_wall": "Call wall", "put_wall": "Put wall", "option_count": "Séries", "source": "Fonte"})
             st.dataframe(history_table, hide_index=True, use_container_width=True)
 
+        st.markdown("#### Mudança de open interest entre snapshots")
+        chain_snapshots = [row for row in (stored_history or []) if isinstance(row, dict) and row.get("chain_oi")]
+        chain_snapshots.sort(key=lambda row: (str(row.get("market_date", "")), str(row.get("observed_at", ""))))
+        if len(chain_snapshots) < 2:
+            st.info("A comparação de OI começa após dois snapshots com cadeia. Os recortes detalhados são mantidos por até 15 coletas; não há recuperação retroativa gratuita da cadeia histórica.")
+        else:
+            from execution.gamma_history import compare_chain_open_interest
+
+            previous_chain, current_chain = chain_snapshots[-2], chain_snapshots[-1]
+            oi_changes = compare_chain_open_interest(current_chain["chain_oi"], previous_chain["chain_oi"])
+            st.caption(f"Comparando {previous_chain['market_date']} → {current_chain['market_date']} · apenas strikes próximos ao spot presentes nos dois snapshots. Variação de OI não revela lado agressor, abertura/fechamento líquido por negócio ou direção institucional.")
+            if oi_changes:
+                oi_table = pd.DataFrame(oi_changes)
+                oi_table["delta_pct"] = oi_table["delta_pct"].map(lambda value: f"{value:+.1f}%" if value is not None else "—")
+                oi_table["delta_oi"] = oi_table["delta_oi"].map(lambda value: f"{value:+,.0f}")
+                oi_table["current_oi"] = oi_table["current_oi"].map(lambda value: f"{value:,.0f}")
+                oi_table["previous_oi"] = oi_table["previous_oi"].map(lambda value: f"{value:,.0f}")
+                oi_table["strike"] = oi_table["strike"].map(lambda value: f"${value:.2f}")
+                oi_table = oi_table.rename(columns={"expiration": "Vencimento", "strike": "Strike", "side": "Lado", "current_oi": "OI atual", "previous_oi": "OI anterior", "delta_oi": "Variação OI", "delta_pct": "Variação %"})
+                oi_table["Lado"] = oi_table["Lado"].str.upper()
+                st.dataframe(oi_table.head(30), hide_index=True, use_container_width=True)
+            else:
+                st.info("Os snapshots não têm contratos comparáveis em comum na faixa selecionada.")
+
     with tab_chain:
         st.markdown("#### Cadeia atual · Yahoo Finance")
         st.caption("Snapshot da consulta atual; não é histórico de negócios. OI pode ter defasagem, volume não identifica agressor e Greeks/GEX são estimados localmente.")
@@ -10943,6 +11021,44 @@ def pagina_gama():
         if chain.empty:
             st.info("A cadeia atual não contém contratos utilizáveis.")
         else:
+            st.markdown("##### Put/Call por vencimento")
+            oi_by_side = options_frame.pivot_table(index="expiration", columns="side", values="open_interest", aggfunc="sum", fill_value=0)
+            volume_by_side = options_frame.pivot_table(index="expiration", columns="side", values="volume", aggfunc="sum", fill_value=0)
+            for frame in (oi_by_side, volume_by_side):
+                for side in ("call", "put"):
+                    if side not in frame.columns:
+                        frame[side] = 0.0
+            pcr_rows = []
+            for expiry in sorted(options_frame["expiration"].astype(str).unique()):
+                call_oi = float(oi_by_side.loc[expiry, "call"]) if expiry in oi_by_side.index else 0.0
+                put_oi = float(oi_by_side.loc[expiry, "put"]) if expiry in oi_by_side.index else 0.0
+                call_vol = float(volume_by_side.loc[expiry, "call"]) if expiry in volume_by_side.index else 0.0
+                put_vol = float(volume_by_side.loc[expiry, "put"]) if expiry in volume_by_side.index else 0.0
+                pcr_rows.append({
+                    "Vencimento": expiry,
+                    "OI calls": call_oi,
+                    "OI puts": put_oi,
+                    "PCR OI": put_oi / call_oi if call_oi else np.nan,
+                    "Volume calls": call_vol if options_frame["volume"].notna().any() else np.nan,
+                    "Volume puts": put_vol if options_frame["volume"].notna().any() else np.nan,
+                    "PCR volume": put_vol / call_vol if call_vol and options_frame["volume"].notna().any() else np.nan,
+                })
+            pcr_table = pd.DataFrame(pcr_rows)
+            st.dataframe(
+                pcr_table,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "OI calls": st.column_config.NumberColumn(format="localized"),
+                    "OI puts": st.column_config.NumberColumn(format="localized"),
+                    "PCR OI": st.column_config.NumberColumn(format="%.2f"),
+                    "Volume calls": st.column_config.NumberColumn(format="localized"),
+                    "Volume puts": st.column_config.NumberColumn(format="localized"),
+                    "PCR volume": st.column_config.NumberColumn(format="%.2f"),
+                },
+            )
+            st.caption("PCR = puts / calls. OI representa contratos em aberto; volume é atividade da sessão reportada pela fonte. Nenhum dos dois determina sozinho direção compradora/vendedora.")
+
             chain["volume_oi_pct"] = np.where(chain["open_interest"] > 0, chain["volume"] / chain["open_interest"] * 100, np.nan)
             chain["gex_millions"] = chain["signed_gex"] / 1e6
             expiry_options = sorted(chain["expiration"].astype(str).unique())
@@ -10959,6 +11075,43 @@ def pagina_gama():
             iv_fig.add_vline(x=spot, line_color="#F5C451", line_dash="dot", annotation_text="Spot")
             iv_fig.update_layout(template="plotly_dark", title=f"Volatilidade implícita por strike · {chosen_expiry}", xaxis_title="Strike (US$)", yaxis_title="IV (%)", height=360, margin=dict(l=15, r=15, t=50, b=15))
             st.plotly_chart(iv_fig, use_container_width=True, config={"displayModeBar": False})
+
+            st.markdown("##### Superfície de volatilidade implícita")
+            surface_side = st.selectbox("Lado da cadeia", ["call", "put"], format_func=lambda value: "Calls" if value == "call" else "Puts", key=f"{underlying.lower()}_gamma_iv_surface_side")
+            surface_data = options_frame[
+                (options_frame["side"] == surface_side)
+                & pd.to_numeric(options_frame["iv"], errors="coerce").gt(0)
+            ].copy()
+            if surface_data.empty:
+                st.info("A fonte não trouxe IV suficiente para construir a superfície deste lado.")
+            else:
+                surface_data["iv_pct"] = pd.to_numeric(surface_data["iv"], errors="coerce") * 100
+                iv_matrix = surface_data.pivot_table(index="strike", columns="expiration", values="iv_pct", aggfunc="mean").sort_index()
+                if iv_matrix.shape[0] < 2 or iv_matrix.shape[1] < 2:
+                    st.info("São necessários ao menos dois strikes e dois vencimentos com IV para visualizar a superfície.")
+                else:
+                    expiry_labels = sorted(iv_matrix.columns.astype(str))
+                    iv_matrix = iv_matrix.reindex(columns=expiry_labels)
+                    surface_fig = go.Figure(go.Surface(
+                        x=list(range(len(expiry_labels))),
+                        y=iv_matrix.index.astype(float).tolist(),
+                        z=iv_matrix.to_numpy(),
+                        customdata=np.tile(np.array(expiry_labels, dtype=object), (len(iv_matrix.index), 1)),
+                        colorscale="Viridis",
+                        colorbar=dict(title="IV (%)"),
+                        connectgaps=False,
+                        hovertemplate="Vencimento %{customdata}<br>Strike $%{y:.2f}<br>IV %{z:.1f}%<extra></extra>",
+                    ))
+                    surface_fig.update_layout(
+                        template="plotly_dark", title=f"IV por strike e vencimento · {surface_side.upper()}",
+                        scene=dict(
+                            xaxis=dict(title="Vencimento", tickvals=list(range(len(expiry_labels))), ticktext=expiry_labels),
+                            yaxis=dict(title="Strike (US$)"), zaxis=dict(title="IV (%)"),
+                        ),
+                        height=520, margin=dict(l=10, r=10, t=55, b=10),
+                    )
+                    st.plotly_chart(surface_fig, use_container_width=True, config={"displayModeBar": True})
+                    st.caption("Superfície calculada da IV reportada na cadeia atual; não é histórico de volatilidade. Lacunas indicam strikes sem IV utilizável.")
 
     with tab_tradingview:
         st.caption(f"Gráfico nativo do TradingView · {underlying} · linha · intervalo de 5 min · janela de 5 dias.")
@@ -11227,22 +11380,6 @@ def pagina_gama():
             motor_price = (st.session_state.get("ewz_gamma_quote") or {}).get("price")
             st.caption(f"Último fechamento completo: ${last_close:.2f} em {price_bundle.get('last_close_date')} · {price_bundle.get('source', 'histórico diário')} · cotação do motor: ${float(motor_price):.2f}." if motor_price else f"Último fechamento completo: ${last_close:.2f} em {price_bundle.get('last_close_date')} · {price_bundle.get('source', 'histórico diário')} · cotação atual do motor indisponível.")
             st.caption("GEX + = hipótese de amortecimento/defesa; GEX - = hipótese de aceleração. Os strikes são níveis fixos da cadeia consultada, não suportes ou resistências garantidos.")
-    with tab_zones:
-        fig = go.Figure()
-        colors = ["#21C997" if value >= 0 else "#FF5A67" for value in strike_data["gex_usd_1pct"]]
-        fig.add_trace(go.Bar(
-            x=strike_data["strike"], y=strike_data["gex_usd_1pct"] / 1e6,
-            marker_color=colors, name="GEX / 1%",
-            customdata=np.column_stack([strike_data["call_gex"] / 1e6, strike_data["put_gex"] / 1e6, strike_data["open_interest"]]),
-            hovertemplate="Strike $%{x:.2f}<br>GEX líquido: $%{y:.2f} mi<br>Calls: $%{customdata[0]:.2f} mi<br>Puts: $%{customdata[1]:.2f} mi<br>OI: %{customdata[2]:,.0f}<extra></extra>",
-        ))
-        fig.add_hline(y=0, line_color="#8792A2", line_width=1)
-        fig.add_vline(x=spot, line_color="#F5C451", line_dash="solid", annotation_text=underlying)
-        if flip is not None:
-            fig.add_vline(x=flip, line_color="#B49AFF", line_dash="dash", annotation_text="Flip estimado")
-        fig.update_layout(template="plotly_dark", title="Exposição estimada por strike · USD por movimento de 1%", xaxis_title="Strike", yaxis_title="GEX (US$ milhões / 1%)", height=460, margin=dict(l=20, r=20, t=55, b=20), legend=dict(orientation="h"))
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-        st.caption("As barras mostram a convenção calls + / puts -. Paredes são concentrações estimadas de OI ponderadas pela gama, não níveis garantidos de suporte/resistência.")
     with tab_scenarios:
         curve = go.Figure()
         curve.add_trace(go.Scatter(x=profile_data["spot_scenario"], y=profile_data["gex_usd_1pct"] / 1e6, mode="lines", name="GEX projetado", line=dict(color="#57C7C2", width=2.5), fill="tozeroy", fillcolor="rgba(87,199,194,0.12)"))

@@ -6,7 +6,7 @@ import pytest
 
 from execution import gamma_zones
 from execution.gamma_zones import build_gamma_exposure, build_price_zone_levels, fetch_ewz_daily_history, fetch_ewz_intraday_bars, fetch_ewz_options, normalize_option_snapshot
-from execution.gamma_history import make_gamma_snapshot, merge_gamma_snapshots, recent_gamma_snapshots
+from execution.gamma_history import compare_chain_open_interest, make_gamma_snapshot, merge_gamma_snapshots, recent_gamma_snapshots
 
 
 def _option(symbol, side, strike, expiry, oi, *, iv=0.35, spot=100.0):
@@ -319,6 +319,39 @@ def test_gamma_snapshot_keeps_only_compact_headline_fields():
     assert snapshot["gamma_flip"] == 51.2
     assert snapshot["call_wall"] == 55
     assert "options" not in snapshot
+
+
+def test_gamma_snapshot_keeps_compact_near_spot_open_interest_by_expiry_and_side():
+    options = pd.DataFrame([
+        {"expiration": "2026-11-20", "strike": 99, "side": "call", "open_interest": 100},
+        {"expiration": "2026-11-20", "strike": 99, "side": "put", "open_interest": 240},
+        {"expiration": "2026-11-20", "strike": 140, "side": "call", "open_interest": 9999},
+    ])
+    snapshot = make_gamma_snapshot({"spot": 100, "options": options}, "2026-11-05T21:00:00+00:00")
+
+    assert snapshot["chain_oi"] == [
+        {"expiration": "2026-11-20", "strike": 99.0, "side": "call", "open_interest": 100.0},
+        {"expiration": "2026-11-20", "strike": 99.0, "side": "put", "open_interest": 240.0},
+    ]
+
+
+def test_open_interest_comparison_matches_contract_and_reports_delta_not_new_contracts():
+    previous = [
+        {"expiration": "2026-11-20", "strike": 100, "side": "call", "open_interest": 200},
+        {"expiration": "2026-11-20", "strike": 100, "side": "put", "open_interest": 100},
+    ]
+    current = [
+        {"expiration": "2026-11-20", "strike": 100, "side": "call", "open_interest": 250},
+        {"expiration": "2026-11-20", "strike": 100, "side": "put", "open_interest": 80},
+        {"expiration": "2026-11-27", "strike": 100, "side": "call", "open_interest": 900},
+    ]
+
+    changes = compare_chain_open_interest(current, previous)
+
+    assert [(row["side"], row["delta_oi"], row["delta_pct"]) for row in changes] == [
+        ("call", 50.0, 25.0),
+        ("put", -20.0, -20.0),
+    ]
 
 
 def test_legacy_option_snapshot_gets_nullable_optional_quote_columns():
